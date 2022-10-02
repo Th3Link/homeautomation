@@ -1,0 +1,65 @@
+<div id="general_state">
+  <h2>General</h2>
+</div>
+
+<div id="wifi">
+  <h2>Wifi</h2>
+  <div class="wifi_state">
+  </div>
+  
+  <div class="wifi_setup">
+    <div>
+    <input type="radio" id="wifi_ap" name="wifi_mode" value="wifi_ap" checked>
+    <label for="wifi_ap">Access Point</label>
+    <input type="radio" id="wifi_client" name="wifi_mode" value="wifi_client">
+    <label for="wifi_client">Client</label>
+    <button id="wifi_mode_restore" class="restore"/>
+    </div>
+    
+    <div>
+    SSID <input id="wifi_ssid" type="text">
+    <button id="wifi_ssid_restore" class="restore"/>
+    </div>
+    
+    <div>
+    Password <input id="wifi_password" type="text">
+    <button id="wifi_password_restore" class="restore"/>
+    </div>
+    
+    <div>
+    Hostname <input id="wifi_hostname" type="text">
+    <button id="wifi_hostname_restore" class="restore"/>
+    </div>
+    
+  </div>
+</div>
+
+<div id="mqtt">
+  <h2>MQTT</h2>
+  <div class="mqtt_state">
+  </div>
+  <div id="mqtt_setup">
+  Server URI (mqtt://IP:PORT) <input id="mqtt_uri" type="text">
+  <button id="mqtt_uri_restore" class="restore"/>
+  </div>
+</div>
+
+<div id="canbus">
+  <h2>CAN Bus</h2>
+  <div class="canbus_state">
+  </div>
+  <div id="canbus_setup">
+    Baudrate
+    <select name="can_baudrate">
+      <option value="b50">50 KBit/s</option>
+      <option value="b22_222">22.222 KBit/s</option>
+      <option value="b25">25 KBit/s</option>
+      <option value="b100">100 KBit/s</option>
+    </select>
+    <button id="can_baudrate_restore" class="restore"/>
+  </div>
+</div>
+
+<div>
+  <button id="save" class="on_page">Save</button>
+</div>

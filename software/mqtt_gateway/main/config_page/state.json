@@ -1,0 +1,21 @@
+{
+  "firmware_version": "0.0",
+  "uptime": "TIME",
+  "hostname": "HOSTNAME",
+  "wifi": {
+    "state": "connected",
+    "ipv4": "IP",
+    "ipv6": "IP",
+    "gateway": "GATEWAY",
+    "dns": "DNS"
+  },
+  "mqtt": {
+    "state": "connected",
+    "received": 130,
+    "sent": 100
+  },
+  "canbus": {
+    "received": 10,
+    "sent": 100
+  }
+}

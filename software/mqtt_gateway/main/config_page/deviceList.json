@@ -1,0 +1,57 @@
+{
+  "warnings": [
+  ],
+  "header": ["Unique ID", "Device ID", "Type", "Type Name", "Custom String","Last Seen (Minutes ago)", "State", "Error"],
+  "devices": [
+    {
+      "uid": "0x123456781234567812345678",
+      "device_id": "0x02",
+      "device_type": "0x03",
+      "device_type_name": "LampController",
+      "custom_string": "ABCDEFLL",
+      "last_seen": 345064,
+      "state" : "application",
+      "last_error": "0x0"
+    },
+    {
+      "uid": "0x223456781234567812345678",
+      "device_id": "0x02",
+      "device_type": "0x03",
+      "device_type_name": "LampController",
+      "custom_string": "ABCDEFGH",
+      "last_seen": 345064,
+      "state" : "application",
+      "last_error": "0x0"
+    },
+    {
+      "uid": "0x323456781234567812345678",
+      "device_id": "0x05",
+      "device_type": "0x02",
+      "device_type_name": "SSR",
+      "custom_string": "ABCDEFGH",
+      "last_seen": -1,
+      "state" : "application",
+      "last_error": "0x0"
+    },
+    {
+      "uid": "0x423456781234567812345678",
+      "device_id": "0x09",
+      "device_type": "0x02",
+      "device_type_name": "SSR",
+      "custom_string": "ABCDEFGH",
+      "last_seen": 4000,
+      "state" : "application",
+      "last_error": "0x0"
+    },
+    {
+      "uid": "0x523456781234567812345678",
+      "device_id": "0x09",
+      "device_type": "0x04",
+      "device_type_name": "SwitchModule",
+      "custom_string": "ABCDEFGH",
+      "last_seen": 4000,
+      "state" : "application",
+      "last_error": "0x0"
+    }
+  ]
+}

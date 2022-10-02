@@ -1,0 +1,3 @@
+[submodule "software/mqtt_gateway/components/arduino-esp32"]
+	path = software/mqtt_gateway/components/arduino-esp32
+	url = https://gitlab.com/Th3Link/arduino-esp32.git

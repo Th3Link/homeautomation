@@ -1,0 +1,226 @@
+html, body {
+    padding: 0;
+    margin: 0;
+  }
+
+  .hide-me {
+    visibility: hidden;
+    opacity: 0;
+    transform: scale(0);
+    display: none;
+  }
+
+  h1 {
+    margin-top: 0;
+    font-size: 2.4em;
+    font-weight: normal;
+    display: inline-block;
+  }
+
+  body {
+    font-family: Helvetica, sans-serif;
+    padding: 50px 10%;
+  }
+  
+  .label {
+    padding-left: 15px;
+    border-left: 5px;
+    border-left-style: solid;
+    border-color: #ffffff;
+  }
+  
+  .changed {
+    padding-left: 15px;
+    border-left: 5px;
+    border-color: #ff9933;
+    border-left-style: solid;
+  }
+  
+  button {
+    all: initial;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    margin-right: 10px;
+    border-bottom: 3px;
+    border-color: #000093;
+    border-bottom-style: solid;
+    padding: 3px;
+  }
+  
+  .details button, #batch_body button {
+    margin-top: 0px;
+    margin-bottom: 5px;
+    margin-right: 10px;
+    padding: 0px;
+  }
+  .details input, #batch_body input {
+    width: 100px;
+  }
+  
+  .details input.upload, #batch_body input.upload {
+    width: 180px;
+  }
+  
+  button.pressed {
+    border-top: 3px;
+    border-top-style: solid;
+    border-color: #930000;
+  }
+
+  button:active {
+    border-color: #930000;
+  }
+
+  button.deactivated {
+    border-color: #999;
+    cursor: not-allowed;
+  }
+
+  button.deactivated:hover {
+    border-color: #999;
+    cursor: not-allowed;
+  }
+
+  button:hover, .details button:hover, #batch_body button:hover {
+    border-color: #009300;
+    cursor: pointer;
+  }
+
+  p {
+    padding: 4px 0 2px 8px;
+    line-height: 1.7;
+    border-bottom: 1px dotted #DDD;
+    list-style: none;
+    margin: 0;
+  }
+  
+  .state {
+    margin-top: 15px;
+    margin-bottom: 15px;
+    padding-left: 15px;
+    border-left: 5px;
+    border-color: #000093;
+    border-left-style: solid;
+  }
+  
+  .control {
+    margin-top: 15px;
+    margin-bottom: 15px;
+    padding-left: 15px;
+  }
+  
+  .label {
+    float: left;
+    width: 150px;
+  }
+  
+  #device_table {
+    font-family: Arial, Helvetica, sans-serif;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  #device_table td, #device_table th {
+    border: 1px solid #ddd;
+    padding: 8px;
+  }
+
+  #device_table tr:nth-child(4n+0){background-color: #f2f2f2;}
+  #device_table tr:nth-child(4n+1){background-color: #f2f2f2;}
+
+  #device_table tr:hover:not(.details):not(.header) {background-color: #ddd;cursor: pointer;}
+
+  #device_table th {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    text-align: left;
+    border-bottom: 3px;
+    border-bottom-color: #000093;
+    border-bottom-style: solid;
+  }
+  .in_float {
+    float:left;
+    margin-right:20px;
+  }
+  .last_float {
+    float:left;
+  }
+  .clear_float {
+    clear:both;
+    height:20px;
+  }
+  
+  #batch_content {
+    margin-bottom: 10px;
+    border-collapse: collapse;
+  }
+  
+  #content_can_device_console .content {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 10px;
+    background-color: #ffffff;
+    border: 1px;
+    border-color: #ddd;
+    border-style: solid;
+    font-weight: bold;
+    margin-top: -1px;
+    margin-bottom: 10px;
+  }
+  
+  #content_can_device_console .header {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 10px;
+    background-color: #f2f2f2;
+    border: 1px;
+    border-color: #ddd;
+    border-style: solid;
+    font-weight: bold;
+  }
+  
+  #batch_content .header {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 10px;
+    background-color: #f2f2f2;
+    border: 1px;
+    border-color: #ddd;
+    border-style: solid;
+    font-weight: bold;
+  }
+  
+  #batch_content .header:hover {
+    background-color: #ddd;
+    cursor: pointer;
+  }
+  #batch_body:not(.hide-me)  {
+    display: flex;
+    justify-content: center;
+    align-items: center; 
+  }
+  #batch_selected, #batch_by_type  {
+    width: 50%;
+    border: 1px;
+    border-color: #ddd;
+    border-style: solid;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 10px;
+    float:left;
+    
+    margin-top:-1px;
+  }
+  #batch_selected  {
+    margin-right:-1px;
+  }
+  #content_can_device {
+    width:80%;
+    float:left;
+  }
+  
+  #content_can_device_console {
+    float:left;
+    width: 15%;
+    margin-left: 10px;
+  }
