@@ -2,5 +2,5 @@
 	path = software/mqtt_gateway/components/arduino-esp32
 	url = https://gitlab.com/Th3Link/arduino-esp32.git
 [submodule "software/relais/components/esp-idf-lib"]
-	path = software/relais/components/esp-idf-lib
+	path = software/library/esp-idf-lib
 	url = https://luehr.dev/gitea/marc/esp-idf-lib

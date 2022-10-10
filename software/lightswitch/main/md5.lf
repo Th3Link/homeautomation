@@ -1,0 +1,3 @@
+PROVIDE ( MD5Final = 0x4005db1c );
+PROVIDE ( MD5Init = 0x4005da7c );
+PROVIDE ( MD5Update = 0x4005da9c );
