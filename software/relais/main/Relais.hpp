@@ -7,7 +7,7 @@
 #include <message/Queue.hpp>
 
 #include <array>
-#include "lib/ICAN.hpp"
+#include "esp32-ha-lib/ICAN.hpp"
 
 enum class rollershutter_state_t {
     MOVING, STOP, BLOCKED

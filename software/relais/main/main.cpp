@@ -12,13 +12,13 @@
 #include <esp_err.h>
 #include <esp_log.h>
 
-#include "lib/Button.hpp"
-#include "lib/CAN.hpp"
-#include "lib/Device.hpp"
-#include "lib/Update.hpp"
-#include "lib/THSensor.hpp"
-#include "lib/EEPROM.hpp"
-#include "lib/PresenceSensor.hpp"
+#include "esp32-ha-lib/Button.hpp"
+#include "esp32-ha-lib/CAN.hpp"
+#include "esp32-ha-lib/Device.hpp"
+#include "esp32-ha-lib/Update.hpp"
+#include "esp32-ha-lib/THSensor.hpp"
+#include "esp32-ha-lib/EEPROM.hpp"
+#include "esp32-ha-lib/PresenceSensor.hpp"
 #include "Relais.hpp"
 #include "ExtensionBoard.hpp"
 #include "gpio_definition.hpp"
