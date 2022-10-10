@@ -1,0 +1,8 @@
+In order to work, the nvs needs to be programmed after programming the firmware:
+ edit nvs.csv
+ 
+Create the NVS binary 
+../esp-idf/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate nvs.csv nvs.bin 12288
+
+Program the NVS binary
+../esp-idf/components/partition_table/parttool.py --port /dev/ttyUSB0 write_partition --partition-name=nvs --input "nvs.bin"
