@@ -36,7 +36,7 @@
 #include "lan.h"
 #include "web_config.h"
 #include "nvs_flash.h"
-#include <Arduino.h>
+#include "update.h"
 
 /* --------------------- Definitions and static variables ------------------ */
 //Example Configuration
@@ -158,7 +158,7 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
-    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
+    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, (int)event_id);
     mqtt_event_handler_cb(event_data);
 }
 
@@ -171,8 +171,6 @@ void app_main()
         printf("Slave starting in %d\n", i);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    
-    initArduino();
     
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -211,7 +209,7 @@ void app_main()
     if (!wifi_err)
     {
         printf("wifi_init_softap\n");
-        wifi_init_softap("CAN2MQTTSETUP", "Can2MqttPass");
+        wifi_init_softap("CAN2MQTTSETUP", "Can2MqttPass", 10);
     }
     else
     {
@@ -240,7 +238,7 @@ void app_main()
         xSemaphoreTake(network_init_sem, pdMS_TO_TICKS(10000));
         printf("mqtt_start_task\n");
         esp_mqtt_client_config_t mqtt_cfg = {
-            .uri = "mqtt://192.168.178.54",
+            .broker.address.uri = "mqtt://192.168.178.54",
         };
 
         client = esp_mqtt_client_init(&mqtt_cfg);
@@ -249,8 +247,8 @@ void app_main()
 
         xSemaphoreGive(receive_task_sem);              //Start Control task
     }
-    printf("web_config_init2222\n");
     web_config_init();
+    update_verified();
     
     xSemaphoreTake(shutdown_sem, portMAX_DELAY);    //Wait for tasks to complete
 

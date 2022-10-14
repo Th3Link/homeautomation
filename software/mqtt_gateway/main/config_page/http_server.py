@@ -34,6 +34,15 @@ def config_json_post(request):
     update(config, d)
     return json.dumps(config)
 
+@app.route('/update/device/data', methods=['POST'])
+def device_update_post(request):
+    with open('device_update', 'wb') as fileOutput:
+        fileOutput.write(request.content.read())
+
+@app.route('/update/device/state', methods=['POST'])
+def device_update_post(request):
+    print(request.content)
+
 @app.route('/<string:filename>', branch=True, methods=['POST'])
 def do_post(request, filename):
     with open('POST_'+filename, 'wb') as fileOutput:

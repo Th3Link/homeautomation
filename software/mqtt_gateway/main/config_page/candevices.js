@@ -289,10 +289,6 @@ function restart_click(uid) {
     console.log("restart " + uid);
 }
 
-function update_click(uid) {
-    console.log("update " + uid);
-}
-
 function ping_click(uid) {
     console.log("ping " + uid);
 }

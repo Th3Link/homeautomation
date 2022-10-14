@@ -1,5 +1,4 @@
-#ifndef __WEB_CONFIG_H__
-#define __WEB_CONFIG_H__
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,7 +9,3 @@ void web_config_init();
 #ifdef __cplusplus
 }
 #endif
-
-
-#endif //__WEB_CONFIG_H__
-
