@@ -155,10 +155,10 @@ void CAN::read_nvs()
     ESP_ERROR_CHECK(ret);
     
     nvs_handle_t nvs_handle;
-    ESP_ERROR_CHECK(nvs_open("storage", NVS_READONLY, &nvs_handle));
-    ESP_ERROR_CHECK(nvs_get_u8(nvs_handle, "can_bitrate", &m_bitrate));
-    ESP_ERROR_CHECK(nvs_get_u8(nvs_handle, "can_id", &m_id));
-    ESP_ERROR_CHECK(nvs_get_u8(nvs_handle, "can_type", &m_type));
+    nvs_open("storage", NVS_READONLY, &nvs_handle);
+    nvs_get_u8(nvs_handle, "can_bitrate", &m_bitrate);
+    nvs_get_u8(nvs_handle, "can_id", &m_id);
+    nvs_get_u8(nvs_handle, "can_type", &m_type);
     
     nvs_close(nvs_handle);
     
