@@ -20,6 +20,7 @@
 #include "esp32-ha-lib/EEPROM.hpp"
 #include "esp32-ha-lib/PresenceSensor.hpp"
 #include "ExtensionBoard.hpp"
+#include "Light.hpp"
 #include "gpio_definition.hpp"
 /* --------------------- Definitions and static variables ------------------ */
 
@@ -37,6 +38,7 @@ void app_main()
     CAN can(RX_GPIO_NUM, TX_GPIO_NUM);
     Device device(can);
     Update update(can);
+    Light light(can);
     THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE);
     THSensor thsensor(can, ONEWIRE_GPIO_NUM);
     EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);

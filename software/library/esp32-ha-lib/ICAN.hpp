@@ -39,6 +39,7 @@ class ICAN
             FLASH_VERIFY = 20,
             BUTTON_EVENT = 30,
             TEMPERATURE_SENSOR = 31,
+            LAMP_GROUP = 90,
             PIR_SENSOR = 128,
             HUMIDITY_SENSOR = 129,
             RELAIS = 130,
@@ -87,6 +88,16 @@ class ICAN
             uint32_t reserved : 24;
         };
         #pragma pack(pop)
+        
+        #pragma pack(push,1)
+        struct LAMP_MSG_t
+        {
+            uint32_t value : 8;
+            uint32_t bitmask : 24;
+            uint32_t reserved : 32;
+        };
+        #pragma pack(pop)
+        
         
         virtual void init() = 0;
         virtual void deinit() = 0;

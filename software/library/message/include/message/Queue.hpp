@@ -37,7 +37,7 @@ namespace message
         void* alloc(std::size_t size) override
         {
             // calculate size
-            auto space = sizeof(uint16_t) + size;
+            auto space = sizeof(uint32_t) + size;
             auto realWrite = write % QUEUE_SIZE;
             
             // check rollover
@@ -54,9 +54,9 @@ namespace message
                 }
             }
             
-            auto sizeAddress = reinterpret_cast<uint16_t*>(&queue[realWrite]);
+            auto sizeAddress = reinterpret_cast<uint32_t*>(&queue[realWrite]);
             *sizeAddress = size;
-            write += sizeof(uint16_t);
+            write += sizeof(uint32_t);
             auto address = &queue[write % queue.size()];
             write += size;        
             
@@ -108,13 +108,13 @@ namespace message
                     read++;
                 }
                 
-                auto size = *reinterpret_cast<uint16_t*>(&queue[read % QUEUE_SIZE]);
-                if (size == 0xFFFF)
+                auto size = *reinterpret_cast<uint32_t*>(&queue[read % QUEUE_SIZE]);
+                if (size == 0xFFFFFFFF)
                 {
                     read += QUEUE_SIZE - (read % QUEUE_SIZE);
-                    size = *reinterpret_cast<uint16_t*>(&queue[read % QUEUE_SIZE]);
+                    size = *reinterpret_cast<uint32_t*>(&queue[read % QUEUE_SIZE]);
                 }
-                read += sizeof(uint16_t);
+                read += sizeof(uint32_t);
                 auto m = reinterpret_cast<Message<int>*>(&queue[read % QUEUE_SIZE]);
                 m->deliver();
                 read += size;
