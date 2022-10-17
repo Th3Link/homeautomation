@@ -71,12 +71,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_softap(const char* ssid, const char* password, const unsigned char channel)
+void wifi_init_softap(const char* ssid, const char* password, const unsigned char channel, const char* hostname)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
-
+    esp_netif_t* netif = esp_netif_create_default_wifi_ap();
+    esp_netif_set_hostname(netif, hostname);
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
@@ -107,15 +105,18 @@ void wifi_init_softap(const char* ssid, const char* password, const unsigned cha
              ssid, password, channel);
 }
 
-bool wifi_init(const char* ssid, const char* password)
+void wifi_init()
+{
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+}
+
+bool wifi_init_client(const char* ssid, const char* password, const char* hostname)
 {
     s_wifi_event_group = xEventGroupCreate();
-
-    ESP_ERROR_CHECK(esp_netif_init());
-
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
+    esp_netif_t* netif = esp_netif_create_default_wifi_sta();
+    esp_netif_set_hostname(netif, hostname);
+    
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
@@ -136,7 +137,8 @@ bool wifi_init(const char* ssid, const char* password)
     memset(&wifi_config, 0, sizeof(wifi_config));
     strcpy(reinterpret_cast<char*>(&wifi_config.sta.ssid[0]), ssid);
     strcpy(reinterpret_cast<char*>(&wifi_config.sta.password[0]), password);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK;
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+    //wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK;
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
@@ -162,9 +164,11 @@ bool wifi_init(const char* ssid, const char* password)
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  ssid, password);
+        esp_wifi_stop(); 
         return false;
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
+        esp_wifi_stop();
         return false;
     }
 }

@@ -14,7 +14,8 @@
 #include <cstdio>
 #include <fcntl.h>
 #include "mbedtls/base64.h"
-
+#include <esp_ota_ops.h>
+#include "nvs_flash.h"
 #include <algorithm>
 
 static const char *TAG = "web_config";
@@ -149,7 +150,7 @@ static esp_err_t minimal_js_get_handler(httpd_req_t *req)
     extern const uint8_t _minimal_js_start[] asm("_binary_minimal_js_start");
     extern const uint8_t _minimal_js_end[]   asm("_binary_minimal_js_end");
     const size_t _minimal_js_size = (_minimal_js_end - _minimal_js_start);
-    httpd_resp_set_type(req, "text/javascript");
+    httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *)_minimal_js_start, _minimal_js_size);
     return ESP_OK;
 }
@@ -164,22 +165,242 @@ static esp_err_t style_css_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t control_json_post_handler(httpd_req_t *req)
+{
+    int total_len = req->content_len;
+    int cur_len = 0;
+    char *buf = ((server_context_t *)(req->user_ctx))->scratch;
+    int received = 0;
+    if (total_len >= SCRATCH_BUFSIZE) {
+        /* Respond with 500 Internal Server Error */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "content too long");
+        return ESP_FAIL;
+    }
+    while (cur_len < total_len) {
+        received = httpd_req_recv(req, buf + cur_len, total_len);
+        if (received <= 0) {
+            /* Respond with 500 Internal Server Error */
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to post control value");
+            return ESP_FAIL;
+        }
+        cur_len += received;
+    }
+    buf[total_len] = '\0';
+
+    cJSON* root = cJSON_Parse(buf);
+    char* command = cJSON_GetStringValue(cJSON_GetObjectItem(root, "command"));
+    if (strcmp (command, "restart") == 0)
+    {
+        char* unit = cJSON_GetStringValue(cJSON_GetObjectItem(root, "unit"));
+        if (strcmp (unit, "self") == 0)
+        {
+            esp_restart();
+        }
+    }
+    
+    cJSON_Delete(root);
+    httpd_resp_sendstr(req, "Post control value successfully");
+    return ESP_OK;
+}
+
+static esp_err_t config_json_post_handler(httpd_req_t *req)
+{
+    int total_len = req->content_len;
+    int cur_len = 0;
+    char *buf = ((server_context_t *)(req->user_ctx))->scratch;
+    int received = 0;
+    if (total_len >= SCRATCH_BUFSIZE) {
+        /* Respond with 500 Internal Server Error */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "content too long");
+        return ESP_FAIL;
+    }
+    while (cur_len < total_len) {
+        received = httpd_req_recv(req, buf + cur_len, total_len);
+        if (received <= 0) {
+            /* Respond with 500 Internal Server Error */
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to post control value");
+            return ESP_FAIL;
+        }
+        cur_len += received;
+    }
+    buf[total_len] = '\0';
+
+    nvs_handle_t nvs_handle;
+    ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &nvs_handle));
+
+    cJSON* root = cJSON_Parse(buf);
+    cJSON* wifi = cJSON_GetObjectItem(root, "wifi");
+    if (cJSON_IsObject(wifi))
+    {
+        cJSON* mode = cJSON_GetObjectItem(wifi, "mode");
+        cJSON* ssid = cJSON_GetObjectItem(wifi, "ssid");
+        cJSON* password = cJSON_GetObjectItem(wifi, "password");
+        
+        if (cJSON_IsString(mode))
+        {
+            char* mode_string = cJSON_GetStringValue(mode);
+            ESP_LOGI(TAG, "Wifi Mode : %s", mode_string);
+            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_mode", mode_string));
+        }
+        
+        if (cJSON_IsString(ssid))
+        {
+            char* ssid_string = cJSON_GetStringValue(ssid);
+            ESP_LOGI(TAG, "WiFi SSID : %s", ssid_string);
+            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_ssid", ssid_string));
+        }
+        
+        if (cJSON_IsString(password))
+        {
+            char* password_string =cJSON_GetStringValue(password);
+            ESP_LOGI(TAG, "WiFi Password : %s", password_string);
+            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_pw", password_string));
+        }
+    }
+    
+    cJSON* mqtt = cJSON_GetObjectItem(root, "mqtt");
+    if (cJSON_IsObject(mqtt))
+    {
+        cJSON* uri = cJSON_GetObjectItem(mqtt, "uri");
+        cJSON* username = cJSON_GetObjectItem(mqtt, "username");
+        cJSON* password = cJSON_GetObjectItem(mqtt, "password");
+        cJSON* enabled = cJSON_GetObjectItem(mqtt, "enabled");
+        
+        if (cJSON_IsString(uri))
+        {
+            char* uri_string = cJSON_GetStringValue(uri);
+            ESP_LOGI(TAG, "MQTT uri : %s", uri_string);
+            nvs_set_str(nvs_handle, "mqtt_uri", uri_string);
+        }
+
+        if (cJSON_IsString(username))
+        {
+            char* username_string = cJSON_GetStringValue(username);
+            ESP_LOGI(TAG, "MQTT Username : %s", username_string);
+            nvs_set_str(nvs_handle, "mqtt_user", username_string);
+        }
+        
+        if (cJSON_IsString(password))
+        {
+            char* password_string = cJSON_GetStringValue(password);
+            ESP_LOGI(TAG, "MQTT Password : %s", password_string);
+            if (strlen(password_string) >= 8)
+            {
+                nvs_set_str(nvs_handle, "mqtt_pw", password_string);
+            }
+        }
+
+        if (cJSON_IsBool(enabled))
+        {
+            bool enabled_bool = cJSON_IsTrue(enabled);
+            ESP_LOGI(TAG, "MQTT Enabled : %d", enabled_bool);
+            uint8_t mqtt_enabled = enabled_bool;
+            nvs_set_u8(nvs_handle, "mqtt_enabled", mqtt_enabled);
+        }
+    }
+    
+    cJSON* canbus = cJSON_GetObjectItem(root, "canbus");
+    if (cJSON_IsObject(canbus))
+    {
+        cJSON* baudrate = cJSON_GetObjectItem(mqtt, "baudrate");
+        
+        if (cJSON_IsString(baudrate))
+        {
+            char* baudrate_string = cJSON_GetStringValue(baudrate);
+            ESP_LOGI(TAG, "canbus baudrate : %s", baudrate_string);
+            if (strcmp(baudrate_string, "b22_222"))
+            {
+                nvs_set_u8(nvs_handle, "can_bitrate", 1);
+            }
+            else if (strcmp(baudrate_string, "b25"))
+            {
+                nvs_set_u8(nvs_handle, "can_bitrate", 2);
+            }
+            else if (strcmp(baudrate_string, "b50"))
+            {
+                nvs_set_u8(nvs_handle, "can_bitrate", 3);
+            }
+            else if (strcmp(baudrate_string, "b100"))
+            {
+                nvs_set_u8(nvs_handle, "can_bitrate", 4);
+            }
+            else
+            {
+                //TODO: send error
+            }
+        }
+    }
+    
+    ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+    nvs_close(nvs_handle);
+    cJSON_Delete(root);
+    httpd_resp_sendstr(req, "Post control value successfully");
+    return ESP_OK;
+}
+
 static esp_err_t config_json_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     cJSON *root = cJSON_CreateObject();
     
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READONLY, &nvs_handle);
+    char ssid[20] = {0};
+    char password[20] = {0};
+    char wifi_mode[20] = {0};
+    char mqtt_uri[50] = {0};
+    char mqtt_username[50] = {0};
+    char mqtt_password[50] = {0};
+    char hostname[50] = {0};
+    size_t ssid_len = sizeof(ssid);
+    size_t password_len = sizeof(password);
+    size_t wifi_mode_len = sizeof(wifi_mode);
+    size_t mqtt_uri_len = sizeof(mqtt_uri);
+    size_t mqtt_username_len = sizeof(mqtt_username);
+    size_t mqtt_password_len = sizeof(mqtt_password);
+    size_t hostname_len = sizeof(hostname);
+    
+    uint8_t can_bitrate = 0;
+    uint8_t mqtt_enabled = 0;
+    
+    nvs_get_str(nvs_handle, "hostname", &hostname[0], &hostname_len);
+    nvs_get_str(nvs_handle, "wifi_ssid", &ssid[0], &ssid_len);
+    nvs_get_str(nvs_handle, "wifi_pw", &password[0], &password_len);
+    nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
+    nvs_get_str(nvs_handle, "mqtt_uri", &mqtt_uri[0], &mqtt_uri_len);
+    nvs_get_str(nvs_handle, "mqtt_user", &mqtt_username[0], &mqtt_username_len);
+    nvs_get_str(nvs_handle, "mqtt_pw", &mqtt_password[0], &mqtt_password_len);
+    nvs_get_u8(nvs_handle, "mqtt_enabled", &mqtt_enabled);
+    nvs_get_u8(nvs_handle, "can_bitrate", &can_bitrate);
+    
+    char can_bitrate_str[8] = {0};
+    strcpy(can_bitrate_str, "b50");
+    if (can_bitrate == 1)
+    {
+        strcpy(can_bitrate_str, "b22_222");
+    }
+    else if (can_bitrate == 2)
+    {
+        strcpy(can_bitrate_str, "b25");
+    }
+    else if (can_bitrate == 4)
+    {
+        strcpy(can_bitrate_str, "b100");
+    }
+    
     cJSON_AddBoolToObject(root, "factory_reset", false);
     cJSON_AddBoolToObject(root, "reboot", false);
-    cJSON_AddStringToObject(root, "hostname", "HOSTNAME");
+    cJSON_AddStringToObject(root, "hostname", hostname);
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
-    cJSON_AddStringToObject(wifi, "mode", "AP");
-    cJSON_AddStringToObject(wifi, "ssid", "SSID");
-    cJSON_AddStringToObject(wifi, "password", "PASSWORD");
+    cJSON_AddStringToObject(wifi, "mode", wifi_mode);
+    cJSON_AddStringToObject(wifi, "ssid", ssid);
+    cJSON_AddStringToObject(wifi, "password", password);
     cJSON *mqtt = cJSON_AddObjectToObject(root, "mqtt");
-    cJSON_AddStringToObject(mqtt, "uri", "mqtt://IP:PORT");
+    cJSON_AddStringToObject(mqtt, "uri", mqtt_uri);
+    cJSON_AddStringToObject(mqtt, "username", mqtt_username);
+    cJSON_AddStringToObject(mqtt, "password", mqtt_password);
     cJSON *canbus = cJSON_AddObjectToObject(root, "canbus");
-    cJSON_AddStringToObject(canbus, "baudrate", "b100");
+    cJSON_AddStringToObject(canbus, "baudrate", can_bitrate_str);
     
     const char *config_json = cJSON_Print(root);
     httpd_resp_sendstr(req, config_json);
@@ -422,14 +643,6 @@ void web_config_init()
     };
     httpd_register_uri_handler(server, &update_device_data_post_uri);
     
-    httpd_uri_t index_html_get_uri = {
-        .uri = "/index.html",
-        .method = HTTP_GET,
-        .handler = index_html_get_handler,
-        .user_ctx = server_context
-    };
-    httpd_register_uri_handler(server, &index_html_get_uri);
-
     httpd_uri_t root_get_uri = {
         .uri = "/",
         .method = HTTP_GET,
@@ -477,7 +690,15 @@ void web_config_init()
         .user_ctx = server_context
     };
     httpd_register_uri_handler(server, &config_json_get_uri);
-    
+
+    httpd_uri_t config_json_post_uri = {
+        .uri = "/config.json",
+        .method = HTTP_POST,
+        .handler = config_json_post_handler,
+        .user_ctx = server_context
+    };
+    httpd_register_uri_handler(server, &config_json_post_uri);
+
     httpd_uri_t device_list_json_get_uri = {
         .uri = "/deviceList.json",
         .method = HTTP_GET,
@@ -485,5 +706,13 @@ void web_config_init()
         .user_ctx = server_context
     };
     httpd_register_uri_handler(server, &device_list_json_get_uri);
+    
+    httpd_uri_t control_json_post_uri = {
+        .uri = "/control.json",
+        .method = HTTP_POST,
+        .handler = control_json_post_handler,
+        .user_ctx = server_context
+    };
+    httpd_register_uri_handler(server, &control_json_post_uri);
 }
 

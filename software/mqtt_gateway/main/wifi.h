@@ -7,8 +7,9 @@ extern "C" {
 
 #include <stdbool.h>
 
-void wifi_init_softap(const char* ssid, const char* password, const unsigned char channel);
-bool wifi_init(const char* ssid, const char* password);
+void wifi_init_softap(const char* ssid, const char* password, const unsigned char channel, const char* hostname);
+bool wifi_init_client(const char* ssid, const char* password, const char* hostname);
+void wifi_init();
 
 #ifdef __cplusplus
 }

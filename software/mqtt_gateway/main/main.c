@@ -181,16 +181,88 @@ void app_main()
     ESP_ERROR_CHECK(ret);
 
     nvs_handle_t nvs_handle;
-    esp_err_t nvs_err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     
-    size_t ssid_password_size = 20;
     char ssid[20] = {0};
     char password[20] = {0};
-    uint8_t can_bitrate = 0;
+    char wifi_mode[20] = {0};
+    char hostname[40] = {0};
+    char mqtt_uri[60] = {0};
+    char mqtt_username[60] = {0};
+    char mqtt_password[60] = {0};
+    size_t ssid_len = sizeof(ssid);
+    size_t pw_len = sizeof(password);
+    size_t wifi_mode_len = sizeof(wifi_mode);
+    size_t hostname_len = sizeof(hostname);
+    size_t mqtt_uri_len = sizeof(mqtt_uri);
+    size_t mqtt_username_len = sizeof(mqtt_username);
+    size_t mqtt_password_len = sizeof(mqtt_password);
+       
+    esp_err_t ssid_err = nvs_get_str(nvs_handle, "wifi_ssid", &ssid[0], &ssid_len);
+    if (ssid_err != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_ssid", "CAN2MQTTSETUP");
+        nvs_get_str(nvs_handle, "wifi_ssid", &ssid[0], &ssid_len);
+    }
     
-    esp_err_t ssid_err = nvs_get_str(nvs_handle, "ssid", &ssid[0], &ssid_password_size);
-    esp_err_t pw_err = nvs_get_str(nvs_handle, "pw", &password[0], &ssid_password_size);
-    esp_err_t can_bitrate_err = nvs_get_u8(nvs_handle, "can_bitrate", &can_bitrate);
+    esp_err_t pw_err = nvs_get_str(nvs_handle, "wifi_pw", &password[0], &pw_len);
+    if (pw_err != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_pw", "Can2MqttPass");
+        nvs_get_str(nvs_handle, "wifi_pw", &password[0], &pw_len);
+    }
+       
+    if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
+    {
+        wifi_mode_len = sizeof(wifi_mode);
+        nvs_set_str(nvs_handle, "wifi_mode", "ap");
+        nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
+    }
+    
+    if (strlen(password) < 8)
+    {
+        ESP_LOGI(EXAMPLE_TAG, "WIFI Password too short");
+        strcpy(ssid, "Can2MqttPass");
+        strcpy(password, "CAN2MQTTSETUP");
+        strcpy(wifi_mode, "ap");
+    }
+    
+    ESP_LOGI(EXAMPLE_TAG, "WIFI Setup from NVS:");
+    ESP_LOGI(EXAMPLE_TAG, "\t SSID: %s",ssid);
+    ESP_LOGI(EXAMPLE_TAG, "\t PW: %s",password);
+    ESP_LOGI(EXAMPLE_TAG, "\t Mode: %s",wifi_mode);
+    
+    if (nvs_get_str(nvs_handle, "hostname", &hostname[0], &hostname_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
+    }
+    
+    uint8_t mqtt_enabled = 0;
+    if (nvs_get_u8(nvs_handle, "mqtt_enabled", &mqtt_enabled) != ESP_OK)
+    {
+        nvs_set_u8(nvs_handle, "mqtt_enabled", mqtt_enabled);
+    }
+    
+    if (nvs_get_str(nvs_handle, "mqtt_uri", &mqtt_uri[0], &mqtt_uri_len) != ESP_OK)
+    {
+        mqtt_enabled = 0;
+        nvs_set_str(nvs_handle, "mqtt_uri", "mqtt://IP:1883");
+    }
+
+    if (nvs_get_str(nvs_handle, "mqtt_user", &mqtt_username[0], &mqtt_username_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "mqtt_user", "");
+    }
+    
+    if (nvs_get_str(nvs_handle, "mqtt_pw", &mqtt_password[0], &mqtt_password_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "mqtt_pw", "");
+    }
+    uint8_t can_bitrate = 0;
+    nvs_get_u8(nvs_handle, "can_bitrate", &can_bitrate);
+    
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
     
     //Create semaphores and tasks
     receive_task_sem  = xSemaphoreCreateBinary();
@@ -200,16 +272,21 @@ void app_main()
     xTaskCreatePinnedToCore(can_receive_task, "CAN_rx", 4096, NULL, RX_TASK_PRIO, NULL, tskNO_AFFINITY);
 
     // try to connect to configured access point but use own access point if this fails
-    bool wifi_err = false;
-    if ((ssid_err == ESP_OK) && (pw_err == ESP_OK))
+    bool wifi_ok = false;
+    wifi_init();
+    if ((ssid_err == ESP_OK) && (pw_err == ESP_OK) && (strcmp(wifi_mode, "ap") != 0))
     {
         printf("wifi_init\n");
-        wifi_err = wifi_init(ssid, password);
+        wifi_ok = wifi_init_client(ssid, password, hostname);
     }
-    if (!wifi_err)
+    if (!wifi_ok)
+    {
+        strcat(ssid, "_ap");
+    }
+    if (!wifi_ok || (strcmp(wifi_mode, "ap") == 0))
     {
         printf("wifi_init_softap\n");
-        wifi_init_softap("CAN2MQTTSETUP", "Can2MqttPass", 10);
+        wifi_init_softap(ssid, password, 10, hostname);
     }
     else
     {
@@ -238,15 +315,26 @@ void app_main()
         xSemaphoreTake(network_init_sem, pdMS_TO_TICKS(10000));
         printf("mqtt_start_task\n");
         esp_mqtt_client_config_t mqtt_cfg = {
-            .broker.address.uri = "mqtt://192.168.178.54",
+            .broker.address.uri = mqtt_uri,
         };
 
+        if (strcmp(mqtt_username, "") != 0)
+        {
+            mqtt_cfg.credentials.username = mqtt_password;
+        }
+        
+        if (strcmp(mqtt_password, "") != 0)
+        {
+            mqtt_cfg.credentials.authentication.password = mqtt_password;
+        }
+        
         client = esp_mqtt_client_init(&mqtt_cfg);
         esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
         esp_mqtt_client_start(client);   
 
         xSemaphoreGive(receive_task_sem);              //Start Control task
     }
+
     web_config_init();
     update_verified();
     
