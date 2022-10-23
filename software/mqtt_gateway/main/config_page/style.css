@@ -36,6 +36,18 @@ html, body {
     border-left-style: solid;
   }
   
+  #device_table_body div.changed {
+    padding-left: 0px;
+    border-bottom: 3px;
+    border-color: #ff9933;
+    border-bottom-style: solid;
+    border-left-style: none;
+  }
+  
+  #device_table .firmware_update_selector {
+    padding-top: 15px;
+  }
+  
   button {
     all: initial;
     margin-top: 15px;

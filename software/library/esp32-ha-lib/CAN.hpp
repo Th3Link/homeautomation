@@ -9,20 +9,26 @@
 class CAN : public ICAN
 {
     public:      
-        CAN(gpio_num_t rx_pin, gpio_num_t tx_pin);
+        CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter);
         void init() override;
         void deinit() override;
         void send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request) override;
+        void send(uint32_t id, uint8_t* data, unsigned int data_len, bool request) override;
         std::vector<ICANDispatcher*> dispatcher();
         void add_dispatcher(ICANDispatcher*) override;
         uint8_t get_id() override;
         uint8_t get_type() override;
+        bool enable_filter();
+        void bitrate(ICAN::BITRATE_t) override;
+        ICAN::BITRATE_t bitrate() override;
+
         static const char* TAG;
         bool shutdown_request();
         void shutdown();
     private:
         void read_nvs();
-        uint8_t m_bitrate;
+        bool m_enable_filter;
+        ICAN::BITRATE_t m_bitrate;
         uint8_t m_id;
         uint8_t m_type;
         gpio_num_t m_rx_pin;

@@ -26,16 +26,14 @@ static void can_receive_task(void *this_ptr)
     {
         if (twai_receive(&rx_msg, portMAX_DELAY) == ESP_OK)
         {
-            if (((rx_msg.identifier & 0xFF00) == (can->get_id() << 8)) ||
-                ((rx_msg.identifier & 0xFF00) == 00))
+            if (!can->enable_filter() || ((rx_msg.identifier & 0xFF00) == (can->get_id() << 8)) ||
+                ((rx_msg.identifier & 0xFF00) == 0x00))
             {
-                
-            }
-            
-            for (auto& dispatcher : can->dispatcher())
-            {
-                dispatcher->dispatch(rx_msg.identifier, rx_msg.data, 
-                    rx_msg.data_length_code, rx_msg.rtr);
+                for (auto& dispatcher : can->dispatcher())
+                {
+                    dispatcher->dispatch(rx_msg.identifier, rx_msg.data, 
+                        rx_msg.data_length_code, rx_msg.rtr);
+                }
             }
         }
     }
@@ -43,8 +41,9 @@ static void can_receive_task(void *this_ptr)
     vTaskDelete(NULL);
 }
 
-CAN::CAN(gpio_num_t rx_pin, gpio_num_t tx_pin) : m_bitrate(0), m_id(0xFF), 
-    m_type(0x4), m_rx_pin(rx_pin), m_tx_pin(tx_pin)
+CAN::CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter) : 
+    m_enable_filter(enable_filter), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
+    m_type(0xFF), m_rx_pin(rx_pin), m_tx_pin(tx_pin)
 {
     m_shutdown_sem  = xSemaphoreCreateBinary();
 }
@@ -52,7 +51,6 @@ CAN::CAN(gpio_num_t rx_pin, gpio_num_t tx_pin) : m_bitrate(0), m_id(0xFF),
 void CAN::init()
 {
     #define RX_TASK_PRIO                    10       //Receiving task priority
-
     static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
         m_tx_pin, m_rx_pin, TWAI_MODE_NORMAL);
     static const twai_timing_config_t t_config_22_222 = {.brp = 200, .tseg_1 = 11, 
@@ -65,15 +63,15 @@ void CAN::init()
     
     //Install CAN driver, trigger tasks to start
     const twai_timing_config_t* t_config = &t_config_50;
-    if (m_bitrate == 1)
+    if (m_bitrate == ICAN::BITRATE_t::BITRATE_22_222)
     {
         t_config = &t_config_22_222;
     }
-    else if (m_bitrate == 2)
+    else if (m_bitrate == ICAN::BITRATE_t::BITRATE_25)
     {
         t_config = &t_config_25;
     }
-    else if (m_bitrate == 4)
+    else if (m_bitrate == ICAN::BITRATE_t::BITRATE_100)
     {
         t_config = &t_config_100;
     }
@@ -101,6 +99,7 @@ void CAN::init()
 void CAN::deinit()
 {
     m_shutdown_request = true;
+    // wait for receive task for a clean shutdown
     xSemaphoreTake(m_shutdown_sem, portMAX_DELAY);
     //Uninstall CAN driver
     twai_stop();
@@ -110,6 +109,7 @@ void CAN::deinit()
 
 void CAN::shutdown()
 {
+    // will be called from the receive task
     xSemaphoreGive(m_shutdown_sem); 
 }
 
@@ -130,12 +130,18 @@ std::vector<ICANDispatcher*> CAN::dispatcher()
 
 void CAN::send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request)
 {
+    send(m_can_ng | m_id << 8 | m_type << 16 | static_cast<uint32_t>(messageId),
+        data, data_len, request);
+}
+
+void CAN::send(uint32_t id, uint8_t* data, unsigned int data_len, bool request)
+{
     twai_message_t tx_msg;
     tx_msg.rtr = (request ? 1 : 0);
     tx_msg.ss = 0;
     tx_msg.self = 0;
     tx_msg.extd = 1;
-    tx_msg.identifier = m_can_ng | m_id << 8 | m_type << 16 | static_cast<uint32_t>(messageId);
+    tx_msg.identifier = id;
     tx_msg.data_length_code = data_len;
     for (unsigned int i = 0; i < data_len; i++)
     {
@@ -156,13 +162,13 @@ void CAN::read_nvs()
     
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READONLY, &nvs_handle);
-    nvs_get_u8(nvs_handle, "can_bitrate", &m_bitrate);
+    nvs_get_u8(nvs_handle, "can_bitrate", reinterpret_cast<uint8_t*>(&m_bitrate));
     nvs_get_u8(nvs_handle, "can_id", &m_id);
     nvs_get_u8(nvs_handle, "can_type", &m_type);
     
     nvs_close(nvs_handle);
     
-    ESP_LOGI(TAG, "Bitrate: %x", m_bitrate);
+    ESP_LOGI(TAG, "Bitrate: %x", static_cast<uint8_t>(m_bitrate));
     ESP_LOGI(TAG, "CAN ID: %x", m_id);
     ESP_LOGI(TAG, "CAN TYPE: %x", m_type);
 }
@@ -175,4 +181,24 @@ uint8_t CAN::get_type()
 uint8_t CAN::get_id()
 {
     return m_id;
+}
+
+bool CAN::enable_filter()
+{
+    return m_enable_filter;
+}
+
+void CAN::bitrate(ICAN::BITRATE_t b)
+{
+    m_bitrate = b;
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_u8(nvs_handle, "can_bitrate", static_cast<uint8_t>(m_bitrate));
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+}
+
+ICAN::BITRATE_t CAN::bitrate()
+{
+    return m_bitrate;
 }

@@ -12,9 +12,29 @@ Update::Update(ICAN& ic) : m_can(ic)
     m_can.add_dispatcher(this);
 }
 
-void Update::init()
+void Update::init(const uint8_t const_type)
 {
-    esp_ota_mark_app_valid_cancel_rollback();
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    uint8_t type = 0;
+    if (nvs_get_u8(nvs_handle, "can_type", &type) != ESP_OK)
+    {
+        nvs_set_u8(nvs_handle, "can_type", const_type);
+        nvs_commit(nvs_handle);
+        nvs_get_u8(nvs_handle, "can_type", &type);
+    }
+
+    nvs_close(nvs_handle);
+    
+    if (type != const_type)
+    {
+        esp_ota_mark_app_invalid_rollback_and_reboot();
+    }
+    else
+    {
+        esp_ota_mark_app_valid_cancel_rollback();
+    }
+    
 }
 
 void Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)

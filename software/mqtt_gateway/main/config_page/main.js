@@ -3,17 +3,25 @@ var content_can_device = document.getElementById("content_can_device");
 var content_can_device_console = document.getElementById("content_can_device_console");
 var content_state = document.getElementById("content_state");
 var content_restart = document.getElementById("content_restart");
+var content_logging = document.getElementById("content_logging");
+var content_docs = document.getElementById("content_docs");
 
 var nav_save = document.getElementById("save");
 var nav_state = document.getElementById("nav_state");
 var nav_can_devices = document.getElementById("nav_can_devices");
 var nav_update = document.getElementById("nav_update");
+var nav_logging = document.getElementById("nav_logging");
+var nav_docs = document.getElementById("nav_docs");
 
 var setup_general_hostname = document.getElementById("general_hostname");
+var setup_general_username = document.getElementById("web_username");
+var setup_general_password = document.getElementById("web_password");
 var setup_wifi_mode = document.getElementById("wifi_mode");
 var setup_wifi_ssid = document.getElementById("wifi_ssid");
 var setup_wifi_password = document.getElementById("wifi_password");
 var setup_mqtt_uri = document.getElementById("mqtt_uri");
+var setup_mqtt_username = document.getElementById("mqtt_username");
+var setup_mqtt_password = document.getElementById("mqtt_password");
 var setup_can_baudrate = document.getElementById("can_baudrate");
 
 var state_refresh = document.getElementById("refresh");
@@ -34,78 +42,113 @@ function clearPressed() {
     nav_state.classList.remove("pressed");
     nav_can_devices.classList.remove("pressed");
     nav_update.classList.remove("pressed");
+    nav_logging.classList.remove("pressed");
+    nav_docs.classList.remove("pressed");
     content_update.classList.add("hide-me");
     content_state.classList.add("hide-me");
     content_can_device.classList.add("hide-me");
     content_can_device_console.classList.add("hide-me");
     content_restart.classList.add("hide-me");
+    content_logging.classList.add("hide-me");
+    content_docs.classList.add("hide-me");
 }
+function init() {
+    nav_can_devices.addEventListener("click", function () {
+        clearPressed();
+        nav_can_devices.classList.add("pressed");
+        updateDeviceList();
 
-nav_can_devices.addEventListener("click", function () {
-    clearPressed();
-    nav_can_devices.classList.add("pressed");
-    updateDeviceList();
+        content_can_device.classList.remove("hide-me");
+        content_can_device_console.classList.remove("hide-me");
+    });
 
-    content_can_device.classList.remove("hide-me");
-    content_can_device_console.classList.remove("hide-me");
-});
+    nav_update.addEventListener("click", function () {
+        clearPressed();
+        nav_update.classList.add("pressed");
+        content_update.classList.remove("hide-me");
+        content_update.innerHTML = "";
+        content_update.appendChild(createFirmwareSelector("device_update"));
+    });
 
-nav_update.addEventListener("click", function () {
-    clearPressed();
-    nav_update.classList.add("pressed");
-    content_update.classList.remove("hide-me");
-    content_update.innerHTML = "";
-    content_update.appendChild(createFirmwareSelector("device_update"));
-});
+    nav_logging.addEventListener("click", function () {
+        clearPressed();
+        nav_logging.classList.add("pressed");
+        content_logging.classList.remove("hide-me");
+        content_logging.innerHTML = "";
+    });
 
-setup_general_hostname.addEventListener("input", checkConfig)
-setup_wifi_mode.addEventListener("input", checkConfig)
-setup_wifi_ssid.addEventListener("input", checkConfig)
-setup_wifi_password.addEventListener("input", checkConfig)
-setup_mqtt_uri.addEventListener("input", checkConfig)
-setup_can_baudrate.addEventListener("input", checkConfig)
+    nav_docs.addEventListener("click", function () {
+        clearPressed();
+        nav_docs.classList.add("pressed");
+        content_docs.classList.remove("hide-me");
+        content_docs.innerHTML = "";
+    });
 
-nav_save.addEventListener("click", function () {
-    if (!nav_save.classList.contains("deactivated")) {
+    setup_general_hostname.addEventListener("input", checkConfig)
+    setup_general_username.addEventListener("input", checkConfig)
+    setup_general_password.addEventListener("input", checkConfig)
+    setup_wifi_mode.addEventListener("input", checkConfig)
+    setup_wifi_ssid.addEventListener("input", checkConfig)
+    setup_wifi_password.addEventListener("input", checkConfig)
+    setup_mqtt_uri.addEventListener("input", checkConfig)
+    setup_mqtt_username.addEventListener("input", checkConfig)
+    setup_mqtt_password.addEventListener("input", checkConfig)
+    setup_can_baudrate.addEventListener("input", checkConfig)
+
+    nav_save.addEventListener("click", function () {
+        if (!nav_save.classList.contains("deactivated")) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", '/control.json', true);
+            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+            xhr.onreadystatechange = function () {
+                if (this.readyState === XMLHttpRequest.DONE && this.status === 200) {
+                    get_config();
+                    // Request finished. Do processing here.
+                } else {
+                    //error happend
+                }
+            };
+            current_config.command = "save_config"
+            xhr.send(JSON.stringify(current_config));
+        }
+    });
+
+
+    state_refresh.addEventListener("click", function () {
+        update_state();
+        get_config();
+    });
+
+    state_restart.addEventListener("click", function () {
         var xhr = new XMLHttpRequest();
-        xhr.open("POST", '/config.json', true);
+        xhr.open("POST", '/control.json', true);
         xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
         xhr.onreadystatechange = function () {
             if (this.readyState === XMLHttpRequest.DONE && this.status === 200) {
-                get_config();
                 // Request finished. Do processing here.
+                clearPressed();
+                content_restart.classList.remove("hide-me");
             } else {
                 //error happend
             }
         };
-        xhr.send(JSON.stringify(current_config));
-    }
-});
 
+        const restart_command = { command: "restart", unit: "self" };
 
-state_refresh.addEventListener("click", function () {
-    update_state();
-    get_config();
-});
+        xhr.send(JSON.stringify(restart_command));
+    });
+    
+    nav_state.addEventListener("click", function () {
+        clearPressed();
+        nav_state.classList.add("pressed");
+        update_state();
+        get_config();
 
-state_restart.addEventListener("click", function () {
-    var xhr = new XMLHttpRequest();
-    xhr.open("POST", '/control.json', true);
-    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhr.onreadystatechange = function () {
-        if (this.readyState === XMLHttpRequest.DONE && this.status === 200) {
-            // Request finished. Do processing here.
-            clearPressed();
-            content_restart.classList.remove("hide-me");
-        } else {
-            //error happend
-        }
-    };
-
-    const restart_command = { command: "restart", unit: "self" };
-
-    xhr.send(JSON.stringify(restart_command));
-});
+        content_state.classList.remove("hide-me");
+    });
+    
+    nav_state.click();
+}
 
 function update_state() {
     var general_state = document.getElementById("general_state");
@@ -146,7 +189,7 @@ function update_state() {
 
 function get_config() {
     var configRequest = new XMLHttpRequest();
-    configRequest.open('GET', 'config.json');
+    configRequest.open('GET', 'state.json');
     configRequest.onload = function () {
         if (configRequest.status >= 200 && configRequest.status < 400) {
 
@@ -158,6 +201,8 @@ function get_config() {
             setup_wifi_password.value = loaded_config.wifi.password;
 
             setup_mqtt_uri.value = loaded_config.mqtt.uri;
+            setup_mqtt_username.value = loaded_config.mqtt.username;
+            setup_mqtt_password.value = loaded_config.mqtt.password;
             setup_can_baudrate.value = loaded_config.canbus.baudrate;
 
             checkConfig();
@@ -169,6 +214,21 @@ function get_config() {
 
 function checkConfig() {
     current_config = {};
+    
+    if (setup_general_username.value != "") {
+        document.getElementById("web_username_label").classList.add("changed");
+    }
+    else
+    {
+        document.getElementById("web_username_label").classList.remove("changed");
+    }
+    if (setup_general_password.value != "") {
+        document.getElementById("web_password_label").classList.add("changed");
+    }
+    else
+    {
+        document.getElementById("web_password_label").classList.remove("changed");
+    }
     if (loaded_config.hostname != setup_general_hostname.value) {
         document.getElementById("general_hostname_label").classList.add("changed");
         current_config.hostname = setup_general_hostname.value;
@@ -208,6 +268,22 @@ function checkConfig() {
     else {
         document.getElementById("mqtt_uri_label").classList.remove("changed");
     }
+    if (loaded_config.mqtt.username != setup_mqtt_username.value) {
+        if (!('mqtt' in current_config)) current_config.mqtt = {};
+        document.getElementById("mqtt_username_label").classList.add("changed");
+        current_config.mqtt.username = setup_mqtt_username.value;
+    }
+    else {
+        document.getElementById("mqtt_username_label").classList.remove("changed");
+    }
+    if (loaded_config.mqtt.password != setup_mqtt_password.value) {
+        if (!('mqtt' in current_config)) current_config.mqtt = {};
+        document.getElementById("mqtt_password_label").classList.add("changed");
+        current_config.mqtt.password = setup_mqtt_password.value;
+    }
+    else {
+        document.getElementById("mqtt_password_label").classList.remove("changed");
+    }
     if (loaded_config.canbus.baudrate != setup_can_baudrate.value) {
         if (!('canbus' in current_config)) current_config.canbus = {};
         document.getElementById("can_baudrate_label").classList.add("changed");
@@ -225,13 +301,53 @@ function checkConfig() {
     }
 }
 
-nav_state.addEventListener("click", function () {
-    clearPressed();
-    nav_state.classList.add("pressed");
-    update_state();
-    get_config();
+function get_device_object(uid)
+{
+    var dev = 0;
+    loaded_config.devices.forEach(function (device, index) {
+        if (device.uid == uid)
+        {
+            dev = device;
+        }
+    });
+    return dev;
+}
 
-    content_state.classList.remove("hide-me");
-});
+function update_state() {
+    var general_state = document.getElementById("general_state");
+    var wifi_state = document.getElementById("wifi_state");
+    var mqtt_state = document.getElementById("mqtt_state");
+    var canbus_state = document.getElementById("canbus_state");
 
-window.onload = nav_state.click();
+    var stateRequest = new XMLHttpRequest();
+    stateRequest.open('GET', 'state.json');
+    stateRequest.onload = function () {
+        if (stateRequest.status >= 200 && stateRequest.status < 400) {
+            state = JSON.parse(stateRequest.responseText);
+            general_state.innerHTML =
+                "Firmware Version: " + state.firmware_version + "<br/>" +
+                "Uptime: " + state.uptime + "<br/>" +
+                "Hostname: " + state.hostname;
+
+            wifi_state.innerHTML =
+                "Connection State: " + state.wifi.state + "<br/>" +
+                "IPv4 Address: " + state.wifi.ipv4 + "<br/>" +
+                "IPv6 Address: " + state.wifi.ipv6 + "<br/>" +
+                "Gateway: " + state.wifi.gateway + "<br/>" +
+                "DNS Server: " + state.wifi.dns;
+
+            mqtt_state.innerHTML =
+                "Connection State: " + state.mqtt.state + "<br/>" +
+                "Messages Received: " + state.mqtt.received + "<br/>" +
+                "Messages Sent: " + state.mqtt.sent;
+
+            canbus_state.innerHTML =
+                "Messages Received: " + state.mqtt.received + "<br/>" +
+                "Messages Sent: " + state.mqtt.sent;
+        }
+    };
+    stateRequest.setRequestHeader('Cache-Control', 'no-cache');
+    stateRequest.send();
+}
+
+window.onload = init();

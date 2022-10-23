@@ -39,6 +39,7 @@ private:
     ICAN& m_can;
     i2c_dev_t m_device;
     uint16_t m_state;
+    ICAN::ROLLERSHUTTER_MODE_t m_rollershutter_mode;
     std::array<rollershutter_state_t, 6> m_states;
     std::array<uint32_t, 6> m_actions;
 };

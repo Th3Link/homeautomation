@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 class ICANDispatcher
 {
     public:
@@ -9,102 +11,199 @@ class ICANDispatcher
 
 class ICAN
 {
-    public:
-        enum class ERROR_t : uint8_t
-        {
-            FLASH_OVERRUN = 0x1,
-            NO_CONFIG = 0x2,
-            DEVICE_ID_TYPE_ERROR = 0x3,
-            FIRMWARE_CORRUPT = 0x4
-        };
+public:
+    enum class BITRATE_t : uint8_t
+    {
+        BITRATE_22_222 = 1,
+        BITRATE_25 = 2,
+        BITRATE_50 = 3,
+        BITRATE_100 = 4
+    };
 
-        enum class MSG_ID_t : uint8_t
-        {
-            AVAILABLE = 0,
-            DEVICE_ERROR = 1,
-            RESTART = 2,
-            DEVICE_UID0 = 3,
-            DEVICE_UID1 = 4,
-            DEVICE_ID_TYPE = 5,
-            DEVICE_GROUP = 6,
-            APPLICATION_VERSION = 7,
-            BAUDRATE = 8,
-            UPTIME = 9,
-            CUSTOM_STRING = 10,
-            PWM_FREQUENCY = 11,
-            FLASH_SELECT = 16,
-            FLASH_ERASE = 17,
-            FLASH_READ = 18,
-            FLASH_WRITE = 19,
-            FLASH_VERIFY = 20,
-            BUTTON_EVENT = 30,
-            TEMPERATURE_SENSOR = 31,
-            LAMP_GROUP = 90,
-            PIR_SENSOR = 128,
-            HUMIDITY_SENSOR = 129,
-            RELAIS = 130,
-            ROLLERSHUTTER = 131
-            //30      button reading
-            //31      temperature reading
-            //32...56 get lamp state
-            //58      gat lamp group state
-            //64...88 set lamp command
-            //90      set lamp group command
-        };
+    enum class ERROR_t : uint8_t
+    {
+        FLASH_OVERRUN = 0x1,
+        NO_CONFIG = 0x2,
+        DEVICE_ID_TYPE_ERROR = 0x3,
+        FIRMWARE_CORRUPT = 0x4
+    };
+
+    enum class MSG_ID_t : uint8_t
+    {
+        AVAILABLE = 0,
+        DEVICE_ERROR = 1,
+        RESTART = 2,
+        DEVICE_UID0 = 3,
+        DEVICE_UID1 = 4,
+        DEVICE_ID_TYPE = 5,
+        DEVICE_GROUP = 6,
+        APPLICATION_VERSION = 7,
+        BAUDRATE = 8,
+        UPTIME = 9,
+        CUSTOM_STRING = 10,
+        PWM_FREQUENCY = 11,
+        REQUEST_PARAMETER = 12,
+        FLASH_SELECT = 16,
+        FLASH_ERASE = 17,
+        FLASH_READ = 18,
+        FLASH_WRITE = 19,
+        FLASH_VERIFY = 20,
+        BUTTON_EVENT = 30,
+        TEMPERATURE_SENSOR = 31,
+        LAMP_GROUP = 90,
+        PIR_SENSOR = 128,
+        HUMIDITY_SENSOR = 129,
+        RELAIS = 130,
+        RELAIS_STATE = 131,
+        ROLLERSHUTTER = 132,
+        ROLLERSHUTTER_STATE = 133,
+        ROLLERSHUTTER_MODE = 134
+        //30      button reading
+        //31      temperature reading
+        //32...56 get lamp state
+        //58      gat lamp group state
+        //64...88 set lamp command
+        //90      set lamp group command
+    };
+
+    enum class AVAILABLE_t : uint8_t
+    {
+        NOT_READY = 0,
+        APPLICATION = 1,
+        UPDATE_MODE = 2
+    };
+
+    enum class BUTTON_EVENT_t : uint8_t
+    {
+        RELEASED = 0,
+        PRESSED = 1,
+        HOLD = 2
+    };
+
+    enum class DEVICE_t : uint32_t
+    {
+        Relais = 0x02,
+        Lamps = 0x03,
+        Button = 0x04
+    };
     
-        enum class AVAILABLE_t : uint8_t
-        {
-            NOT_READY = 0,
-            APPLICATION = 1,
-            UPDATE_MODE = 2
-        };
+    enum class ROLLERSHUTTER_MODE_t : uint8_t
+    {
+        SOFTWARE = 1,
+        HARDWARE = 2
+    };
     
-        enum class BUTTON_EVENT_t : uint8_t
-        {
-            RELEASED = 0,
-            PRESSED = 1,
-            HOLD = 2
-        };
+    #pragma pack(push,1)
+    struct RELAIS_MSG_t
+    {
+        uint32_t number : 8;
+        uint32_t state : 8;
+        uint32_t time : 24;
+        uint32_t reserved : 24;
+    };
+    #pragma pack(pop)
     
-        enum class DEVICE_t : uint32_t
+    #pragma pack(push,1)
+    struct LAMP_MSG_t
+    {
+        uint32_t value : 8;
+        uint32_t bitmask : 24;
+        uint32_t reserved : 32;
+    };
+    #pragma pack(pop)
+    
+    virtual void init() = 0;
+    virtual void deinit() = 0;
+    virtual void add_dispatcher(ICANDispatcher*) = 0;
+    virtual void send(MSG_ID_t, uint8_t* data, 
+        unsigned int data_len, bool request) = 0;
+    virtual void send(uint32_t, uint8_t* data, 
+        unsigned int data_len, bool request) = 0;
+    virtual uint8_t get_id() = 0;
+    virtual uint8_t get_type() = 0;
+    virtual void bitrate(ICAN::BITRATE_t) = 0;
+    virtual ICAN::BITRATE_t bitrate() = 0;
+
+    static inline const char* bitrate_string(ICAN::BITRATE_t b)
+    {
+        switch (b)
         {
-            Sensor = 1000000,
-            Lamp = 2000000,
-            Button = 3000000,
-            Relais = 4000000,
-            TemperatureSensors = 5000000,
-            TemperatureSensorsNG = 0x0100,
-            RelaisNG = 0x0200,
-            Lamps = 0x0300,
-            ButtonNG = 0x0400
-        };
-        
-        #pragma pack(push,1)
-        struct RELAIS_MSG_t
+            case ICAN::BITRATE_t::BITRATE_22_222:
+                return "b22_222";
+            case ICAN::BITRATE_t::BITRATE_25:
+                return "b25";
+            case ICAN::BITRATE_t::BITRATE_50:
+                return "b50";
+            case ICAN::BITRATE_t::BITRATE_100:
+                return "b100";
+        }
+        return "b50";
+    }
+
+    static inline ICAN::BITRATE_t bitrate(const char* c)
+    {
+        if (strcmp(c, "b22_222") == 0)
         {
-            uint32_t number : 8;
-            uint32_t state : 8;
-            uint32_t time : 24;
-            uint32_t reserved : 24;
-        };
-        #pragma pack(pop)
-        
-        #pragma pack(push,1)
-        struct LAMP_MSG_t
+            return ICAN::BITRATE_t::BITRATE_22_222;
+        }
+        else if (strcmp(c, "b25") == 0)
         {
-            uint32_t value : 8;
-            uint32_t bitmask : 24;
-            uint32_t reserved : 32;
-        };
-        #pragma pack(pop)
-        
-        
-        virtual void init() = 0;
-        virtual void deinit() = 0;
-        virtual void add_dispatcher(ICANDispatcher*) = 0;
-        virtual void send(MSG_ID_t, uint8_t* data, 
-            unsigned int data_len, bool request) = 0;
-        virtual uint8_t get_id();
-        virtual uint8_t get_type();
-        
+            return ICAN::BITRATE_t::BITRATE_25;
+        }
+        else if (strcmp(c, "b50") == 0)
+        {
+            return ICAN::BITRATE_t::BITRATE_50;
+        }
+        else if (strcmp(c, "b100") == 0)
+        {
+            return ICAN::BITRATE_t::BITRATE_100;
+        }
+        return ICAN::BITRATE_t::BITRATE_50;
+    }
+    
+    static constexpr uint32_t ID_NG_MASK       = 0x10000000; // 1 bit
+    static constexpr uint32_t ID_GROUP_MASK    = 0x0FC00000; // 6 bits
+    static constexpr uint32_t ID_TYPE_MASK     = 0x003F0000; // 6 bits
+    static constexpr uint32_t ID_ID_MASK       = 0x0000FF00; // 8 bits
+    static constexpr uint32_t ID_MSG_MASK      = 0x000000FF; // 8 bits
+
+    static constexpr uint32_t GET_GROUP(uint32_t id)
+    {
+        return (id & ID_GROUP_MASK) >> 22;
+    }
+
+    static constexpr uint32_t GET_TYPE(uint32_t id)
+    {
+        return (id & ID_TYPE_MASK) >> 16;
+    }
+
+    static constexpr uint32_t GET_ID(uint32_t id)
+    {
+        return (id & ID_ID_MASK) >> 8;
+    }
+
+    static constexpr uint32_t GET_MSG(uint32_t id)
+    {
+        return id & ID_MSG_MASK;
+    }
+
+    static constexpr uint32_t GET_NOT_MSG(uint32_t id)
+    {
+        return id & ~ID_MSG_MASK;
+    }
+
+    static constexpr bool TYPE_COMPARE(uint32_t id, DEVICE_t type)
+    {
+        return ((id & ID_NG_MASK) && (static_cast<DEVICE_t>(GET_TYPE(id)) == type));
+    }
+
+    static constexpr bool ID_COMPARE(uint32_t id, uint8_t device_id)
+    {
+        return ((id & ID_NG_MASK) && (GET_ID(id) == device_id));
+    }
+
+    static constexpr bool MSG_COMPARE(uint32_t id, MSG_ID_t msg_id)
+    {
+        return ((id & ID_NG_MASK) && (static_cast<MSG_ID_t>(GET_MSG(id)) == msg_id));
+    }
 };

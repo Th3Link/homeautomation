@@ -1,7 +1,10 @@
 #include <nvs_flash.h>
 #include <esp_mac.h>
+#include <esp_ota_ops.h>
 #include "Device.hpp"
 #include <chrono>
+#include <cstring>
+#include <algorithm>
 
 const char* Device::TAG = "Device";
 
@@ -20,6 +23,16 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
     static bool uid_selected = false;
     switch (static_cast<ICAN::MSG_ID_t>(identifier & 0xFF))
     {
+        case ICAN::MSG_ID_t::REQUEST_PARAMETER:
+        {
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::APPLICATION_VERSION), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID0), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID1), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::CUSTOM_STRING), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::UPTIME), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::BAUDRATE), data, data_len, request);
+            break;
+        }
         case ICAN::MSG_ID_t::DEVICE_GROUP:
         {
             if (request)
@@ -34,8 +47,15 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
         {
             if (request)
             {
-                uint8_t data[6] {0};
-                m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION, data, sizeof(data), false);
+                const esp_app_desc_t* desc = esp_ota_get_app_description();
+                uint8_t data[8] {0};
+                size_t len = strlen(desc->version);
+                int min_len = std::min(static_cast<int>(len),8);
+                for (unsigned int i = 0; i < min_len; i++)
+                {
+                    data[i] = desc->version[i];
+                }
+                m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION, data, min_len, false);
             }
             break;
         }
@@ -54,9 +74,12 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 nvs_handle_t nvs_handle;
                 nvs_open("storage", NVS_READWRITE, &nvs_handle);
 
-                nvs_set_u8(nvs_handle, "m_can_type", data[1]);
-                nvs_set_u8(nvs_handle, "m_can_id", data[0]);
-
+                nvs_set_u8(nvs_handle, "can_type", data[1]);
+                if (data[0] != 0)
+                {
+                    nvs_set_u8(nvs_handle, "can_id", data[0]);
+                }
+                nvs_commit(nvs_handle);
                 nvs_close(nvs_handle);
                 m_can.deinit();
                 m_can.init();
@@ -91,18 +114,58 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             }
             break;
         }
-        case ICAN::MSG_ID_t::CUSTOM_STRING:
+        case ICAN::MSG_ID_t::BAUDRATE:
         {
+            nvs_handle_t nvs_handle;
+            nvs_open("storage", NVS_READWRITE, &nvs_handle);
             if (request)
             {
                 // custom string
-                // uptime
-                
-                uint8_t custom_string[8] {0};
+                uint8_t data_out[1] {0};
+
+                nvs_get_u8(nvs_handle, "can_bitrate", &data_out[0]);
+
+                m_can.send(ICAN::MSG_ID_t::BAUDRATE, data_out, 
+                    1, false);
+            }
+            else
+            {
+                if ((data_len == 1) && (data[0] > 0))
+                {
+                    nvs_set_u8(nvs_handle, "can_bitrate", data[0]);
+                    nvs_commit(nvs_handle);
+                }
+            }
+            nvs_close(nvs_handle);
+            break;
+        }
+        case ICAN::MSG_ID_t::CUSTOM_STRING:
+        {
+            nvs_handle_t nvs_handle;
+            nvs_open("storage", NVS_READWRITE, &nvs_handle);
+            if (request)
+            {
+                // custom string
+                uint8_t custom_string[9] {0};
+                size_t custom_string_len = 9;
+
+                nvs_get_str(nvs_handle, "custom_string", reinterpret_cast<char*>(&custom_string[0]), &custom_string_len);
 
                 m_can.send(ICAN::MSG_ID_t::CUSTOM_STRING, custom_string, 
-                    sizeof(custom_string), false);
+                    custom_string_len, false);
             }
+            else
+            {
+                uint8_t custom_string[9] {0};
+                for (unsigned int i = 0; i < data_len; i++)
+                {
+                    custom_string[i] = data[i];
+                }
+                nvs_set_str(nvs_handle, "custom_string", reinterpret_cast<char*>(&custom_string[0]));
+                nvs_commit(nvs_handle);
+            }
+            
+            nvs_close(nvs_handle);
             break;
         }
         case ICAN::MSG_ID_t::UPTIME:

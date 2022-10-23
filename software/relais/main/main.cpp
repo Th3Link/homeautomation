@@ -34,7 +34,7 @@ static SemaphoreHandle_t shutdown_sem;
 extern "C"
 void app_main()
 {
-    CAN can(RX_GPIO_NUM, TX_GPIO_NUM);
+    CAN can(RX_GPIO_NUM, TX_GPIO_NUM, true);
     Device device(can);
     Update update(can);
     THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE);
@@ -83,7 +83,7 @@ void app_main()
     }
     
     // init update at last; rollback will be disabled on init
-    update.init();
+    update.init(static_cast<uint8_t>(ICAN::DEVICE_t::Relais));
     
     xSemaphoreTake(shutdown_sem, portMAX_DELAY);    //Wait for tasks to complete
 

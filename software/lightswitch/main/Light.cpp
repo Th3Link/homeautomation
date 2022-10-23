@@ -55,7 +55,10 @@ Light::Light(ICAN& ic) : m_can(ic)
             .intr_type      = LEDC_INTR_DISABLE,
             .timer_sel      = LEDC_TIMER,
             .duty           = 0, // Set duty to 0%
-            .hpoint         = 0
+            .hpoint         = 0,
+            .flags          = {
+                .output_invert = 0
+            }
         };
         ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
     }

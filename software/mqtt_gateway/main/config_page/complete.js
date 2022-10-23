@@ -68,7 +68,7 @@ setup_can_baudrate.addEventListener("input", checkConfig)
 nav_save.addEventListener("click", function () {
     if (!nav_save.classList.contains("deactivated")) {
         var xhr = new XMLHttpRequest();
-        xhr.open("POST", '/config.json', true);
+        xhr.open("POST", '/control.json', true);
         xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
         xhr.onreadystatechange = function () {
             if (this.readyState === XMLHttpRequest.DONE && this.status === 200) {
@@ -146,7 +146,7 @@ function update_state() {
 
 function get_config() {
     var configRequest = new XMLHttpRequest();
-    configRequest.open('GET', 'config.json');
+    configRequest.open('GET', 'state.json');
     configRequest.onload = function () {
         if (configRequest.status >= 200 && configRequest.status < 400) {
 
@@ -461,6 +461,12 @@ function updateTable(header, elements) {
         device_tr.childNodes[6].childNodes[0].textContent = elements[i].last_seen;
         device_tr.childNodes[7].childNodes[0].textContent = elements[i].state;
         device_tr.childNodes[8].childNodes[0].textContent = elements[i].last_error;
+        
+        document.getElementById(elements[i].uid + "_firmware").textContent = elements[i].version;
+        document.getElementById(elements[i].uid + "_uid0").textContent = elements[i].uid0;
+        document.getElementById(elements[i].uid + "_uid1").textContent = elements[i].uid1;
+        document.getElementById(elements[i].uid + "_uptime").textContent = elements[i].uptime;
+        document.getElementById(elements[i].uid + "_last_message").textContent = elements[i].last_seen;
     }
 }
 
@@ -487,13 +493,11 @@ function updateTypes(device_list) {
 }
 
 function updateTypeOptions() {
-    console.log(type_options)
     var by_type_select = document.getElementById("by_type_select");
     while (by_type_select.firstChild) {
         by_type_select.removeChild(by_type_select.lastChild);
     }
 
-    console.log(by_type_select)
     if (by_type_select != null) {
         for (i = 0; i < type_options.length; i++) {
             var option = document.createElement("option");
@@ -506,7 +510,7 @@ function updateTypeOptions() {
 
 function updateDeviceList() {
     var deviceListRequest = new XMLHttpRequest();
-    deviceListRequest.open('GET', 'deviceList.json');
+    deviceListRequest.open('GET', 'state.json');
     deviceListRequest.onload = function () {
         if (deviceListRequest.status >= 200 && deviceListRequest.status < 400) {
             device_list = JSON.parse(deviceListRequest.responseText);
@@ -672,6 +676,7 @@ function createFirmwareSelector(uid) {
     div.appendChild(desc);
     div.appendChild(upload);
     div.appendChild(button);
+    div.appendChild(label);
 
     return div;
 }
@@ -710,7 +715,8 @@ function createControls(uid, cl) {
     control.appendChild(ping);
 
     return control;
-}function update_click(uid) {
+}
+function update_click(uid) {
     console.log("update " + uid);
     var update_file = document.getElementById(uid + "_file_upload").files[0];
     var req = new XMLHttpRequest();
@@ -720,8 +726,14 @@ function createControls(uid, cl) {
     {
         var type = document.getElementById("selected_device_type").value;
         console.log(type);
+        
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open("POST", "/control.json");
+        xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        xmlhttp.send(JSON.stringify({"update_prepare":true,"update_type":"can_by_type","update_id":type}));
+        
         formData.append("type:"+type, update_file);
-        req.open("POST", '/update/can');
+        req.open("POST", '/update/data');
     }
     else if (uid == "selected")
     {
@@ -730,26 +742,36 @@ function createControls(uid, cl) {
     }
     else if (uid == "device_update")
     {
-        var xmlhttp = new XMLHttpRequest();   // new HttpRequest instance 
-        xmlhttp.open("POST", "/update/device/state");
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        xmlhttp.send(JSON.stringify({ "prepare": true }));
+        xmlhttp.send(JSON.stringify({"update_prepare":true,"update_type":"self"}));
         
         formData.append("device_update", update_file);
-        req.open("POST", '/update/device/data', false);
+        req.open("POST", '/update/data');
     }
     else
     {
-        formData.append(uid, update_file);
-        req.open("POST", '/update/can');
-    }
-    req.send(formData);
-    
-    if (uid == "device_update")
-    {
-        var xmlhttp = new XMLHttpRequest();   // new HttpRequest instance 
-        xmlhttp.open("POST", "/update/device/state", false);
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        xmlhttp.send(JSON.stringify({ "complete": true }));
+        xmlhttp.send(JSON.stringify({"update_prepare":true,"update_type":"can_by_uid","update_id":uid}));
+        
+        formData.append(uid, update_file);
+        req.open("POST", '/update/data');
     }
+    
+    req.upload.onprogress = function(e) {
+        var p = Math.round(100 / e.total * e.loaded);
+        document.getElementById(uid + "_progress").innerHTML = p + "%";
+    };
+
+    req.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "100%";
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open("POST", "/control.json");
+        xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        xmlhttp.send(JSON.stringify({ "update_complete": true }));
+    };
+    req.send(formData);
 }

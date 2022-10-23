@@ -7,6 +7,7 @@
 #include <chrono>
 #include <esp_err.h>
 #include <esp_log.h>
+#include <nvs_flash.h>
 
 #include <message/Atomic.hpp>
 #include <message/Receiver.hpp>
@@ -93,7 +94,7 @@ void Relais::receive(message::Message<ICAN::RELAIS_MSG_t>& m)
     relais.time = 0;
     relais.number = m.data.number;
     relais.state = state(m.data.number);
-    m_can.send(ICAN::MSG_ID_t::RELAIS, data8, sizeof(data8), false);
+    m_can.send(ICAN::MSG_ID_t::RELAIS_STATE, data8, sizeof(data8), false);
 }
 
 void Relais::sendRollershutter(uint8_t number)
@@ -121,7 +122,7 @@ void Relais::sendRollershutter(uint8_t number)
         relais.state = 0xFF;
     }
     
-    m_can.send(ICAN::MSG_ID_t::RELAIS, data8, sizeof(data8), false);
+    m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_STATE, data8, sizeof(data8), false);
 }
 
 bool Relais::setRollershutter(uint8_t p_number, uint8_t p_state, uint32_t p_time)
@@ -145,8 +146,17 @@ bool Relais::setRollershutter(uint8_t p_number, uint8_t p_state, uint32_t p_time
         // go up
         if ((m_states[p_number] == rollershutter_state_t::STOP) && hwoff && p_time > 0)
         {
-            state(p_number * 2, 2 - p_state); //(0=0,1=2,2=4,3=6,4=8,5=10)
-            state(p_number * 2 + 1, p_state - 1);
+            if (m_rollershutter_mode == ICAN::ROLLERSHUTTER_MODE_t::HARDWARE)
+            {
+                state(p_number * 2, 1); //(0=0,1=2,2=4,3=6,4=8,5=10)
+                state(p_number * 2 + 1, p_state - 1);
+            }
+            else
+            {
+                state(p_number * 2, 2 - p_state); //(0=0,1=2,2=4,3=6,4=8,5=10)
+                state(p_number * 2 + 1, p_state - 1);
+            }
+            
             m_states[p_number] = rollershutter_state_t::MOVING;
             m_actions[p_number]++;
             message::Message<rollershutter_action_t>::send(m_queue, *this, 
@@ -192,8 +202,8 @@ static void message_task(void *this_ptr)
 Relais::Relais(gpio_num_t sda_pin, gpio_num_t scl_pin, ICAN& ic) 
     : message::Receiver<ICAN::RELAIS_MSG_t>(m_queue), 
       message::Receiver<rollershutter_action_t>(m_queue), 
-      m_can(ic), m_state(0), m_states({rollershutter_state_t::STOP}),
-      m_actions({0})
+      m_can(ic), m_state(0), m_rollershutter_mode(ICAN::ROLLERSHUTTER_MODE_t::SOFTWARE),
+      m_states({rollershutter_state_t::STOP}), m_actions({0})
 {
     m_can.add_dispatcher(this);
     memset(&m_device, 0, sizeof(i2c_dev_t));
@@ -202,8 +212,15 @@ Relais::Relais(gpio_num_t sda_pin, gpio_num_t scl_pin, ICAN& ic)
 
 void Relais::init()
 {
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READONLY, &nvs_handle);
+    uint8_t rsmode = static_cast<uint8_t>(ICAN::ROLLERSHUTTER_MODE_t::SOFTWARE);
+    nvs_get_u8(nvs_handle, "rollershutter_mode", &rsmode);
+    nvs_close(nvs_handle);
+    m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(rsmode);
+    
     ESP_ERROR_CHECK(i2cdev_init());
-
+    
     pca9534_port_set_mode(&m_device, relais1_address,0);
     pca9534_port_set_mode(&m_device, relais2_address,0);
     pca9534_port_write(&m_device, relais1_address, 0);
@@ -310,6 +327,29 @@ void Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             }
             break;
         }
+        case ICAN::MSG_ID_t::ROLLERSHUTTER_MODE:
+        {
+            if (request)
+            {
+                uint8_t mode[1] {0};
+                mode[0] = static_cast<uint8_t>(m_rollershutter_mode);
+                m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, mode, 1, false);
+            }
+            else if (data_len == 1)
+            {
+                nvs_handle_t nvs_handle;
+                nvs_open("storage", NVS_READWRITE, &nvs_handle);
+
+                nvs_set_u8(nvs_handle, "rollershutter_mode", data[0]);
+                m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(data[0]);
+                nvs_commit(nvs_handle);
+                nvs_close(nvs_handle);
+                m_can.deinit();
+                m_can.init();
+            }
+            break;
+        }
+        
         default:
             break;
     }

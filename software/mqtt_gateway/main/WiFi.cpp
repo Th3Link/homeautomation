@@ -6,7 +6,7 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
-#include "wifi.h"
+#include "WiFi.hpp"
 #include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -39,8 +39,9 @@ static EventGroupHandle_t s_wifi_event_group;
 
 static int s_retry_num = 0;
 
-static const char *TAG = "wifi";
 
+const char* WiFi::TAG = "WiFi";
+static const char *TAG = "WiFi";
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
@@ -71,51 +72,94 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_softap(const char* ssid, const char* password, const unsigned char channel, const char* hostname)
-{
-    esp_netif_t* netif = esp_netif_create_default_wifi_ap();
-    esp_netif_set_hostname(netif, hostname);
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
+WiFi::WiFi() : m_mode(Mode::AccessPoint), m_ssid({0}), m_password({0}), m_hostname({0})
+{   
+    char wifi_mode[20];
+    size_t ssid_len = sizeof(m_ssid);
+    size_t pw_len = sizeof(m_password);
+    size_t wifi_mode_len = sizeof(m_mode);
+    size_t hostname_len = sizeof(m_hostname);
     
-    wifi_config_t wifi_config {};
-    memset(&wifi_config, 0, sizeof(wifi_config));
-    strcpy(reinterpret_cast<char*>(&wifi_config.ap.ssid[0]), ssid);
-    wifi_config.ap.channel = channel;
-    strcpy(reinterpret_cast<char*>(&wifi_config.ap.password[0]), password);
-    wifi_config.ap.max_connection = 2;
-    wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
-    wifi_config.ap.pmf_cfg.required = false;
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     
-    if (strlen(password) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
+    {
+        wifi_mode_len = sizeof(wifi_mode);
+        nvs_set_str(nvs_handle, "wifi_mode", "ap");
+        nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
     }
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             ssid, password, channel);
+    
+    if (strcmp(wifi_mode, "client"))
+    {
+        m_mode = Mode::Client;
+    }
+    
+    if (nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_ssid", "CAN2MQTTSETUP");
+        nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len);
+        m_mode = Mode::AccessPoint;
+    }
+    
+    if (nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_pw", "Can2MqttPass");
+        nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len);
+        m_mode = Mode::AccessPoint;
+    }
+    
+    if (strlen(m_password) < 8)
+    {
+        ESP_LOGI(WiFi::TAG, "WIFI Password too short");
+        strcpy(m_ssid, "Can2MqttPass");
+        strcpy(m_password, "CAN2MQTTSETUP");
+        m_mode = Mode::AccessPoint;
+    }
+    
+    ESP_LOGI(WiFi::TAG, "WIFI Setup from NVS:");
+    ESP_LOGI(WiFi::TAG, "\t SSID: %s",m_ssid);
+    ESP_LOGI(WiFi::TAG, "\t PW: %s",m_password);
+    ESP_LOGI(WiFi::TAG, "\t Mode: %s",wifi_mode);
+    
+    if (nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
+        nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
+    }
+    
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
 }
 
-void wifi_init()
+void WiFi::init()
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    // try to connect to configured access point but use own access point if this fails
+    
+    if (m_mode == Mode::Client)
+    {
+        printf("wifi_init\n");
+        if (!init_client())
+        {
+            strcat(m_ssid, "_ap");
+            init_softap(10);
+            m_mode = Mode::AccessPoint;
+        }
+    }
+    else
+    {
+        init_softap(10);
+    }
 }
 
-bool wifi_init_client(const char* ssid, const char* password, const char* hostname)
+bool WiFi::init_client()
 {
     s_wifi_event_group = xEventGroupCreate();
     esp_netif_t* netif = esp_netif_create_default_wifi_sta();
-    esp_netif_set_hostname(netif, hostname);
+    esp_netif_set_hostname(netif, m_hostname);
     
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -135,8 +179,8 @@ bool wifi_init_client(const char* ssid, const char* password, const char* hostna
 
     wifi_config_t wifi_config {};
     memset(&wifi_config, 0, sizeof(wifi_config));
-    strcpy(reinterpret_cast<char*>(&wifi_config.sta.ssid[0]), ssid);
-    strcpy(reinterpret_cast<char*>(&wifi_config.sta.password[0]), password);
+    strcpy(reinterpret_cast<char*>(&wifi_config.sta.ssid[0]), m_ssid);
+    strcpy(reinterpret_cast<char*>(&wifi_config.sta.password[0]), m_password);
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
     //wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK;
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
@@ -159,11 +203,11 @@ bool wifi_init_client(const char* ssid, const char* password, const char* hostna
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 ssid, password);
+                 m_ssid, m_password);
         return true;
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 ssid, password);
+                 m_ssid, m_password);
         esp_wifi_stop(); 
         return false;
     } else {
@@ -171,4 +215,68 @@ bool wifi_init_client(const char* ssid, const char* password, const char* hostna
         esp_wifi_stop();
         return false;
     }
+}
+
+void WiFi::init_softap(const unsigned char channel)
+{
+    esp_netif_t* netif = esp_netif_create_default_wifi_ap();
+    esp_netif_set_hostname(netif, m_hostname);
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &wifi_event_handler,
+                                                        NULL,
+                                                        NULL));
+    
+    wifi_config_t wifi_config {};
+    memset(&wifi_config, 0, sizeof(wifi_config));
+    strcpy(reinterpret_cast<char*>(&wifi_config.ap.ssid[0]), m_ssid);
+    wifi_config.ap.channel = channel;
+    strcpy(reinterpret_cast<char*>(&wifi_config.ap.password[0]), m_password);
+    wifi_config.ap.max_connection = 2;
+    wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+    wifi_config.ap.pmf_cfg.required = false;
+    
+    if (strlen(m_password) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
+             m_ssid, m_password, channel);
+}
+
+WiFi::Mode WiFi::mode()
+{
+    return m_mode;
+}
+
+const char* WiFi::ssid()
+{
+    return &m_ssid[0];
+}
+
+const char* WiFi::password()
+{
+    return &m_password[0];
+}
+
+const char* WiFi::hostname()
+{
+    return &m_hostname[0];
+}
+
+const char* WiFi::mode_str()
+{
+    if (m_mode == Mode::Client)
+    {
+        return "client";
+    }
+    
+    return "ap";
 }
