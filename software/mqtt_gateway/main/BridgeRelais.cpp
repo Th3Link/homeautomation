@@ -17,7 +17,7 @@ void BridgeRelais::init()
 
 }
 
-void BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     //when receiving
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::RELAIS_STATE))
@@ -27,6 +27,7 @@ void BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
             std::to_string(data[0]);
         std::string relaisStateData = std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
+        return true;
     }
     else if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::ROLLERSHUTTER_STATE))
     {
@@ -35,7 +36,9 @@ void BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
             std::to_string(data[0]);
         std::string relaisStateData = std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
+        return true;
     }
+    return false;
 }
 
 void BridgeRelais::dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len)

@@ -39,13 +39,14 @@ static bool header_complete(const char* input, const char* compare, size_t len)
 }
 
 Web::Web(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging& l, DeviceList& d) : 
-    m_command(u,cu,im,ic,w,l), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l), m_deviceList(d)
+    m_command(u,cu,im,ic,w,l,m_web_credentials), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l), m_deviceList(d)
 {
-    
+
 }
 
 void Web::init()
 {
+    m_web_credentials.init();
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 7;
@@ -118,6 +119,8 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
    
     cJSON_AddStringToObject(root, "hostname", m_wifi.hostname());
+    cJSON_AddStringToObject(root, "username", username());
+    cJSON_AddStringToObject(root, "password", password());
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
     cJSON_AddStringToObject(wifi, "mode", m_wifi.mode_str());
     cJSON_AddStringToObject(wifi, "ssid", m_wifi.ssid());
@@ -147,11 +150,12 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(wifi, "ipv6", "IP");
     cJSON_AddStringToObject(wifi, "gateway", "GATEWAY");
     cJSON_AddStringToObject(wifi, "dns", "DNS");
-    cJSON_AddStringToObject(mqtt, "state", "connected");
-    cJSON_AddNumberToObject(mqtt, "received", 130);
-    cJSON_AddNumberToObject(mqtt, "sent", 100);
-    cJSON_AddNumberToObject(canbus, "received", 10);
-    cJSON_AddNumberToObject(canbus, "sent", 100);
+    cJSON_AddStringToObject(mqtt, "state", (m_mqtt.connected() ? "connected" : "not connected"));
+    cJSON_AddNumberToObject(mqtt, "received", m_mqtt.received());
+    cJSON_AddNumberToObject(mqtt, "sent", m_mqtt.transmitted());
+    cJSON_AddNumberToObject(canbus, "received", m_can.received());
+    cJSON_AddNumberToObject(canbus, "sent", m_can.transmitted());
+    cJSON_AddBoolToObject(canbus, "mqtt_logging", m_logging.mqtt_logging());
 
     const char *const header_arr[] = {"Unique ID", "Device ID", "Type", "Type Name", "Custom String","Last Seen (Minutes ago)", "State", "Error"};
     cJSON_AddArrayToObject(root, "warnings");
@@ -168,6 +172,11 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
 
 esp_err_t Web::control_post_handler(httpd_req_t *req)
 {
+    if (http_handler::httpAuthenticateRequest(req, username(), password()) == false)
+    {
+        return http_handler::httpRequestAuthorization(req);
+    }
+    
     int total_len = req->content_len;
     int cur_len = 0;
     char *buf = scratch;
@@ -254,7 +263,7 @@ esp_err_t Web::update_data_post_handler(httpd_req_t *req)
         
         bool data_success = false;
         /* Write buffer content to file on storage */
-        m_command.current_update()->data(buf, received);
+        data_success = m_command.current_update()->data(buf, received);
         if (received && !data_success) {
             
             m_command.current_update()->abort();
@@ -271,4 +280,14 @@ esp_err_t Web::update_data_post_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, "File uploaded successfully");
     
     return ESP_OK;
+}
+
+const char* Web::username()
+{
+    return m_web_credentials.username();
+}
+
+const char* Web::password()
+{
+    return m_web_credentials.password();
 }

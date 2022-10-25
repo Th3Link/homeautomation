@@ -70,7 +70,7 @@ void Light::set(uint8_t num, uint8_t duty)
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, static_cast<ledc_channel_t>(num)));
 }
 
-void Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     union {
         ICAN::LAMP_MSG_t lamps;
@@ -97,9 +97,10 @@ void Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, 
                     set(i, lamps.value);
                 }
             }
-            break;
+            return true;
         }
         default:
             break;
     }
+    return false;
 }

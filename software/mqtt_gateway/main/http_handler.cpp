@@ -1,7 +1,8 @@
 #include "http_handler.hpp"
 #include "mbedtls/base64.h"
+#include "Web.hpp"
 
-esp_err_t httpRequestAuthorization(httpd_req_t *req)
+esp_err_t http_handler::httpRequestAuthorization(httpd_req_t *req)
 {
     httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"my_realm1\"");
     httpd_resp_set_status(req, "401 Unauthorized");
@@ -11,7 +12,7 @@ esp_err_t httpRequestAuthorization(httpd_req_t *req)
 }
 
 
-bool httpAuthenticateRequest(httpd_req_t *req, const char *server_username, const char *server_password)
+bool http_handler::httpAuthenticateRequest(httpd_req_t *req, const char *server_username, const char *server_password)
 {
     char  authorization_header[64] = {0};
     char decoded_authorization[32] = {0};
@@ -92,11 +93,12 @@ bool httpAuthenticateRequest(httpd_req_t *req, const char *server_username, cons
     return false;
 }
 
-esp_err_t index_html_get_handler(httpd_req_t *req)
+esp_err_t http_handler::index_html_get_handler(httpd_req_t *req)
 {
-    if (httpAuthenticateRequest(req, "username", "password") == false)
+    Web* web = reinterpret_cast<Web*>(req->user_ctx);
+    if (http_handler::httpAuthenticateRequest(req, web->username(), web->password()) == false)
     {
-        return httpRequestAuthorization(req);
+        return http_handler::httpRequestAuthorization(req);
     }
     extern const uint8_t _index_html_start[] asm("_binary_index_html_start");
     extern const uint8_t _index_html_end[]   asm("_binary_index_html_end");
@@ -106,7 +108,7 @@ esp_err_t index_html_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t favicon_png_get_handler(httpd_req_t *req)
+esp_err_t http_handler::favicon_png_get_handler(httpd_req_t *req)
 {
     extern const uint8_t _favicon_png_start[] asm("_binary_favicon_png_start");
     extern const uint8_t _favicon_png_end[]   asm("_binary_favicon_png_end");
@@ -116,7 +118,7 @@ esp_err_t favicon_png_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t minimal_js_get_handler(httpd_req_t *req)
+esp_err_t http_handler::minimal_js_get_handler(httpd_req_t *req)
 {
     extern const uint8_t _minimal_js_start[] asm("_binary_minimal_js_start");
     extern const uint8_t _minimal_js_end[]   asm("_binary_minimal_js_end");
@@ -126,7 +128,7 @@ esp_err_t minimal_js_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t style_css_get_handler(httpd_req_t *req)
+esp_err_t http_handler::style_css_get_handler(httpd_req_t *req)
 {
     extern const uint8_t _style_css_start[] asm("_binary_style_css_start");
     extern const uint8_t _style_css_end[]   asm("_binary_style_css_end");

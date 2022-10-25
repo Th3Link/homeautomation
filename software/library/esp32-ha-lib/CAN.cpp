@@ -16,7 +16,9 @@ static void can_receive_task(void *this_ptr)
     auto can = reinterpret_cast<CAN*>(this_ptr);
     //Listen
     twai_message_t rx_msg;
-    ESP_LOGI(CAN::TAG, "Start CAN receive\n");
+    ESP_LOGI(CAN::TAG, "Start CAN receive");
+    
+    twai_reconfigure_alerts(TWAI_ALERT_RX_QUEUE_FULL | TWAI_ALERT_ARB_LOST | TWAI_ALERT_BUS_ERROR, NULL);
     
     // Send start message
     uint8_t data[1] {static_cast<uint8_t>(ICAN::AVAILABLE_t::APPLICATION)};
@@ -24,17 +26,21 @@ static void can_receive_task(void *this_ptr)
     
     while (!can->shutdown_request())
     {
-        if (twai_receive(&rx_msg, portMAX_DELAY) == ESP_OK)
+        if (twai_receive(&rx_msg, pdMS_TO_TICKS(100)) == ESP_OK)
         {
-            if (!can->enable_filter() || ((rx_msg.identifier & 0xFF00) == (can->get_id() << 8)) ||
-                ((rx_msg.identifier & 0xFF00) == 0x00))
+            // no need to compare types, they are filtered using the acceptance filter
+            if (!can->enable_filter()
+                || ICAN::ID_COMPARE(rx_msg.identifier,can->get_id())
+                || ((rx_msg.identifier & 0xFF00) == 0x00))
             {
-                for (auto& dispatcher : can->dispatcher())
-                {
-                    dispatcher->dispatch(rx_msg.identifier, rx_msg.data, 
-                        rx_msg.data_length_code, rx_msg.rtr);
-                }
+                can->dispatch(rx_msg.identifier, rx_msg.data, 
+                    rx_msg.data_length_code, rx_msg.rtr);
             }
+        }
+        uint32_t alerts;
+        twai_read_alerts(&alerts, 0);
+        if (alerts) {
+            ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
         }
     }
     can->shutdown();
@@ -43,7 +49,8 @@ static void can_receive_task(void *this_ptr)
 
 CAN::CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter) : 
     m_enable_filter(enable_filter), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
-    m_type(0xFF), m_rx_pin(rx_pin), m_tx_pin(tx_pin)
+    m_type(0xFF), m_rx_pin(rx_pin), m_tx_pin(tx_pin), m_shutdown_request(false),
+    m_received(0), m_transmitted(0)
 {
     m_shutdown_sem  = xSemaphoreCreateBinary();
 }
@@ -76,22 +83,29 @@ void CAN::init()
         t_config = &t_config_100;
     }
     
-    g_config.rx_queue_len = 200;
-    g_config.tx_queue_len = 200;
     g_config.alerts_enabled = TWAI_ALERT_BELOW_ERR_WARN | 
       TWAI_ALERT_RECOVERY_IN_PROGRESS | 
       TWAI_ALERT_RX_QUEUE_FULL | 
       TWAI_ALERT_RX_FIFO_OVERRUN |
       TWAI_ALERT_BUS_ERROR | 
       TWAI_ALERT_ARB_LOST;
-
-    twai_filter_config_t f_config = {
-        .acceptance_code = ((m_type << 16) | m_can_ng) << 3, 
-        .acceptance_mask = ((0xFF00FFFF & ~m_can_ng) << 3) | 0xFF, 
-        .single_filter = true};
     
-    ESP_ERROR_CHECK(twai_driver_install(&g_config, t_config, &f_config));
-    
+    if (m_enable_filter)
+    {
+        constexpr uint32_t DUAL_MASK = ((ID_TYPE_MASK + ID_NG_MASK) >> 13);
+        twai_filter_config_t f_config = {
+            .acceptance_code = ((ID_NG_MASK >> 13) | 
+                (((ID_TYPE_MASK + TYPE_TO_ID(static_cast<ICAN::DEVICE_t>(get_type()))) >> 13) << 16)), 
+            .acceptance_mask = DUAL_MASK | (DUAL_MASK << 16),
+            .single_filter = false};
+        
+        ESP_ERROR_CHECK(twai_driver_install(&g_config, t_config, &f_config));
+    }
+    else
+    {
+        twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+        ESP_ERROR_CHECK(twai_driver_install(&g_config, t_config, &f_config));
+    }
     twai_start();
     xTaskCreatePinnedToCore(can_receive_task, "CAN_rx", 4096, this, RX_TASK_PRIO, NULL, tskNO_AFFINITY);
 }
@@ -123,19 +137,28 @@ void CAN::add_dispatcher(ICANDispatcher* dispatcher)
     m_dispatcher.push_back(dispatcher);
 }
 
-std::vector<ICANDispatcher*> CAN::dispatcher()
+bool CAN::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
-    return m_dispatcher;
+    inc_received();
+    for (auto* dispatcher : m_dispatcher)
+    {
+        if (dispatcher->dispatch(identifier, data, data_len, request))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void CAN::send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request)
 {
-    send(m_can_ng | m_id << 8 | m_type << 16 | static_cast<uint32_t>(messageId),
+    send(ICAN::ID_NG_MASK | m_id << 8 | m_type << 16 | static_cast<uint32_t>(messageId),
         data, data_len, request);
 }
 
 void CAN::send(uint32_t id, uint8_t* data, unsigned int data_len, bool request)
 {
+    inc_transmitted();
     twai_message_t tx_msg;
     tx_msg.rtr = (request ? 1 : 0);
     tx_msg.ss = 0;
@@ -147,7 +170,11 @@ void CAN::send(uint32_t id, uint8_t* data, unsigned int data_len, bool request)
     {
         tx_msg.data[i] = data[i];
     }
-    twai_transmit(&tx_msg, portMAX_DELAY);
+    
+    if (twai_transmit(&tx_msg, portMAX_DELAY) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Transmit error");
+    }
 }
 
 void CAN::read_nvs()
@@ -201,4 +228,24 @@ void CAN::bitrate(ICAN::BITRATE_t b)
 ICAN::BITRATE_t CAN::bitrate()
 {
     return m_bitrate;
+}
+
+void CAN::inc_received()
+{
+    m_received++;
+}
+
+void CAN::inc_transmitted()
+{
+    m_transmitted++;
+}
+
+uint64_t CAN::received()
+{
+    return m_received;
+}
+
+uint64_t CAN::transmitted()
+{
+    return m_transmitted;
 }

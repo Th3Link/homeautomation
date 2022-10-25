@@ -1,5 +1,9 @@
 #include "CANUpdate.hpp"
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <esp_log.h>
+
 #include <algorithm>
 #include <string>
 
@@ -24,6 +28,7 @@ void CANUpdate::by_uid_start(char* uid, uint32_t filesize)
 
 void CANUpdate::start(uint32_t filesize)
 {
+    m_filesize = filesize;
     //switch to update mode
     uint8_t data[8] {0};
     data[0] = static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE);
@@ -49,7 +54,7 @@ void CANUpdate::start(uint32_t filesize)
 
 void CANUpdate::selected_start(char** uids, uint8_t device_count, uint32_t filesize)
 {
-    
+
 }
 
 void CANUpdate::abort()
@@ -57,17 +62,24 @@ void CANUpdate::abort()
     complete();
 }
 
-bool CANUpdate::data(char* data, uint32_t data_len)
+bool CANUpdate::data(char* p_data, uint32_t data_len)
 {
     constexpr uint32_t can_max = 8;
     uint32_t remaining = data_len;
-    while (remaining > 0)
+    size_t addr = 0;
+    while ((remaining > 0) && (m_filesize > 0))
     {
-        uint32_t to_send = std::min(remaining, can_max);
+        // slow down transmission. slaves are too slow to compete
+        if ((addr % 96) == 0)
+        {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);
         m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
-            reinterpret_cast<uint8_t*>(data), to_send, false);
+            reinterpret_cast<uint8_t*>(&p_data[addr]), to_send, false);
         remaining -= to_send;
-        data += to_send;
+        m_filesize -= to_send;
+        addr += to_send;
     }
     return true;
 }

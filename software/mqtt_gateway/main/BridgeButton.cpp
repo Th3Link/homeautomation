@@ -14,7 +14,7 @@ void BridgeButton::init()
 
 }
 
-void BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::BUTTON_EVENT))
     {
@@ -36,7 +36,9 @@ void BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
         std::string buttonTopic = "canbus/button/" + toHexString(u.s.button_id);
         std::string buttonData = std::to_string(u.s.button_event) + "/" + std::to_string(u.s.count);
         m_mqtt.publish(buttonTopic.c_str(), buttonData.c_str());
+        return true;
     }
+    return false;
 }
 
 void BridgeButton::dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len)

@@ -280,7 +280,7 @@ bool Relais::state(uint8_t num)
     return (m_state & ~(1<<num));
 }
 
-void Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     union {
         ICAN::RELAIS_MSG_t relais;
@@ -311,7 +311,7 @@ void Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                     message::Event::CAN_RELAIS_SET, std::move(relais));
             }
 
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::ROLLERSHUTTER:
         {
@@ -325,7 +325,7 @@ void Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 message::Message<ICAN::RELAIS_MSG_t>::send(m_queue, *this, 
                     message::Event::CAN_ROLLERSHUTTER_SET, std::move(relais));
             }
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::ROLLERSHUTTER_MODE:
         {
@@ -347,10 +347,11 @@ void Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 m_can.deinit();
                 m_can.init();
             }
-            break;
+            return true;
         }
         
         default:
             break;
     }
+    return false;
 }

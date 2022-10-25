@@ -74,66 +74,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
 WiFi::WiFi() : m_mode(Mode::AccessPoint), m_ssid({0}), m_password({0}), m_hostname({0})
 {   
-    char wifi_mode[20];
-    size_t ssid_len = sizeof(m_ssid);
-    size_t pw_len = sizeof(m_password);
-    size_t wifi_mode_len = sizeof(m_mode);
-    size_t hostname_len = sizeof(m_hostname);
-    
-    nvs_handle_t nvs_handle;
-    nvs_open("storage", NVS_READWRITE, &nvs_handle);
-    
-    if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
-    {
-        wifi_mode_len = sizeof(wifi_mode);
-        nvs_set_str(nvs_handle, "wifi_mode", "ap");
-        nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
-    }
-    
-    if (strcmp(wifi_mode, "client"))
-    {
-        m_mode = Mode::Client;
-    }
-    
-    if (nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len) != ESP_OK)
-    {
-        nvs_set_str(nvs_handle, "wifi_ssid", "CAN2MQTTSETUP");
-        nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len);
-        m_mode = Mode::AccessPoint;
-    }
-    
-    if (nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len) != ESP_OK)
-    {
-        nvs_set_str(nvs_handle, "wifi_pw", "Can2MqttPass");
-        nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len);
-        m_mode = Mode::AccessPoint;
-    }
-    
-    if (strlen(m_password) < 8)
-    {
-        ESP_LOGI(WiFi::TAG, "WIFI Password too short");
-        strcpy(m_ssid, "Can2MqttPass");
-        strcpy(m_password, "CAN2MQTTSETUP");
-        m_mode = Mode::AccessPoint;
-    }
-    
-    ESP_LOGI(WiFi::TAG, "WIFI Setup from NVS:");
-    ESP_LOGI(WiFi::TAG, "\t SSID: %s",m_ssid);
-    ESP_LOGI(WiFi::TAG, "\t PW: %s",m_password);
-    ESP_LOGI(WiFi::TAG, "\t Mode: %s",wifi_mode);
-    
-    if (nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len) != ESP_OK)
-    {
-        nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
-        nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
-    }
-    
-    nvs_commit(nvs_handle);
-    nvs_close(nvs_handle);
+
 }
 
 void WiFi::init()
 {
+    read_nvs();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
@@ -251,6 +197,71 @@ void WiFi::init_softap(const unsigned char channel)
              m_ssid, m_password, channel);
 }
 
+void WiFi::read_nvs()
+{
+    char wifi_mode[20];
+    size_t ssid_len = sizeof(m_ssid);
+    size_t pw_len = sizeof(m_password);
+    size_t wifi_mode_len = sizeof(m_mode);
+    size_t hostname_len = sizeof(m_hostname);
+    
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    
+    if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
+    {
+        wifi_mode_len = sizeof(wifi_mode);
+        nvs_set_str(nvs_handle, "wifi_mode", "ap");
+        nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
+    }
+    
+    if (strcmp(wifi_mode, "client"))
+    {
+        m_mode = Mode::Client;
+    }
+    else
+    {
+        m_mode = Mode::AccessPoint;
+    }
+    
+    if (nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_ssid", "CAN2MQTTSETUP");
+        nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len);
+        m_mode = Mode::AccessPoint;
+    }
+    
+    if (nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len) != ESP_OK)
+    {
+        nvs_set_str(nvs_handle, "wifi_pw", "Can2MqttPass");
+        nvs_get_str(nvs_handle, "wifi_pw", &m_password[0], &pw_len);
+        m_mode = Mode::AccessPoint;
+    }
+
+    ESP_LOGI(WiFi::TAG, "WIFI Setup from NVS:");
+    ESP_LOGI(WiFi::TAG, "\t SSID: %s",m_ssid);
+    ESP_LOGI(WiFi::TAG, "\t PW: %s",m_password);
+    ESP_LOGI(WiFi::TAG, "\t Mode: %s",wifi_mode);
+    
+    if (strlen(m_password) < 8)
+    {
+        ESP_LOGI(WiFi::TAG, "WIFI Password too short");
+        strcpy(m_ssid, "CAN2MQTTSETUP");
+        strcpy(m_password, "Can2MqttPass");
+        m_mode = Mode::AccessPoint;
+    }
+    
+    esp_err_t hostname_err = nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
+    if (hostname_err != ESP_OK || (strcmp(&m_hostname[0], "") == 0))
+    {
+        nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
+        nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
+    }
+    
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+}
+
 WiFi::Mode WiFi::mode()
 {
     return m_mode;
@@ -279,4 +290,44 @@ const char* WiFi::mode_str()
     }
     
     return "ap";
+}
+
+void WiFi::mode_str(const char* m)
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_str(nvs_handle, "wifi_mode", m);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    read_nvs();
+}
+
+void WiFi::ssid(const char* s)
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_str(nvs_handle, "wifi_ssid", s);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    read_nvs();
+}
+
+void WiFi::password(const char* p)
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_str(nvs_handle, "wifi_pw", p);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    read_nvs();
+}
+
+void WiFi::hostname(const char* h)
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_str(nvs_handle, "hostname", h);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    read_nvs();
 }

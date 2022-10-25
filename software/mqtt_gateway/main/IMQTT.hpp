@@ -24,4 +24,7 @@ public:
     virtual const char* username() = 0;
     virtual const char* password() = 0;
     virtual bool enabled() = 0;
+    virtual bool connected() = 0;
+    virtual uint64_t received() = 0;
+    virtual uint64_t transmitted() = 0;
 };

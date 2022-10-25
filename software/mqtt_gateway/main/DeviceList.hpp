@@ -9,7 +9,7 @@ class DeviceList : public ICANDispatcher
 {
 public:
     DeviceList(ICAN&);
-    void dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
+    bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
     void refresh();
     void init();
     void output(cJSON* object);
@@ -21,6 +21,7 @@ public:
         std::array<char, 8> version;
         uint32_t last_seen;
         uint32_t uptime;
+        uint8_t baudrate;
         std::array<uint8_t, 8> uid0;
         std::array<uint8_t, 8> uid1;
         uint8_t rollershutter_mode;

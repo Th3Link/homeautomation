@@ -1,5 +1,7 @@
 // std
 #include <sstream>
+//for: setfill
+#include <iomanip>
 
 // lib
 
@@ -33,6 +35,13 @@ std::string toHexString(unsigned int n)
 {
     std::stringstream ss;
     ss << std::hex << n;
+    return ss.str();
+}
+
+std::string toHexStringPad(unsigned int n)
+{
+    std::stringstream ss;
+    ss << std::setw(2) << std::setfill('0') << std::hex << n;
     return ss.str();
 }
 

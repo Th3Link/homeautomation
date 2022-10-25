@@ -17,9 +17,10 @@ void BridgeLamps::init()
 
 }
 
-void BridgeLamps::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool BridgeLamps::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     //noting to do here; there is no feed back
+    return false;
 }
 
 void BridgeLamps::dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len)

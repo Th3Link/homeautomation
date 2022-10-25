@@ -24,6 +24,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             
             for (auto& dispatcher : mqtt->dispatcher())
             {
+                mqtt->connected(true);
                 dispatcher->connected();
             }
             
@@ -46,9 +47,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         case MQTT_EVENT_DATA:
         {
             ESP_LOGI(MQTT::TAG, "MQTT_EVENT_DATA");
-            printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-            printf("DATA=%.*s\r\n", event->data_len, event->data);
-            printf("ID=%d\r\n", event->msg_id);
+            ESP_LOGI(MQTT::TAG, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
+            ESP_LOGI(MQTT::TAG, "DATA=%.*s\r\n", event->data_len, event->data);
+            ESP_LOGI(MQTT::TAG, "ID=%d\r\n", event->msg_id);
+            
+            mqtt->inc_received();
             
             for (auto dispatcher : mqtt->dispatcher())
             {
@@ -66,7 +69,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
-MQTT::MQTT() : m_uri({0}), m_username({0}), m_password({0})
+MQTT::MQTT() : m_uri({0}), m_username({0}), m_password({0}), m_enabled(false),
+    m_received(0), m_transmitted(0), m_connected(false)
+{
+    
+}
+
+void MQTT::init()
 {
     size_t mqtt_uri_len = sizeof(m_uri);
     size_t mqtt_username_len = sizeof(m_username);
@@ -98,10 +107,7 @@ MQTT::MQTT() : m_uri({0}), m_username({0}), m_password({0})
     }
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
-}
 
-void MQTT::init()
-{
     esp_mqtt_client_config_t mqtt_cfg;
     memset(&mqtt_cfg, 0, sizeof(mqtt_cfg));
     mqtt_cfg.broker.address.uri = m_uri;
@@ -128,9 +134,13 @@ void MQTT::subscribe(const char* topic)
 
 void MQTT::publish(const char* topic, const char* data)
 {
-    esp_mqtt_client_publish(m_client, 
-        topic, 
-        data, 0, 0, 0);
+    if (connected())
+    {
+        inc_transmitted();
+        esp_mqtt_client_publish(m_client, 
+            topic, 
+            data, 0, 0, 0);
+    }
 }
 
 void MQTT::uri(const char* uri, size_t uri_len)
@@ -206,4 +216,34 @@ const char* MQTT::password()
 bool MQTT::enabled()
 {
     return m_enabled;
+}
+
+void MQTT::inc_received()
+{
+    m_received++;
+}
+
+void MQTT::inc_transmitted()
+{
+    m_transmitted++;
+}
+
+void MQTT::connected(bool c)
+{
+    m_connected = c;
+}
+
+bool MQTT::connected()
+{
+    return m_connected;
+}
+
+uint64_t MQTT::received()
+{
+    return m_received;
+}
+
+uint64_t MQTT::transmitted()
+{
+    return m_transmitted;
 }

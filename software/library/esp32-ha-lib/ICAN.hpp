@@ -5,7 +5,7 @@
 class ICANDispatcher
 {
     public:
-        virtual void dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) = 0;
+        virtual bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) = 0;
 };
 
 
@@ -111,7 +111,6 @@ public:
         uint32_t reserved : 32;
     };
     #pragma pack(pop)
-    
     virtual void init() = 0;
     virtual void deinit() = 0;
     virtual void add_dispatcher(ICANDispatcher*) = 0;
@@ -123,7 +122,9 @@ public:
     virtual uint8_t get_type() = 0;
     virtual void bitrate(ICAN::BITRATE_t) = 0;
     virtual ICAN::BITRATE_t bitrate() = 0;
-
+    virtual uint64_t received() = 0;
+    virtual uint64_t transmitted() = 0;
+    
     static inline const char* bitrate_string(ICAN::BITRATE_t b)
     {
         switch (b)
@@ -175,6 +176,11 @@ public:
     static constexpr uint32_t GET_TYPE(uint32_t id)
     {
         return (id & ID_TYPE_MASK) >> 16;
+    }
+
+    static constexpr uint32_t TYPE_TO_ID(DEVICE_t type)
+    {
+        return ((static_cast<uint8_t>(type) << 16) & ID_TYPE_MASK);
     }
 
     static constexpr uint32_t GET_ID(uint32_t id)

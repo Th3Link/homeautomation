@@ -7,46 +7,9 @@
 #include <nvs_flash.h>
 
 const char* Command::TAG = "Command";
-/*
-static void logging(cJSON* root, bool enable, Logging::OUTPUT_t t)
-{
-    char* unit = cJSON_GetStringValue(cJSON_GetObjectItem(root, "unit"));
-    if (strcmp (unit, "can_all") == 0)
-    {
-        
-    }
-    else if (strcmp (unit, "can_by_type") == 0)
-    {
-        char* cid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "commandId"));
-        uint8_t type = std::stoul(std::string(cid), nullptr, 16) & 0xFF;
-        
-    }
-    else if (strcmp (unit, "can_selected") == 0)
-    {
-        cJSON* commandId = cJSON_GetObjectItem(root, "commandId");
-        if (cJSON_IsArray(commandId))
-        {
-            int size = cJSON_GetArraySize(commandId);
-            for (unsigned int i = 0; i < size; i++)
-            {
-                char* cid = cJSON_GetStringValue(cJSON_GetArrayItem(commandId, i));
-                uint8_t uid = std::stoul(std::string(cid), nullptr, 16);
-                
-            }
-            
-        }
-    }
-    else if (strcmp (unit, "can_by_uid") == 0)
-    {
-        char* cid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "commandId"));
-        uint8_t uid = std::stoul(std::string(cid), nullptr, 16);
-        
-    }
-}
-*/
 
-Command::Command(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging& l) : m_current_update(nullptr), 
-    m_selfupdate(u), m_canupdate(cu), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l)
+Command::Command(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging& l, WebCredentials& web) : m_current_update(nullptr), 
+    m_selfupdate(u), m_canupdate(cu), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l), m_web_credentials(web)
 {
     
 }
@@ -57,7 +20,6 @@ void Command::command(char* cmd, cJSON* root)
     relais_rollenshutter(cmd, root);
     lamps(cmd, root);
     mqtt_logging(cmd, root);
-    web_logging(cmd, root);
     save_device(cmd, root);
     refresh_device(cmd, root);
     ping_device(cmd, root);
@@ -88,7 +50,7 @@ void Command::send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* d
             for (unsigned int i = 0; i < size; i++)
             {
                 char* cid = cJSON_GetStringValue(cJSON_GetArrayItem(commandId, i));
-                uint8_t uid = std::stoul(std::string(cid), nullptr, 16);
+                uint32_t uid = std::stoul(std::string(cid), nullptr, 16);
                 m_can.send(uid + static_cast<uint32_t>(messageId), data, data_len, request);
             }
             
@@ -97,7 +59,7 @@ void Command::send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* d
     else if (strcmp (unit, "can_by_uid") == 0)
     {
         char* cid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "commandId"));
-        uint8_t uid = std::stoul(std::string(cid), nullptr, 16);
+        uint32_t uid = std::stoul(std::string(cid), nullptr, 16);
         m_can.send(uid + static_cast<uint32_t>(messageId), data, data_len, request);
     }
 }
@@ -111,6 +73,24 @@ void Command::save_config(char* cmd, cJSON* root)
     
     nvs_handle_t nvs_handle;
     ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &nvs_handle));
+
+    cJSON* hostname = cJSON_GetObjectItem(root, "hostname");
+    if (cJSON_IsString(hostname))
+    {
+        m_wifi.hostname(cJSON_GetStringValue(hostname));
+    }
+    
+    cJSON* username = cJSON_GetObjectItem(root, "username");
+    if (cJSON_IsString(username))
+    {
+        m_web_credentials.username(cJSON_GetStringValue(username));
+    }
+    
+    cJSON* password = cJSON_GetObjectItem(root, "password");
+    if (cJSON_IsString(password))
+    {
+        m_web_credentials.password(cJSON_GetStringValue(password));
+    }
     
     cJSON* wifi = cJSON_GetObjectItem(root, "wifi");
     if (cJSON_IsObject(wifi))
@@ -121,23 +101,17 @@ void Command::save_config(char* cmd, cJSON* root)
         
         if (cJSON_IsString(mode))
         {
-            char* mode_string = cJSON_GetStringValue(mode);
-            ESP_LOGI(TAG, "Wifi Mode : %s", mode_string);
-            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_mode", mode_string));
+            m_wifi.mode_str(cJSON_GetStringValue(mode));
         }
         
         if (cJSON_IsString(ssid))
         {
-            char* ssid_string = cJSON_GetStringValue(ssid);
-            ESP_LOGI(TAG, "WiFi SSID : %s", ssid_string);
-            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_ssid", ssid_string));
+            m_wifi.ssid(cJSON_GetStringValue(ssid));
         }
         
         if (cJSON_IsString(password))
         {
-            char* password_string =cJSON_GetStringValue(password);
-            ESP_LOGI(TAG, "WiFi Password : %s", password_string);
-            ESP_ERROR_CHECK(nvs_set_str(nvs_handle, "wifi_pw", password_string));
+            m_wifi.password(cJSON_GetStringValue(password));
         }
     }
     
@@ -283,22 +257,7 @@ void Command::mqtt_logging(char* cmd, cJSON* root)
     if (cJSON_IsBool(enabled_json))
     {
         bool enabled_bool = cJSON_IsTrue(enabled_json);
-        //logging(root, enabled_bool, Logging::OUTPUT_t::MQTT);
-    }
-}
-
-void Command::web_logging(char* cmd, cJSON* root)
-{
-    if (strcmp (cmd, "web_logging") != 0)
-    {
-        return;
-    }
-    
-    cJSON* enabled_json = cJSON_GetObjectItem(root, "enabled");
-    if (cJSON_IsBool(enabled_json))
-    {
-        bool enabled_bool = cJSON_IsTrue(enabled_json);
-        //logging(root, enabled_bool, Logging::OUTPUT_t::WEB);
+        m_logging.mqtt_logging(enabled_bool);
     }
 }
 
@@ -397,7 +356,7 @@ void Command::restart_device(char* cmd, cJSON* root)
 
 void Command::prepare_update(char* cmd, cJSON* root)
 {
-    if (strcmp (cmd, "prepare_update") != 0)
+    if (strcmp (cmd, "update_prepare") != 0)
     {
         return;
     }
@@ -426,6 +385,7 @@ void Command::prepare_update(char* cmd, cJSON* root)
             cJSON* update_id = cJSON_GetObjectItem(root, "update_id");
             if (cJSON_IsString(update_id))
             {
+                ESP_LOGI(TAG, "prepared for can_by_id");
                 m_current_update = &m_canupdate;
                 m_canupdate.by_uid_start(cJSON_GetStringValue(update_id), cJSON_GetNumberValue(update_size));
             }
@@ -440,7 +400,7 @@ void Command::prepare_update(char* cmd, cJSON* root)
 
 void Command::complete_update(char* cmd, cJSON* root)
 {
-    if (strcmp (cmd, "complete_update") != 0)
+    if (strcmp (cmd, "update_complete") != 0)
     {
         return;
     }

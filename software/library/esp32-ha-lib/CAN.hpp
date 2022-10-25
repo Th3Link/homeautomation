@@ -6,7 +6,7 @@
 #include <vector>
 #include "ICAN.hpp"
 
-class CAN : public ICAN
+class CAN : public ICAN, public ICANDispatcher
 {
     public:      
         CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter);
@@ -14,14 +14,18 @@ class CAN : public ICAN
         void deinit() override;
         void send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request) override;
         void send(uint32_t id, uint8_t* data, unsigned int data_len, bool request) override;
-        std::vector<ICANDispatcher*> dispatcher();
+        bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
         void add_dispatcher(ICANDispatcher*) override;
         uint8_t get_id() override;
         uint8_t get_type() override;
         bool enable_filter();
         void bitrate(ICAN::BITRATE_t) override;
         ICAN::BITRATE_t bitrate() override;
-
+        void inc_received();
+        void inc_transmitted();
+        uint64_t received() override;
+        uint64_t transmitted() override;
+    
         static const char* TAG;
         bool shutdown_request();
         void shutdown();
@@ -34,8 +38,8 @@ class CAN : public ICAN
         gpio_num_t m_rx_pin;
         gpio_num_t m_tx_pin;
         std::vector<ICANDispatcher*> m_dispatcher;
-        static constexpr uint32_t m_can_ng = 0x10000000;
         SemaphoreHandle_t m_shutdown_sem;
-        bool m_shutdown_request = false;
-
+        bool m_shutdown_request;
+        uint64_t m_received;
+        uint64_t m_transmitted;
 };

@@ -36,8 +36,8 @@ void app_main()
 {
 
     CAN can(RX_GPIO_NUM, TX_GPIO_NUM, true);
-    Device device(can);
     Update update(can);
+    Device device(can);
     Light light(can);
     THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE);
     THSensor thsensor(can, ONEWIRE_GPIO_NUM);

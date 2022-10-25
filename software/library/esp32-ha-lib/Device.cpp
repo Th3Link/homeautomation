@@ -18,7 +18,7 @@ void Device::init()
     
 }
 
-void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     static bool uid_selected = false;
     switch (static_cast<ICAN::MSG_ID_t>(identifier & 0xFF))
@@ -31,7 +31,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::CUSTOM_STRING), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::UPTIME), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::BAUDRATE), data, data_len, request);
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::DEVICE_GROUP:
         {
@@ -40,7 +40,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 uint8_t data[1] {0};
                 m_can.send(ICAN::MSG_ID_t::DEVICE_GROUP, data, sizeof(data), false);
             }
-            break;
+            return true;
         }
 
         case ICAN::MSG_ID_t::APPLICATION_VERSION:
@@ -57,7 +57,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 }
                 m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION, data, min_len, false);
             }
-            break;
+            return true;
         }
 
         case ICAN::MSG_ID_t::DEVICE_ID_TYPE:
@@ -84,7 +84,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 m_can.deinit();
                 m_can.init();
             }
-            break;
+            return true;
         }
         
         case ICAN::MSG_ID_t::DEVICE_UID0:
@@ -112,7 +112,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                     }
                 }
             }
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::BAUDRATE:
         {
@@ -137,7 +137,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 }
             }
             nvs_close(nvs_handle);
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::CUSTOM_STRING:
         {
@@ -166,7 +166,7 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             }
             
             nvs_close(nvs_handle);
-            break;
+            return true;
         }
         case ICAN::MSG_ID_t::UPTIME:
         {
@@ -186,8 +186,10 @@ void Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 m_can.send(ICAN::MSG_ID_t::UPTIME, uptime8, 
                     sizeof(uptime8), false);
             }
+            return true;
         }
         default:
             break;
     }
+    return false;
 }

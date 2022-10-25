@@ -26,7 +26,7 @@ public:
     void init();
     void state(uint8_t num, bool state);
     bool state(uint8_t num);
-    void dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
+    bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
     void receive(message::Message<ICAN::RELAIS_MSG_t>&) override;
     void receive(message::Message<rollershutter_action_t>&) override;
     static const char* TAG;

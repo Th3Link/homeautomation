@@ -23,7 +23,8 @@
   "canbus": {
     "baudrate": "b100",
     "received": 10,
-    "sent": 100
+    "sent": 100,
+    "mqtt_logging": true
   },
   "warnings": [
   ],

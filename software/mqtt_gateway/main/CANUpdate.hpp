@@ -19,5 +19,6 @@ public:
 private:
     ICAN& m_can;
     uint32_t m_update_id;
+    uint32_t m_filesize;
     static const char* TAG;
 };

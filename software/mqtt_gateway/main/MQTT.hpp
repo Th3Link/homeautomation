@@ -22,12 +22,21 @@ public:
     const char* password() override;
     bool enabled() override;
     void enabled(bool) override;
+    void inc_received();
+    void inc_transmitted();
+    void connected(bool);
+    bool connected() override;
+    uint64_t received() override;
+    uint64_t transmitted() override;
     static const char* TAG;
 private:
     char m_uri[60];
     char m_username[60];
     char m_password[60];
     bool m_enabled;
+    uint64_t m_received;
+    uint64_t m_transmitted;
+    bool m_connected;
     esp_mqtt_client_handle_t m_client;
     std::vector<IMQTTDispatcher*> m_dispatcher;
 };

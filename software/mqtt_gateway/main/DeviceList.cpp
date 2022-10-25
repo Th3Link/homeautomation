@@ -1,9 +1,11 @@
 #include "DeviceList.hpp"
-#include "esp_timer.h"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
-#include "cJSON.h"
+
+#include <cJSON.h>
+#include <esp_timer.h>
+#include <esp_log.h>
 
 const char* DeviceList::TAG = "DeviceList";
 
@@ -34,6 +36,9 @@ static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifi
             break;
         case ICAN::MSG_ID_t::DEVICE_ERROR:
             device.error = data[0];
+            break;
+        case ICAN::MSG_ID_t::BAUDRATE:
+            device.baudrate = data[0];
             break;
         case ICAN::MSG_ID_t::DEVICE_UID0:
         {
@@ -90,19 +95,20 @@ static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifi
     }
 }
 
-void DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
+    // return always false --> do not consume the msg
     if (ICAN::GET_ID(identifier) == 0)
     {
-        return;
+        return false;
     }
-    
+
     for (unsigned int i = 0; i < 50; i++)
     {
         if (m_deviceList[i].id == (identifier & 0xFFFFFF00))
         {
             update_device(m_deviceList[i], identifier, data, data_len);
-            return;
+            return false;
         }
     }
     
@@ -113,11 +119,11 @@ void DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_
         {
             m_deviceList[i].id = (identifier & 0xFFFFFF00);
             uint8_t data[1];
-            m_can.send((identifier & 0xFFFFFF00)+3, &data[0], 0, true);
-            m_can.send((identifier & 0xFFFFFF00)+4, &data[0], 0, true);
-            return;
+            m_can.send((identifier & 0xFFFFFF00)+12, &data[0], 0, true);
+            return false;
         }
     }
+    return false;
 }
 
 void DeviceList::refresh()
@@ -174,7 +180,7 @@ void DeviceList::output(cJSON* object)
                 version[j] = m_deviceList[i].version[j];
             }
             
-            switch (static_cast<ICAN::DEVICE_t>(deviceid))
+            switch (static_cast<ICAN::DEVICE_t>(devicetype))
             {
                 case ICAN::DEVICE_t::Relais:
                     sprintf(device_type_name, "Relais");
@@ -214,6 +220,7 @@ void DeviceList::output(cJSON* object)
             cJSON_AddStringToObject(device, "uid1", &uid1[0]);
             cJSON_AddStringToObject(device, "version", &version[0]);
             cJSON_AddNumberToObject(device, "uptime", m_deviceList[i].uptime);
+            cJSON_AddNumberToObject(device, "baudrate", m_deviceList[i].baudrate);
             cJSON_AddStringToObject(device, "rollershutter_mode", &rollershutter_mode[0]);
             cJSON_AddNumberToObject(device, "last_seen", ls);
             cJSON_AddStringToObject(device, "state", &state[0]);

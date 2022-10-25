@@ -7,12 +7,13 @@
 #include "WiFi.hpp"
 #include "Update.hpp"
 #include "CANUpdate.hpp"
+#include "WebCredentials.hpp"
 #include "esp32-ha-lib/ICAN.hpp"
 
 class Command
 {
 public:
-    Command(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Logging&);
+    Command(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Logging&, WebCredentials&);
     void command(char* cmd, cJSON* root);
     void send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* data,  size_t data_len, 
         bool request);
@@ -37,5 +38,6 @@ private:
     ICAN& m_can;
     WiFi& m_wifi;
     Logging& m_logging;
+    WebCredentials& m_web_credentials;
     static const char* TAG;
 };

@@ -8,17 +8,24 @@
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <h1>CAN 2 MQTT Gateway Setup</h1>
+    <h1>CAN 2 MQTT Gateway</h1>
     <div id="nav">
       <button id="nav_state">State / Setup</button>
       <button id="nav_can_devices">CAN Devices</button>
-      <button id="nav_can_mqtt_monitor">CAN/MQTT Monitor</button>
+      <button id="nav_logging">CAN/MQTT Monitor</button>
       <button id="nav_update">FW Update</button>
+      <button id="nav_docs">Documentation</button>
     </div>
     <div id="content_update" class="hide-me">
     </div>
 
     <div id="content_can_device" class="hide-me">
+    </div>
+
+    <div id="content_logging" class="hide-me">
+    </div>
+    
+    <div id="content_docs" class="hide-me">
     </div>
 
     <div id="content_restart" class="hide-me">
@@ -34,12 +41,7 @@
           <button id="query_all">Query</button>
           <button id="restart_all">Restart all</button>
         </div>
-        </div>
-      <div id="content_can_device_console_logging">
-        <div class="header">Logging</div>
-        <div class="content"></div>
       </div>
-      
     </div>
     
     <div style="clear:both;">
@@ -59,6 +61,14 @@
           <div>
           <input id="general_hostname" type="text">
           </div>
+          <div class="label" id="web_username_label">Username</div>
+          <div><input id="web_username" type="text">
+          </div>
+          
+          <div class="label" id="web_password_label">Password</div>
+          <div>
+          <input id="web_password" type="text">
+          </div>
       </div>
       <div id="wifi">
         <h2>Wifi</h2>
@@ -75,12 +85,12 @@
           </div>
           
           <div class="label" id="wifi_ssid_label">SSID</div>
-          <div><input id="wifi_ssid" type="text">
+          <div><input id="wifi_ssid" type="text" />
           </div>
           
           <div class="label" id="wifi_password_label">Password</div>
           <div>
-          <input id="wifi_password" type="text">
+          <input id="wifi_password" type="text" />
           </div>
         </div>
       </div>
@@ -90,9 +100,19 @@
         <div id="mqtt_state" class="state">
         </div>
         <div id="mqtt_setup" class="setup">
-          <div class="label"  id="mqtt_uri_label">Server URI (mqtt://IP:PORT)</div>
+          <div class="label"  id="mqtt_uri_label">Server URI</div>
+          <div style="float:left;">
+            <input id="mqtt_uri" type="text" />
+          </div>
+          <div style="width:150px;float:left;padding-left:10px;" id="mqtt_uri_label">(mqtt://IP:PORT)</div>
+          <div style="clear:left;"></div>
+          <div class="label" id="mqtt_username_label">Username</div>
+          <div><input id="mqtt_username" type="text" />
+          </div>
+          
+          <div class="label" id="mqtt_password_label">Password</div>
           <div>
-            <input id="mqtt_uri" type="text">
+          <input id="mqtt_password" type="text" />
           </div>
         </div>
       </div>

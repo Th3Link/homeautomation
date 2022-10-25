@@ -365,12 +365,12 @@ function addDetails(uid) {
     var div = document.createElement("div");
     div.classList.add("state");
     div.classList.add("in_float");
-    div.appendChild(c1("Firmware Version:", uid + "_firmware"));
-    div.appendChild(c1("Last Message:", uid + "_last_message"));
-    div.appendChild(c1("Device UID0:", uid + "_uid0"));
-    div.appendChild(c1("Device UID1:", uid + "_uid1"));
-    div.appendChild(c1("Baudrate:", uid + "_baudrate"));
-    div.appendChild(c1("Uptime:", uid + "_uptime"));
+    div.appendChild(c1("Firmware Version: ", uid + "_firmware"));
+    div.appendChild(c1("Last Message: ", uid + "_last_message"));
+    div.appendChild(c1("Device UID0: ", uid + "_uid0"));
+    div.appendChild(c1("Device UID1: ", uid + "_uid1"));
+    div.appendChild(c1("Baudrate: ", uid + "_baudrate"));
+    div.appendChild(c1("Uptime: ", uid + "_uptime"));
 
     var clear0 = document.createElement("div");
     clear0.classList.add("clear_float");
@@ -378,49 +378,6 @@ function addDetails(uid) {
     details.appendChild(div);
     var controls = createControls(uid, "in_float")
     controls.appendChild(createFirmwareSelector(uid));
-    
-    // logging
-    
-    var div_logging = document.createElement("div");
-    div_logging.classList.add("in_float");
-    div_logging.style = "padding-top:15px;";
-    var label_mqtt_logging = document.createElement("label");
-    label_mqtt_logging.for = uid + "_input_mqtt_logging";
-    label_mqtt_logging.innerText = "MQTT Logging ";
-    var input_mqtt_logging = document.createElement("input");
-    input_mqtt_logging.id = uid + "_input_mqtt_logging";
-    input_mqtt_logging.name = "input_mqtt_logging";
-    input_mqtt_logging.type = "checkbox";
-    input_mqtt_logging.style = "width:15px;margin-right:20px;";
-    input_mqtt_logging.checked = false;
-    input_mqtt_logging.addEventListener("change", function () {
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", '/control.json', true);
-        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        var logging_command = { command: "mqtt_logging", unit: "can_by_uid", commandId: uid, enabled: input_mqtt_logging.checked };
-        xhr.send(JSON.stringify(logging_command));
-    });
-    var label_web_logging = document.createElement("label");
-    label_web_logging.for = uid + "_input_web_logging";
-    label_web_logging.innerText = "Web Logging ";
-    var input_web_logging = document.createElement("input");
-    input_web_logging.id = uid + "_input_web_logging";
-    input_web_logging.name = "input_web_logging";
-    input_web_logging.type = "checkbox";
-    input_web_logging.style = "width:15px;";
-    input_web_logging.checked = false;
-    input_web_logging.addEventListener("change", function () {
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", '/control.json', true);
-        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        var logging_command = { command: "web_logging", unit: "can_by_uid", commandId: uid, enabled: input_web_logging.checked };
-        xhr.send(JSON.stringify(logging_command));
-    });
-    div_logging.appendChild(label_mqtt_logging);
-    div_logging.appendChild(input_mqtt_logging);
-    div_logging.appendChild(label_web_logging);
-    div_logging.appendChild(input_web_logging);
-    controls.appendChild(div_logging);
     details.appendChild(controls);
     details.appendChild(clear0);
     
@@ -612,8 +569,6 @@ function updateTable(header, elements) {
         document.getElementById(elements[i].uid + "_device_type").value = elements[i].device_type;
         document.getElementById(elements[i].uid + "_custom_string").value = elements[i].custom_string;
         document.getElementById(elements[i].uid + "_can_baudrate").value = elements[i].baudrate;
-        document.getElementById(elements[i].uid + "_input_web_logging").checked = elements[i].web_logging;
-        document.getElementById(elements[i].uid + "_input_mqtt_logging").checked = elements[i].mqtt_logging;
         document.getElementById(elements[i].uid + "_device_id").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_device_type").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_custom_string").dispatchEvent(new window.Event('change'));
@@ -660,9 +615,10 @@ function updateTypeOptions() {
 }
 
 function updateDeviceList() {
-    get_config();
-    updateTypes(loaded_config);
-    updateTable(loaded_config.header, loaded_config.devices);
+    get_config(function (loaded_config) {        
+        updateTypes(loaded_config);
+        updateTable(loaded_config.header, loaded_config.devices);
+    });
 }
 
 function add_unit(uid, command) {
@@ -752,7 +708,10 @@ function refresh_click(uid) {
     var refresh_command = { command: "refresh" };
     refresh_command = add_unit(uid, refresh_command);
     xhr.send(JSON.stringify(refresh_command));
-    updateTable(loaded_config.header, loaded_config.devices);
+    xhr.onload = function(e) {
+        updateTable(loaded_config.header, loaded_config.devices);
+    }
+    xhr.send(JSON.stringify(logging_command));
 }
 
 devices_refresh.addEventListener("click", function () {

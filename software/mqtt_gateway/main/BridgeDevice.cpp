@@ -14,7 +14,7 @@ void BridgeDevice::init()
 
 }
 
-void BridgeDevice::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool BridgeDevice::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::TEMPERATURE_SENSOR))
     {
@@ -39,7 +39,9 @@ void BridgeDevice::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
         std::string temperatureData = std::to_string(
             static_cast<double>(t.temperature)/16.0);
         m_mqtt.publish(temperatureTopic.c_str(), temperatureData.c_str());
+        return true;
     }
+    return false;
 }
 
 void BridgeDevice::dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len)

@@ -14,7 +14,9 @@ function update_click(uid) {
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
         xmlhttp.send(JSON.stringify({command:"update_prepare","update_type":"can_by_type","update_id":type,"update_size":update_file_size}));
-        
+        xmlhttp.onload = function(e) {
+            req.send(formData);
+        }
         formData.append("type:"+type, update_file);
         req.open("POST", '/update/data');
     }
@@ -29,7 +31,9 @@ function update_click(uid) {
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
         xmlhttp.send(JSON.stringify({command:"update_prepare","update_type":"self","update_size":update_file_size}));
-        
+        xmlhttp.onload = function(e) {
+            req.send(formData);
+        }
         formData.append("device_update", update_file);
         req.open("POST", '/update/data');
     }
@@ -39,7 +43,9 @@ function update_click(uid) {
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
         xmlhttp.send(JSON.stringify({command:"update_prepare","update_type":"can_by_uid","update_id":uid,"update_size":update_file_size}));
-        
+        xmlhttp.onload = function(e) {
+            req.send(formData);
+        }
         formData.append(uid, update_file);
         req.open("POST", '/update/data');
     }
@@ -54,7 +60,12 @@ function update_click(uid) {
         var xmlhttp = new XMLHttpRequest();
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        
+        document.getElementById(uid + "_progress").innerHTML = "Update complete, restarting...";
+        setTimeout(function() {
+             location.reload();
+        }, 8000);
         xmlhttp.send(JSON.stringify({ command:"update_complete" }));
     };
-    req.send(formData);
+    
 }

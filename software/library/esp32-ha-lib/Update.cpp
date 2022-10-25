@@ -28,6 +28,7 @@ void Update::init(const uint8_t const_type)
     
     if (type != const_type)
     {
+        ESP_LOGI(TAG, "Image not valid, wrong type\n");
         esp_ota_mark_app_invalid_rollback_and_reboot();
     }
     else
@@ -37,13 +38,19 @@ void Update::init(const uint8_t const_type)
     
 }
 
-void Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
+bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     static bool update_mode = false;
     static esp_ota_handle_t ota_handle;
     static const esp_partition_t* partition = NULL;
     switch (static_cast<ICAN::MSG_ID_t>(identifier & 0xFF))
     {
+        case ICAN::MSG_ID_t::FLASH_WRITE:
+        {
+            esp_ota_write(ota_handle, data, data_len);
+            return true;
+        }
+        
         case ICAN::MSG_ID_t::AVAILABLE:
         {
             if (request && !update_mode)
@@ -57,7 +64,7 @@ void Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 uint8_t data[1] {static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE)};
                 m_can.send(ICAN::MSG_ID_t::AVAILABLE, data, sizeof(data), false);
             }
-            break;
+            return true;
         }
         
         case ICAN::MSG_ID_t::RESTART:
@@ -80,13 +87,7 @@ void Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 }
                 update_mode = false;
             }
-            break;
-        }
-                
-        case ICAN::MSG_ID_t::FLASH_WRITE:
-        {
-            esp_ota_write(ota_handle, data, data_len);
-            break;
+            return true;
         }
         
         case ICAN::MSG_ID_t::FLASH_VERIFY:
@@ -100,9 +101,10 @@ void Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                     checksum[0], checksum[1], checksum[2], checksum[3],
                     checksum[4], checksum[5], checksum[6], checksum[7]);
             }
-            break;
+            return true;
         }
         default:
             break;
     }
+    return false;
 }

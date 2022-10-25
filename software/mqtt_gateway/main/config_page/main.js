@@ -95,6 +95,29 @@ function init() {
     setup_mqtt_password.addEventListener("input", checkConfig)
     setup_can_baudrate.addEventListener("input", checkConfig)
 
+    var label_mqtt_logging = document.createElement("div");
+    label_mqtt_logging.classList.add("label");
+    label_mqtt_logging.id = "label_mqtt_logging";
+    label_mqtt_logging.innerText = "MQTT Logging ";
+    var input_mqtt_logging = document.createElement("input");
+    input_mqtt_logging.id = "input_mqtt_logging";
+    input_mqtt_logging.name = "input_mqtt_logging";
+    input_mqtt_logging.type = "checkbox";
+    input_mqtt_logging.style = "width:15px;margin-right:20px;";
+    input_mqtt_logging.checked = false;
+    input_mqtt_logging.addEventListener("change", function () {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", '/control.json', true);
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        var logging_command = { command: "mqtt_logging", unit: "can_all", enabled: input_mqtt_logging.checked };
+        xhr.onload = function(e) {
+            get_config();
+        }
+        xhr.send(JSON.stringify(logging_command));
+    });
+    document.getElementById("canbus_setup").appendChild(label_mqtt_logging);
+    document.getElementById("canbus_setup").appendChild(input_mqtt_logging);
+    
     nav_save.addEventListener("click", function () {
         if (!nav_save.classList.contains("deactivated")) {
             var xhr = new XMLHttpRequest();
@@ -150,44 +173,7 @@ function init() {
     nav_state.click();
 }
 
-function update_state() {
-    var general_state = document.getElementById("general_state");
-    var wifi_state = document.getElementById("wifi_state");
-    var mqtt_state = document.getElementById("mqtt_state");
-    var canbus_state = document.getElementById("canbus_state");
-
-    var stateRequest = new XMLHttpRequest();
-    stateRequest.open('GET', 'state.json');
-    stateRequest.onload = function () {
-        if (stateRequest.status >= 200 && stateRequest.status < 400) {
-            state = JSON.parse(stateRequest.responseText);
-            general_state.innerHTML =
-                "Firmware Version: " + state.firmware_version + "<br/>" +
-                "Uptime: " + state.uptime + "<br/>" +
-                "Hostname: " + state.hostname;
-
-            wifi_state.innerHTML =
-                "Connection State: " + state.wifi.state + "<br/>" +
-                "IPv4 Address: " + state.wifi.ipv4 + "<br/>" +
-                "IPv6 Address: " + state.wifi.ipv6 + "<br/>" +
-                "Gateway: " + state.wifi.gateway + "<br/>" +
-                "DNS Server: " + state.wifi.dns;
-
-            mqtt_state.innerHTML =
-                "Connection State: " + state.mqtt.state + "<br/>" +
-                "Messages Received: " + state.mqtt.received + "<br/>" +
-                "Messages Sent: " + state.mqtt.sent;
-
-            canbus_state.innerHTML =
-                "Messages Received: " + state.mqtt.received + "<br/>" +
-                "Messages Sent: " + state.mqtt.sent;
-        }
-    };
-    stateRequest.setRequestHeader('Cache-Control', 'no-cache');
-    stateRequest.send();
-}
-
-function get_config() {
+function get_config(onload = null) {
     var configRequest = new XMLHttpRequest();
     configRequest.open('GET', 'state.json');
     configRequest.onload = function () {
@@ -206,6 +192,10 @@ function get_config() {
             setup_can_baudrate.value = loaded_config.canbus.baudrate;
 
             checkConfig();
+            if (onload != null)
+            {
+                onload(loaded_config);
+            }
         }
     };
     configRequest.setRequestHeader('Cache-Control', 'no-cache');
@@ -215,19 +205,25 @@ function get_config() {
 function checkConfig() {
     current_config = {};
     
-    if (setup_general_username.value != "") {
+    document.getElementById("input_mqtt_logging").checked = loaded_config.canbus.mqtt_logging;
+    
+    if (setup_general_username.value != loaded_config.username) {
         document.getElementById("web_username_label").classList.add("changed");
+        current_config.username = setup_general_username.value;
     }
     else
     {
         document.getElementById("web_username_label").classList.remove("changed");
+        delete current_config.username;
     }
-    if (setup_general_password.value != "") {
+    if (setup_general_password.value != loaded_config.password) {
         document.getElementById("web_password_label").classList.add("changed");
+        current_config.password = setup_general_password.value;
     }
     else
     {
         document.getElementById("web_password_label").classList.remove("changed");
+        delete current_config.password;
     }
     if (loaded_config.hostname != setup_general_hostname.value) {
         document.getElementById("general_hostname_label").classList.add("changed");
@@ -342,8 +338,8 @@ function update_state() {
                 "Messages Sent: " + state.mqtt.sent;
 
             canbus_state.innerHTML =
-                "Messages Received: " + state.mqtt.received + "<br/>" +
-                "Messages Sent: " + state.mqtt.sent;
+                "Messages Received: " + state.canbus.received + "<br/>" +
+                "Messages Sent: " + state.canbus.sent;
         }
     };
     stateRequest.setRequestHeader('Cache-Control', 'no-cache');

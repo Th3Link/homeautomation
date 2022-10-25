@@ -13,11 +13,16 @@ public:
     
     WiFi();
     void init();
+    void read_nvs();
     Mode mode();
     const char* mode_str();
     const char* ssid();
     const char* password();
     const char* hostname();
+    void mode_str(const char*);
+    void ssid(const char*);
+    void password(const char*);
+    void hostname(const char*);
     
 private:
     void init_softap(const unsigned char channel);

@@ -36,6 +36,19 @@ static const char *TAG = "main";
 
 static SemaphoreHandle_t shutdown_sem;
 
+//static CAN can(RX_GPIO_NUM, TX_GPIO_NUM, false);
+static MQTT mqtt;
+static Logging can_logging(RX_GPIO_NUM, TX_GPIO_NUM, false, mqtt);
+static Update update;
+static CANUpdate can_update(can_logging);
+static DeviceList device_list(can_logging);
+static WiFi wifi;
+static Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
+static BridgeDevice bridge_device(can_logging, mqtt);
+static BridgeRelais bridge_relais(can_logging, mqtt);
+static BridgeButton bridge_button(can_logging, mqtt);
+static BridgeLamps bridge_lamps(can_logging, mqtt);
+
 extern "C"
 void app_main()
 {   
@@ -46,21 +59,11 @@ void app_main()
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    
-    CAN can(RX_GPIO_NUM, TX_GPIO_NUM, false);
-    Update update;
-    CANUpdate can_update(can);
-    DeviceList device_list(can);
-    WiFi wifi;
-    MQTT mqtt;
-    Logging logging(mqtt);
-    Web(update, can_update, mqtt, can, wifi, logging, device_list);
-    BridgeDevice bridge_device(can, mqtt);
-    BridgeRelais bridge_relais(can, mqtt);
-    BridgeButton bridge_button(can, mqtt);
-    BridgeLamps bridge_lamps(can, mqtt);
     wifi.init();
+    web.init();
     
+    can_logging.init();
+    device_list.init();
     //Create semaphores and tasks
     shutdown_sem  = xSemaphoreCreateBinary();
 
