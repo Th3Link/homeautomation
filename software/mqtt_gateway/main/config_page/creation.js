@@ -243,9 +243,18 @@ function createControls(uid, cl) {
         ping_click(uid);
     });
 
+    var legacy_mode = document.createElement("button");
+    legacy_mode.id = uid + "_legacy_mode";
+    legacy_mode.name = "legacy_mode";
+    legacy_mode.innerText = "Update Mode (Legacy)";
+    legacy_mode.addEventListener("click", function () {
+        legacy_mode_click(uid);
+    });
+
     control.appendChild(refresh);
     control.appendChild(restart);
     control.appendChild(ping);
+    control.appendChild(legacy_mode);
 
     return control;
 }

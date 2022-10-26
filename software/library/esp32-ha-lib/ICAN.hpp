@@ -43,6 +43,7 @@ public:
         CUSTOM_STRING = 10,
         PWM_FREQUENCY = 11,
         REQUEST_PARAMETER = 12,
+        APPLICATION_VERSION_STRING = 13,
         FLASH_SELECT = 16,
         FLASH_ERASE = 17,
         FLASH_READ = 18,
@@ -82,9 +83,11 @@ public:
 
     enum class DEVICE_t : uint32_t
     {
-        Relais = 0x02,
-        Lamps = 0x03,
-        Button = 0x04
+        LegacyRelais = 0x02,
+        LegacyLamps = 0x03,
+        Button = 0x04,
+        Relais = 0x05,
+        Gateway = 0x06
     };
     
     enum class ROLLERSHUTTER_MODE_t : uint8_t
@@ -124,7 +127,25 @@ public:
     virtual ICAN::BITRATE_t bitrate() = 0;
     virtual uint64_t received() = 0;
     virtual uint64_t transmitted() = 0;
-    
+
+    static inline const char* device_string(ICAN::DEVICE_t b)
+    {
+        switch (b)
+        {
+            case ICAN::DEVICE_t::LegacyRelais:
+                return "LegacyRelais";
+            case ICAN::DEVICE_t::LegacyLamps:
+                return "LegacyLamps";
+            case ICAN::DEVICE_t::Button:
+                return "Button";
+            case ICAN::DEVICE_t::Relais:
+                return "Relais";
+            case ICAN::DEVICE_t::Gateway:
+                return "Gateway";
+        }
+        return "b50";
+    }
+
     static inline const char* bitrate_string(ICAN::BITRATE_t b)
     {
         switch (b)
@@ -181,6 +202,11 @@ public:
     static constexpr uint32_t TYPE_TO_ID(DEVICE_t type)
     {
         return ((static_cast<uint8_t>(type) << 16) & ID_TYPE_MASK);
+    }
+
+    static constexpr uint32_t DID_TO_ID(uint8_t did)
+    {
+        return ((static_cast<uint8_t>(did) << 8) & ID_ID_MASK);
     }
 
     static constexpr uint32_t GET_ID(uint32_t id)

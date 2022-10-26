@@ -24,6 +24,7 @@ public:
     void web_logging(char* cmd, cJSON* root);
     void save_device(char* cmd, cJSON* root);
     void refresh_device(char* cmd, cJSON* root);
+    void legacy_mode(char* cmd, cJSON* root);
     void ping_device(char* cmd, cJSON* root);
     void restart_device(char* cmd, cJSON* root);
     void prepare_update(char* cmd, cJSON* root);

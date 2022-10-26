@@ -240,12 +240,14 @@ esp_err_t Web::update_data_post_handler(httpd_req_t *req)
     /* Content length of the request gives
      * the size of the file being uploaded */
     size_t remaining = req->content_len - (header_buf - buf);
-
+    
+    constexpr size_t RECEIVE_MAX = 400;
+    
     while (remaining > 0) {
 
         ESP_LOGI(TAG, "Remaining size : %d", remaining);
         /* Receive the file part by part into a buffer */
-        if ((received = httpd_req_recv(req, buf, std::min(remaining, SCRATCH_BUFSIZE))) <= 0) {
+        if ((received = httpd_req_recv(req, buf, std::min(remaining, RECEIVE_MAX))) <= 0) {
             
             if (received == HTTPD_SOCK_ERR_TIMEOUT) {
                 /* Retry if timeout occurred */

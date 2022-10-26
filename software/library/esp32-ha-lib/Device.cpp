@@ -25,7 +25,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
     {
         case ICAN::MSG_ID_t::REQUEST_PARAMETER:
         {
-            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::APPLICATION_VERSION), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::APPLICATION_VERSION_STRING), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID0), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID1), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::CUSTOM_STRING), data, data_len, request);
@@ -43,7 +43,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             return true;
         }
 
-        case ICAN::MSG_ID_t::APPLICATION_VERSION:
+        case ICAN::MSG_ID_t::APPLICATION_VERSION_STRING:
         {
             if (request)
             {
@@ -178,7 +178,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                     uint8_t uptime8[4];
                 };
                 
-                auto uptime_auto = std::chrono::duration_cast<std::chrono::seconds>(
+                auto uptime_auto = std::chrono::duration_cast<std::chrono::minutes>(
                       std::chrono::system_clock::now().time_since_epoch()).count();
                 
                 uptime = static_cast<decltype(uptime)>(uptime_auto);

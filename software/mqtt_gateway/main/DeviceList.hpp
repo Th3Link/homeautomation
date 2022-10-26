@@ -18,7 +18,7 @@ public:
     {
         uint32_t id;
         std::array<char, 8> custom_string;
-        std::array<char, 8> version;
+        std::array<char, 12> version;
         uint32_t last_seen;
         uint32_t uptime;
         uint8_t baudrate;

@@ -15,6 +15,7 @@
 #include <esp_wifi.h>
 #include <esp_event.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <nvs_flash.h>
 
 #include <lwip/err.h>
@@ -64,6 +65,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
         ESP_LOGI(TAG,"connect to the AP fail");
+        
+        vTaskDelay(pdMS_TO_TICKS(4000));
+        ESP_LOGI(TAG,"Try new round to connect to AP");
+        s_retry_num = 0;
+        esp_restart();
     } else if (event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));

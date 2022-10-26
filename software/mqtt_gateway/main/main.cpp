@@ -22,6 +22,7 @@
 #include "BridgeLamps.hpp"
 #include "BridgeRelais.hpp"
 #include "BridgeButton.hpp"
+#include "BridgeDebug.hpp"
 
 /* --------------------- Definitions and static variables ------------------ */
 //Example Configuration
@@ -48,6 +49,7 @@ static BridgeDevice bridge_device(can_logging, mqtt);
 static BridgeRelais bridge_relais(can_logging, mqtt);
 static BridgeButton bridge_button(can_logging, mqtt);
 static BridgeLamps bridge_lamps(can_logging, mqtt);
+static BridgeDebug bridge_debug(can_logging, mqtt);
 
 extern "C"
 void app_main()
@@ -74,6 +76,7 @@ void app_main()
         bridge_relais.init();
         bridge_button.init();
         bridge_lamps.init();
+        bridge_debug.init();
     }
     
     update.verified();

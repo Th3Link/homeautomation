@@ -348,7 +348,6 @@ function update_state() {
 
 window.onload = init();
 function row_click(uid) {
-    console.log("Row " + uid + "clicked!");
     var details = document.getElementById(uid + "_details");
     var other_details = document.getElementsByClassName("details");
     for (var i = 0; i < other_details.length; i++) {
@@ -367,7 +366,6 @@ function checkbox_input(uid) {
             checkboxes[i].checked = all_checkbox.checked;
         }
     }
-    console.log("Row " + uid + "clicked!");
 }
 
 function decimalToHex(d, padding) {
@@ -1038,6 +1036,11 @@ function restart_click(uid) {
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var restart_command = { command: "restart" };
     restart_command = add_unit(uid, restart_command);
+    xhr.onload = function(e) {
+        setTimeout(function() {
+            updateDeviceList();
+        }, 4000);
+    }
     xhr.send(JSON.stringify(restart_command));
 }
 
@@ -1047,6 +1050,9 @@ function ping_click(uid) {
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var ping_command = { command: "ping" };
     ping_command = add_unit(uid, ping_command);
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(ping_command));
 }
 
@@ -1058,9 +1064,22 @@ function refresh_click(uid) {
     refresh_command = add_unit(uid, refresh_command);
     xhr.send(JSON.stringify(refresh_command));
     xhr.onload = function(e) {
-        updateTable(loaded_config.header, loaded_config.devices);
+        updateDeviceList();
     }
-    xhr.send(JSON.stringify(logging_command));
+    xhr.send(JSON.stringify(refresh_command));
+}
+
+function legacy_mode_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var legacy_mode_command = { command: "legacy_mode" };
+    legacy_mode_command = add_unit(uid, legacy_mode_command);
+    xhr.send(JSON.stringify(legacy_mode_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(legacy_mode_command));
 }
 
 devices_refresh.addEventListener("click", function () {
@@ -1073,6 +1092,9 @@ devices_broadcast_ping.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var ping_command = { command: "ping", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(ping_command));
 });
 
@@ -1081,6 +1103,9 @@ devices_query_all.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var refresh_command = { command: "refresh", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(refresh_command));
 });
 
@@ -1089,6 +1114,11 @@ devices_restart_all.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var restart_command = { command: "restart", unit: "can_all"};
+    xhr.onload = function(e) {
+        setTimeout(function() {
+            updateDeviceList();
+        }, 4000);
+    }
     xhr.send(JSON.stringify(restart_command));
 });
 function createDeviceID(uid, cl) {
@@ -1336,23 +1366,34 @@ function createControls(uid, cl) {
         ping_click(uid);
     });
 
+    var legacy_mode = document.createElement("button");
+    legacy_mode.id = uid + "_legacy_mode";
+    legacy_mode.name = "legacy_mode";
+    legacy_mode.innerText = "Update Mode (Legacy)";
+    legacy_mode.addEventListener("click", function () {
+        legacy_mode_click(uid);
+    });
+
     control.appendChild(refresh);
     control.appendChild(restart);
     control.appendChild(ping);
+    control.appendChild(legacy_mode);
 
     return control;
 }
 function update_click(uid) {
-    console.log("update " + uid);
     var update_file = document.getElementById(uid + "_file_upload").files[0];
+    if ((typeof update_file == 'undefined') || update_file == null)
+    {
+        return;
+    }
     var update_file_size = document.getElementById(uid + "_file_upload").files[0].size;
     var req = new XMLHttpRequest();
     var formData = new FormData();
-
+    var reload = false;
     if (uid == "by_type")
     {
         var type = document.getElementById("selected_device_type").value;
-        console.log(type);
         
         var xmlhttp = new XMLHttpRequest();
         xmlhttp.open("POST", "/control.json");
@@ -1380,6 +1421,7 @@ function update_click(uid) {
         }
         formData.append("device_update", update_file);
         req.open("POST", '/update/data');
+        reload = true;
     }
     else
     {
@@ -1404,11 +1446,18 @@ function update_click(uid) {
         var xmlhttp = new XMLHttpRequest();
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        
-        document.getElementById(uid + "_progress").innerHTML = "Update complete, restarting...";
-        setTimeout(function() {
-             location.reload();
-        }, 8000);
+
+        if (reload) {        
+            document.getElementById(uid + "_progress").innerHTML = "Update complete, restarting...";
+            setTimeout(function() {
+                 location.reload();
+            }, 8000);
+        } else {
+            xmlhttp.onload = function(e) {
+                document.getElementById(uid + "_progress").innerHTML = "Update complete";
+                updateDeviceList();
+            }
+        }
         xmlhttp.send(JSON.stringify({ command:"update_complete" }));
     };
     

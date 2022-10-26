@@ -1,14 +1,16 @@
 function update_click(uid) {
-    console.log("update " + uid);
     var update_file = document.getElementById(uid + "_file_upload").files[0];
+    if ((typeof update_file == 'undefined') || update_file == null)
+    {
+        return;
+    }
     var update_file_size = document.getElementById(uid + "_file_upload").files[0].size;
     var req = new XMLHttpRequest();
     var formData = new FormData();
-
+    var reload = false;
     if (uid == "by_type")
     {
         var type = document.getElementById("selected_device_type").value;
-        console.log(type);
         
         var xmlhttp = new XMLHttpRequest();
         xmlhttp.open("POST", "/control.json");
@@ -36,6 +38,7 @@ function update_click(uid) {
         }
         formData.append("device_update", update_file);
         req.open("POST", '/update/data');
+        reload = true;
     }
     else
     {
@@ -54,17 +57,24 @@ function update_click(uid) {
         var p = Math.round(100 / e.total * e.loaded);
         document.getElementById(uid + "_progress").innerHTML = p + "%";
     };
-
+    
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "Update complete";
+    }
+    
     req.onload = function(e) {
         document.getElementById(uid + "_progress").innerHTML = "100%";
-        var xmlhttp = new XMLHttpRequest();
+        
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        
-        document.getElementById(uid + "_progress").innerHTML = "Update complete, restarting...";
-        setTimeout(function() {
-             location.reload();
-        }, 8000);
+
+        if (reload) {        
+            document.getElementById(uid + "_progress").innerHTML = "Update complete, restarting...";
+            setTimeout(function() {
+                 location.reload();
+            }, 8000);
+        }
         xmlhttp.send(JSON.stringify({ command:"update_complete" }));
     };
     

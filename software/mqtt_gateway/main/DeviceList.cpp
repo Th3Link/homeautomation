@@ -56,7 +56,27 @@ static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifi
             }
             break;
         }
+        // application version in binary form
         case ICAN::MSG_ID_t::APPLICATION_VERSION:
+        {
+            if (data_len == 4)
+            {
+                union {
+                    struct {
+                        uint16_t major;
+                        uint16_t minor;
+                    } s;
+                    uint8_t data8[4];
+                } u;
+                for (unsigned int i = 0; i < data_len; i++)
+                {
+                    u.data8[i] = data[i];
+                }
+                sprintf(&device.version[0], "%d.%d", u.s.major, u.s.minor);
+            }
+            break;
+        }
+        case ICAN::MSG_ID_t::APPLICATION_VERSION_STRING:
         {
             for (unsigned int i = 0; i < data_len; i++)
             {
@@ -143,7 +163,6 @@ void DeviceList::output(cJSON* object)
             char uid[30] {0};
             char device_id[5] {0};
             char device_type[5] {0};
-            char device_type_name[20] = {0};
             char custom_string[9] {0};
             char state[5] {0};
             char error[5] {0};
@@ -179,20 +198,7 @@ void DeviceList::output(cJSON* object)
             {
                 version[j] = m_deviceList[i].version[j];
             }
-            
-            switch (static_cast<ICAN::DEVICE_t>(devicetype))
-            {
-                case ICAN::DEVICE_t::Relais:
-                    sprintf(device_type_name, "Relais");
-                    break;
-                case ICAN::DEVICE_t::Lamps:
-                    sprintf(device_type_name, "Lamps");
-                    break;
-                case ICAN::DEVICE_t::Button:
-                    sprintf(device_type_name, "Button");
-                    break;
-            }
-            
+                       
             if (m_deviceList[i].rollershutter_mode == 2)
             {
                 sprintf(&rollershutter_mode[0], "HARDWARE");
@@ -214,13 +220,15 @@ void DeviceList::output(cJSON* object)
             cJSON_AddStringToObject(device, "uid", &uid[0]);
             cJSON_AddStringToObject(device, "device_id", &device_id[0]);
             cJSON_AddStringToObject(device, "device_type", &device_type[0]);
-            cJSON_AddStringToObject(device, "device_type_name", &device_type_name[0]);
+            cJSON_AddStringToObject(device, "device_type_name", ICAN::device_string(
+                static_cast<ICAN::DEVICE_t>(devicetype)));
             cJSON_AddStringToObject(device, "custom_string", &custom_string[0]);
             cJSON_AddStringToObject(device, "uid0", &uid0[0]);
             cJSON_AddStringToObject(device, "uid1", &uid1[0]);
             cJSON_AddStringToObject(device, "version", &version[0]);
             cJSON_AddNumberToObject(device, "uptime", m_deviceList[i].uptime);
-            cJSON_AddNumberToObject(device, "baudrate", m_deviceList[i].baudrate);
+            cJSON_AddStringToObject(device, "baudrate", ICAN::bitrate_string(
+                static_cast<ICAN::BITRATE_t>(m_deviceList[i].baudrate)));
             cJSON_AddStringToObject(device, "rollershutter_mode", &rollershutter_mode[0]);
             cJSON_AddNumberToObject(device, "last_seen", ls);
             cJSON_AddStringToObject(device, "state", &state[0]);

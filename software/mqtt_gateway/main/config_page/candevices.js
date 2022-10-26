@@ -1,5 +1,4 @@
 function row_click(uid) {
-    console.log("Row " + uid + "clicked!");
     var details = document.getElementById(uid + "_details");
     var other_details = document.getElementsByClassName("details");
     for (var i = 0; i < other_details.length; i++) {
@@ -18,7 +17,6 @@ function checkbox_input(uid) {
             checkboxes[i].checked = all_checkbox.checked;
         }
     }
-    console.log("Row " + uid + "clicked!");
 }
 
 function decimalToHex(d, padding) {
@@ -689,6 +687,11 @@ function restart_click(uid) {
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var restart_command = { command: "restart" };
     restart_command = add_unit(uid, restart_command);
+    xhr.onload = function(e) {
+        setTimeout(function() {
+            updateDeviceList();
+        }, 4000);
+    }
     xhr.send(JSON.stringify(restart_command));
 }
 
@@ -698,6 +701,9 @@ function ping_click(uid) {
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var ping_command = { command: "ping" };
     ping_command = add_unit(uid, ping_command);
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(ping_command));
 }
 
@@ -709,9 +715,22 @@ function refresh_click(uid) {
     refresh_command = add_unit(uid, refresh_command);
     xhr.send(JSON.stringify(refresh_command));
     xhr.onload = function(e) {
-        updateTable(loaded_config.header, loaded_config.devices);
+        updateDeviceList();
     }
-    xhr.send(JSON.stringify(logging_command));
+    xhr.send(JSON.stringify(refresh_command));
+}
+
+function legacy_mode_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var legacy_mode_command = { command: "legacy_mode" };
+    legacy_mode_command = add_unit(uid, legacy_mode_command);
+    xhr.send(JSON.stringify(legacy_mode_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(legacy_mode_command));
 }
 
 devices_refresh.addEventListener("click", function () {
@@ -724,6 +743,9 @@ devices_broadcast_ping.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var ping_command = { command: "ping", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(ping_command));
 });
 
@@ -732,6 +754,9 @@ devices_query_all.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var refresh_command = { command: "refresh", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
     xhr.send(JSON.stringify(refresh_command));
 });
 
@@ -740,5 +765,10 @@ devices_restart_all.addEventListener("click", function () {
     xhr.open("POST", '/control.json', true);
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     var restart_command = { command: "restart", unit: "can_all"};
+    xhr.onload = function(e) {
+        setTimeout(function() {
+            updateDeviceList();
+        }, 4000);
+    }
     xhr.send(JSON.stringify(restart_command));
 });

@@ -35,6 +35,9 @@ void CANUpdate::start(uint32_t filesize)
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), 
         &data[0], 1, false);
     
+    // legacy devices need to restart...
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
     // select flash area
     data[0] = 0;
     data[1] = 0;
@@ -47,9 +50,19 @@ void CANUpdate::start(uint32_t filesize)
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_SELECT),
         &data[0], 8, false);
     
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
+        &data[0], 0, true);
+    
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
     // erase flash
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_ERASE), 
         &data[0], 0, false);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
+        &data[0], 0, true);
+        vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 void CANUpdate::selected_start(char** uids, uint8_t device_count, uint32_t filesize)
@@ -67,16 +80,28 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
     constexpr uint32_t can_max = 8;
     uint32_t remaining = data_len;
     size_t addr = 0;
+    static uint8_t buffer[can_max];
+    static uint8_t buffer_len = 0;
     while ((remaining > 0) && (m_filesize > 0))
     {
         // slow down transmission. slaves are too slow to compete
-        if ((addr % 96) == 0)
+        if ((addr % 24) == 0)
         {
             vTaskDelay(pdMS_TO_TICKS(20));
         }
-        uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);
-        m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
-            reinterpret_cast<uint8_t*>(&p_data[addr]), to_send, false);
+        uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);       
+        for (unsigned int i = 0; i < to_send; i++)
+        {
+            buffer[buffer_len] = p_data[addr+i];
+            buffer_len++;
+            if (buffer_len == can_max)
+            {
+                m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
+                &buffer[0], can_max, false);
+                buffer_len = 0;
+            }
+        }
+                    
         remaining -= to_send;
         m_filesize -= to_send;
         addr += to_send;
@@ -86,7 +111,16 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
 
 void CANUpdate::complete()
 {
+   
     uint8_t data[8] {0};
+    
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
+        &data[0], 0, true);
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     data[0] = static_cast<uint8_t>(ICAN::AVAILABLE_t::APPLICATION);
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), &data[0], 1, false);
 }
