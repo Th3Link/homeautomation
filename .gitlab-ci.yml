@@ -1,0 +1,15 @@
+ESP32-SWITCHES Build:
+    image: espressif/idf:release-v5.0
+    variables:
+      GIT_SUBMODULE_STRATEGY: recursive
+    stage: build
+    script:
+        - idf.py -C software/mqtt_gateway build
+        - idf.py -C software/relais build
+        - idf.py -C software/lightswitch build
+    artifacts:
+        paths:
+            - software/lightswitch/build/lightswitch.*
+            - software/relais/build/relais.*
+            - software/mqtt_gateway/build/can2mqtt.*
+        expire_in: 1 week
