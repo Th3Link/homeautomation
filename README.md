@@ -85,7 +85,7 @@ It seems best to put the identificable devices into the topic and the numbers in
 data part. When using hexadecimal numbers, they get a leading 0x. the CANID is always
 in hex, additionally the BITMASK is also hex. 
 
-#### canbus/relais_command/<CANID> <NO>/<STATE>/<TIMEOUT>
+#### canbus/relais_command/&lt;CANID> &lt;NO>/&lt;STATE>/&lt;TIMEOUT>
 NO depends on the amount of chained relais. 
 - 0-15 are onboand relais. If the PCB has only 12 relais, 12-15 are unused. 
 - 16-31 is the extender with address 0b00
@@ -94,7 +94,7 @@ NO depends on the amount of chained relais.
 - 64-79 0b11
 The state is 0 for OFF, 1 for ON. The TIMEOUT is in milliseconds
 
-#### canbus/rollershutter_command/<CANID> <NO>/<STATE>/<TIMEOUT>
+#### canbus/rollershutter_command/&lt;CANID> &lt;NO>/&lt;STATE>/&lt;TIMEOUT>
 NO depends on the amount of chained relais. 
 - 0-7 are onboand relais. If the PCB has only 12 relais, 6-7 are unused. 
 - 8-15 is the extender with address 0b00
@@ -103,7 +103,7 @@ NO depends on the amount of chained relais.
 - 32-39 0b11
 The state is 0 for OFF, 1 for UP, 2 for DOWN. The TIMEOUT is in milliseconds
 
-#### canbus/lamp_command/<CANID> <VALUE>/<BITMASK>
+#### canbus/lamp_command/&lt;CANID> &lt;VALUE>/&lt;BITMASK>
 The value accepts values from 0 to 255 where 0 is OFF und 255 is the maximum brightness.
 The bitmask must be given in HEX, the first byte are leds 0-7 (little endian). The bitmask
 musk always be 3 bytes long
@@ -113,14 +113,14 @@ musk always be 3 bytes long
 - 0x800000 selects LED 7
 - 0x000100 seletcs LED 8
 
-#### canbus/debug/<CANID> <CANMESSAGE>
+#### canbus/debug/&lt;CANID> &lt;CANMESSAGE>
 The CANMESSAGE must be given in HEX, and can input every message. The first byte written
 in CANMESSAGE will translate to data[0] in the can message.
 
 ### CAN to MQTT
-#### canbus/relais_state/<CANID> <NO>/<STATE>
-#### canbus/rollershutter_state/<CANID> <NO>/<STATE>
-#### canbus/button/<CANID> <BUTTONID>/<EVENT>/<COUNT>
+#### canbus/relais_state/&lt;CANID> &lt;NO>/&lt;STATE>
+#### canbus/rollershutter_state/&lt;CANID> &lt;NO>/&lt;STATE>
+#### canbus/button/&lt;CANID> &lt;BUTTONID>/&lt;EVENT>/&lt;COUNT>
 The button ID depends on the amount of buttons attached to the extension board
 - 0-3 maps to onboard buttons. Thed are unusen if the PCB does not have buttons.
 - 4-7 maps to the extension board with address 0b00
@@ -128,7 +128,7 @@ The button ID depends on the amount of buttons attached to the extension board
 - 12-15 0x10
 - 16-19 0x11
 
-#### canbus/humidity/<SENSORID> <HUMITIDY>
+#### canbus/humidity/&lt;SENSORID> &lt;HUMITIDY>
 The SENSORID is a bit difficult. It has no mapping to the CANID. The Sensor ID is the
 devics UID (CHIP ID on stm32 and MAC address on ESP3) appended with the pin number or
 I2C address (depending on the sensor used)
@@ -137,12 +137,12 @@ The humidiy is a relative humidity in percent.
 In practice just put the sensor location in your house and the according SENSORID somewhere
 where it does not get lost.
  
-#### canbus/temperature/<SENSORID> <TEMPERATURE>
+#### canbus/temperature/&lt;SENSORID> &lt;TEMPERATURE>
 For this value comes another option for the SENSORID along. DS18B20 sensors have an
 own 64 bit address with 48 unique bits. When using such a sensor, these 48 bits are
 the SENSORID, for other sensors its the same as for humidity.
 
-#### canbus/log/<CANID> <CANMESSAGE>
+#### canbus/log/&lt;CANID> &lt;CANMESSAGE>
 
 ## Build 
 The build is done using the esp-idf (https://github.com/espressif/esp-idf), currently
