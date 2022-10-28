@@ -1,0 +1,4 @@
+**/build/*
+software/**/*.bin
+software/**/*.hexdump
+**/nvs.csv

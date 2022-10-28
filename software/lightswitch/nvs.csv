@@ -1,5 +1,0 @@
-key,type,encoding,value
-storage,namespace,,
-can_bitrate,data,u8,0
-can_id,data,u8,52
-can_type,data,u8,04
