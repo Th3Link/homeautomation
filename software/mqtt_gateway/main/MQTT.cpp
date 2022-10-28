@@ -22,11 +22,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(MQTT::TAG, "MQTT_EVENT_CONNECTED");
             
-            for (auto& dispatcher : mqtt->dispatcher())
-            {
-                mqtt->connected(true);
-                dispatcher->connected();
-            }
+            mqtt->connected_event();
             
             break;
         case MQTT_EVENT_DISCONNECTED:
@@ -51,13 +47,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             ESP_LOGI(MQTT::TAG, "DATA=%.*s\r\n", event->data_len, event->data);
             ESP_LOGI(MQTT::TAG, "ID=%d\r\n", event->msg_id);
             
-            mqtt->inc_received();
-            
-            for (auto dispatcher : mqtt->dispatcher())
-            {
-                dispatcher->dispatch(event->topic, event->topic_len, event->data, 
+            mqtt->dispatch(event->topic, event->topic_len, event->data, 
                     event->data_len);
-            }
             break;
         }
         case MQTT_EVENT_ERROR:
@@ -195,9 +186,32 @@ void MQTT::add_dispatcher(IMQTTDispatcher* dispatcher)
     m_dispatcher.push_back(dispatcher);
 }
 
-std::vector<IMQTTDispatcher*> MQTT::dispatcher()
+void MQTT::dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len)
 {
-    return m_dispatcher;
+    inc_received();
+    
+    try
+    {
+        for (auto dispatcher : m_dispatcher)
+        {
+            dispatcher->dispatch(topic, topic_len, data, data_len);
+        }
+    }
+    catch (...)
+    {
+        std::string topic("canbus/error/gateway_translation");
+        std::string data = std::string(topic, topic_len) + " " + std::string(data, data_len);
+        publish(topic.c_str(), data.c_str());
+    }
+}
+
+void MQTT::connected_event()
+{
+    m_connected = true;
+    for (auto dispatcher : m_dispatcher)
+    {
+        dispatcher->connected_event();
+    }
 }
 
 const char* MQTT::uri()
@@ -226,11 +240,6 @@ void MQTT::inc_received()
 void MQTT::inc_transmitted()
 {
     m_transmitted++;
-}
-
-void MQTT::connected(bool c)
-{
-    m_connected = c;
 }
 
 bool MQTT::connected()

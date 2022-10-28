@@ -9,7 +9,7 @@ public:
     BridgeDebug(ICAN&, IMQTT&);
     void init();
     void dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len) override;
-    void connected() override;
+    void connected_event() override;
 private:
     ICAN& m_can;
     IMQTT& m_mqtt;

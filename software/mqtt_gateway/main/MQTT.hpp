@@ -5,7 +5,7 @@
 #include "mqtt_client.h"
 #include "IMQTT.hpp"
 
-class MQTT : public IMQTT
+class MQTT : public IMQTT, public IMQTTDispatcher
 {
 public:
     MQTT();
@@ -24,10 +24,11 @@ public:
     void enabled(bool) override;
     void inc_received();
     void inc_transmitted();
-    void connected(bool);
     bool connected() override;
     uint64_t received() override;
     uint64_t transmitted() override;
+    void dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len) override;
+    void connected_event() override;
     static const char* TAG;
 private:
     char m_uri[60];

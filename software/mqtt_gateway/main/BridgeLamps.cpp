@@ -1,5 +1,6 @@
 #include "BridgeLamps.hpp"
 #include "helper.hpp"
+#include <string>
 
 const char canbuslamps_topic[] = "canbus/lamp_command/#";
 
@@ -33,12 +34,14 @@ void BridgeLamps::dispatch(const char* topic, size_t topic_len, const char* data
             uint8_t data8[4];
             uint32_t value_bitmask;
         };
-        value_bitmask = std::stoi(std::string(data, data_len));
+
+        value_bitmask = std::stoi(mqtt_split(data, data_len,1), nullptr, 16) << 8;
+        data8[0] = static_cast<uint8_t>(std::stoi(mqtt_split(data, data_len,0), nullptr, 10));
         m_can.send(id + static_cast<uint32_t>(ICAN::MSG_ID_t::LAMP_GROUP), data8, 4, false);
     }
 }
 
-void BridgeLamps::connected()
+void BridgeLamps::connected_event()
 {
     m_mqtt.subscribe(canbuslamps_topic);
 }

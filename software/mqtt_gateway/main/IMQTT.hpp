@@ -7,7 +7,7 @@ class IMQTTDispatcher
 {
 public:
     virtual void dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len) = 0;
-    virtual void connected() = 0;
+    virtual void connected_event() = 0;
 };
 
 class IMQTT

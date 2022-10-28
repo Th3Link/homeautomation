@@ -23,18 +23,16 @@ bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::RELAIS_STATE))
     {
         std::string relaisStateTopic = "canbus/relais_state/0x" + 
-            toHexString(ICAN::GET_NOT_MSG(identifier)) + "/" + 
-            std::to_string(data[0]);
-        std::string relaisStateData = std::to_string(data[1]);
+            toHexString(ICAN::GET_NOT_MSG(identifier));
+        std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
         return true;
     }
     else if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::ROLLERSHUTTER_STATE))
     {
         std::string relaisStateTopic = "canbus/rollershutter_state/0x" + 
-            toHexString(ICAN::GET_NOT_MSG(identifier)) + "/" + 
-            std::to_string(data[0]);
-        std::string relaisStateData = std::to_string(data[1]);
+            toHexString(ICAN::GET_NOT_MSG(identifier));
+        std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
         return true;
     }
@@ -58,9 +56,9 @@ void BridgeRelais::dispatch(const char* topic, size_t topic_len, const char* dat
                 uint64_t reserved : 16;
             };
         } du;
-        du.num = std::stoi(mqtt_split(topic,topic_len,3));
-        du.state = std::stoi(mqtt_split(data,data_len,0));
-        du.stop_time = std::stoi(mqtt_split(data,data_len,1));
+        du.num = std::stoi(mqtt_split(data,data_len,0));
+        du.state = std::stoi(mqtt_split(data,data_len,1));
+        du.stop_time = std::stoi(mqtt_split(data,data_len,2));
         du.reserved = 0;
         if (relaiscommand)
         {
@@ -73,7 +71,7 @@ void BridgeRelais::dispatch(const char* topic, size_t topic_len, const char* dat
     }
 }
 
-void BridgeRelais::connected()
+void BridgeRelais::connected_event()
 {
     m_mqtt.subscribe(canbusrelais_topic);
     m_mqtt.subscribe(canbusrollershutter_topic);

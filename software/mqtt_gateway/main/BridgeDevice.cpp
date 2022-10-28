@@ -79,7 +79,7 @@ void BridgeDevice::dispatch(const char* topic, size_t topic_len, const char* dat
 
 }
 
-void BridgeDevice::connected()
+void BridgeDevice::connected_event()
 {
     std::string availableTopic = std::string(canbusavailable_topic)
     + toHexString(ICAN::DID_TO_ID(m_can.get_id()) + ICAN::TYPE_TO_ID(static_cast<ICAN::DEVICE_t>(m_can.get_type())) + 

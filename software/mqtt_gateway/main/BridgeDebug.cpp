@@ -34,7 +34,7 @@ void BridgeDebug::dispatch(const char* topic, size_t topic_len, const char* data
     }
 }
 
-void BridgeDebug::connected()
+void BridgeDebug::connected_event()
 {
     m_mqtt.subscribe(debug_topic);
 }

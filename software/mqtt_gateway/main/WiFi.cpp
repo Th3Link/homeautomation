@@ -93,7 +93,6 @@ void WiFi::init()
     
     if (m_mode == Mode::Client)
     {
-        printf("wifi_init\n");
         if (!init_client())
         {
             strcat(m_ssid, "_ap");
