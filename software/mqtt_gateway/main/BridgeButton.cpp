@@ -32,9 +32,34 @@ bool BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
         {
             u.data8[i] = data[i];
         };
-
+        
         std::string buttonTopic = "canbus/button/0x" + toHexString(ICAN::GET_NOT_MSG(identifier));
-        std::string buttonData = std::to_string(u.s.button_id) + "/" + std::to_string(u.s.button_event) + "/" + std::to_string(u.s.count);
+        std::string buttonData = std::to_string(u.s.button_id) + "/";
+        
+        switch (static_cast<ICAN::BUTTON_EVENT_t>(u.s.button_event))
+        {
+            case ICAN::BUTTON_EVENT_t::RELEASED:
+                buttonData += "released";
+                break;
+            case ICAN::BUTTON_EVENT_t::HOLD:
+                buttonData += "hold";
+                break;
+            case ICAN::BUTTON_EVENT_t::PRESSED:
+                return true;
+            case ICAN::BUTTON_EVENT_t::SINGLE:
+                buttonData += "single";
+                break;
+            case ICAN::BUTTON_EVENT_t::DOUBLE:
+                buttonData += "double";
+                break;
+            case ICAN::BUTTON_EVENT_t::TRIPPLE:
+                buttonData += "tripple";
+                break;
+        }
+        
+
+        
+        buttonData += "/" + std::to_string(u.s.count);
         m_mqtt.publish(buttonTopic.c_str(), buttonData.c_str());
         return true;
     }
