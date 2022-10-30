@@ -133,7 +133,20 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(canbus, "baudrate", ICAN::bitrate_string(m_can.bitrate()));
 
     const esp_app_desc_t* desc = esp_ota_get_app_description();
-
+    const char release_prefix[] = "release/";
+    const size_t rpl = sizeof(release_prefix)-1;
+    char version[10] {0};
+    if (strncmp(desc->version, release_prefix, rpl) == 0)
+    {
+        strncpy(&version[0], &desc->version[rpl], 
+            strlen(desc->version) - rpl);
+    }
+    else
+    {
+        strncpy(&version[0], desc->version, sizeof(version));
+    }
+    // assure /0 at the end
+    version[9] = 0;
     uint32_t mins = std::chrono::duration_cast<std::chrono::minutes>(
         std::chrono::microseconds(esp_timer_get_time())).count();
     uint32_t days = mins / 60 / 24;
@@ -142,7 +155,7 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     char uptime[32];
     sprintf(&uptime[0], "%lu days, %lu minutes", days, rem_mins);
     
-    cJSON_AddStringToObject(root, "firmware_version", desc->version);
+    cJSON_AddStringToObject(root, "firmware_version", version);
     cJSON_AddStringToObject(root, "idf_version", desc->idf_ver);
     cJSON_AddStringToObject(root, "uptime", &uptime[0]);
     cJSON_AddStringToObject(wifi, "state", "connected");

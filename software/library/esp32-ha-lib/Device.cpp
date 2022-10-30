@@ -1,5 +1,6 @@
 #include <nvs_flash.h>
 #include <esp_mac.h>
+#include <esp_log.h>
 #include <esp_ota_ops.h>
 #include "Device.hpp"
 #include <chrono>
@@ -48,14 +49,31 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             if (request)
             {
                 const esp_app_desc_t* desc = esp_ota_get_app_description();
+                const char release_prefix[] = "release/";
+                const size_t rpl = sizeof(release_prefix)-1;
+                
                 uint8_t data[8] {0};
                 size_t len = strlen(desc->version);
                 int min_len = std::min(static_cast<int>(len),8);
-                for (unsigned int i = 0; i < min_len; i++)
+                
+                if (strncmp(desc->version, release_prefix, rpl) == 0)
                 {
-                    data[i] = desc->version[i];
+                    min_len = std::min(static_cast<int>(len-rpl),8);
+                    for (unsigned int i = 0; i < min_len; i++)
+                    {
+                        data[i] = desc->version[i+rpl];
+                    }
                 }
-                m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION, data, min_len, false);
+                else
+                {
+                    for (unsigned int i = 0; i < min_len; i++)
+                    {
+                        data[i] = desc->version[i];
+                    }
+                }
+
+                ESP_LOGI(TAG, "APP VERSION %s %d", desc->version, len);
+                m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION_STRING, data, min_len, false);
             }
             return true;
         }
@@ -81,8 +99,6 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 }
                 nvs_commit(nvs_handle);
                 nvs_close(nvs_handle);
-                m_can.deinit();
-                m_can.init();
             }
             return true;
         }
@@ -103,12 +119,21 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 if (data_len == 8)
                 {
                     uid_selected = true;
+                    bool all_zero = true;
                     for (unsigned int i = 0; i < 8; i++)
                     {
                         if (chipid[i] != data[i])
                         {
                             uid_selected = false;
                         }
+                        if (data[i])
+                        {
+                            all_zero = false;
+                        }
+                    }
+                    if (all_zero)
+                    {
+                        uid_selected = true;
                     }
                 }
             }

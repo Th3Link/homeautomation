@@ -29,9 +29,9 @@ static void can_receive_task(void *this_ptr)
         if (twai_receive(&rx_msg, pdMS_TO_TICKS(100)) == ESP_OK)
         {
             // no need to compare types, they are filtered using the acceptance filter
-            if (!can->enable_filter()
-                || ICAN::ID_COMPARE(rx_msg.identifier,can->get_id())
-                || ((rx_msg.identifier & 0xFF00) == 0x00))
+            bool id_match = ICAN::ID_COMPARE(rx_msg.identifier,can->get_id());
+            bool id_zero = ICAN::ID_COMPARE(rx_msg.identifier,0);
+            if (!can->enable_filter() || id_zero || id_match)
             {
                 can->dispatch(rx_msg.identifier, rx_msg.data, 
                     rx_msg.data_length_code, rx_msg.rtr);
@@ -92,12 +92,28 @@ void CAN::init()
     
     if (m_enable_filter)
     {
-        constexpr uint32_t DUAL_MASK = ((ID_TYPE_MASK + ID_NG_MASK) >> 13);
+        //twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+        constexpr uint32_t DUAL_MASK = ((ID_TYPE_MASK + ID_NG_MASK) << 3);
+        uint32_t type_code = ((ID_NG_MASK + TYPE_TO_ID(static_cast<ICAN::DEVICE_t>(get_type()))) << 3);
+        twai_filter_config_t f_config = {
+            .acceptance_code = ID_NG_MASK << 3 | (type_code >> 16),
+            .acceptance_mask = (~(DUAL_MASK) & 0xFFFF0000) | 
+                (~(DUAL_MASK >> 16) & 0xFFFF),
+            .single_filter = false};
+        
+        /*constexpr uint32_t DUAL_MASK = ((ID_TYPE_MASK + ID_NG_MASK) >> 13);
         twai_filter_config_t f_config = {
             .acceptance_code = ((ID_NG_MASK >> 13) | 
-                (((ID_TYPE_MASK + TYPE_TO_ID(static_cast<ICAN::DEVICE_t>(get_type()))) >> 13) << 16)), 
-            .acceptance_mask = DUAL_MASK | (DUAL_MASK << 16),
+                (((ID_NG_MASK + TYPE_TO_ID(static_cast<ICAN::DEVICE_t>(get_type()))) >> 13) << 16)), 
+            .acceptance_mask = ~(DUAL_MASK | (DUAL_MASK << 16)),
             .single_filter = false};
+        */
+        /*twai_filter_config_t f_config = {
+            .acceptance_code = 0x08010001,
+            .acceptance_mask = 0xE07EE07E,
+            .single_filter = false};
+        */
+        ESP_LOGI(TAG, "acceptance code: %08lx mask: %08lx", f_config.acceptance_code, f_config.acceptance_mask);
         
         ESP_ERROR_CHECK(twai_driver_install(&g_config, t_config, &f_config));
     }
@@ -171,9 +187,10 @@ void CAN::send(uint32_t id, uint8_t* data, unsigned int data_len, bool request)
         tx_msg.data[i] = data[i];
     }
     
-    if (twai_transmit(&tx_msg, portMAX_DELAY) != ESP_OK)
+    esp_err_t err = twai_transmit(&tx_msg, portMAX_DELAY);
+    if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Transmit error");
+        ESP_LOGE(TAG, "Transmit error %lx", static_cast<uint32_t>(err));
     }
 }
 

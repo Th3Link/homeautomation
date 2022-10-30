@@ -10,14 +10,13 @@ class DeviceList : public ICANDispatcher
 public:
     DeviceList(ICAN&);
     bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
-    void refresh();
     void init();
     void output(cJSON* object);
     
     struct DeviceListEntry
     {
         uint32_t id;
-        std::array<char, 8> custom_string;
+        std::array<char, 10> custom_string;
         std::array<char, 12> version;
         uint32_t last_seen;
         uint32_t uptime;

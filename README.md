@@ -1,6 +1,6 @@
 # homeautomation
 
-In this repository you can find components for a canbus home automation system.:
+In this repository you can find components for a CANBus home automation system.
 
 ## mqtt_gateway
 The gateway is used to access the canbus via MQTT but it also has some very useful features
@@ -160,8 +160,11 @@ Quick steps:
 `sudo pacman -S --needed gcc git make flex bison gperf python cmake ninja ccache dfu-util libusb`
 
 `git clone --recursive https://github.com/espressif/esp-idf.git`
+
 `cd esp-idf`
+
 `./install.sh esp32`
+
 `. ./export.sh # note the dot at the beginning: source the file, otherwise you dont get the environment varibles set`
 
 Than you can change to your project dir (i.e. homeautomation/software/mqtt_gateway) and

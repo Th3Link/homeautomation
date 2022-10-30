@@ -23,7 +23,8 @@ void DeviceList::init()
 
 }
 
-static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifier, uint8_t* data, unsigned int data_len)
+static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifier, 
+    uint8_t* data, unsigned int data_len)
 {
     uint32_t mins = std::chrono::duration_cast<std::chrono::minutes>(
         std::chrono::microseconds(esp_timer_get_time())).count();
@@ -78,10 +79,11 @@ static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifi
         }
         case ICAN::MSG_ID_t::APPLICATION_VERSION_STRING:
         {
-            for (unsigned int i = 0; i < data_len; i++)
+            for (unsigned int i = 0; i < std::min(data_len,static_cast<unsigned int>(12-1)); i++)
             {
                 device.version[i] = data[i];
             }
+            device.version[data_len] = 0;
             break;
         }
         case ICAN::MSG_ID_t::UPTIME:
@@ -146,13 +148,6 @@ bool DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_
     return false;
 }
 
-void DeviceList::refresh()
-{
-    uint8_t data[1];
-    m_can.send(0x10000000, &data[0], 0, true);
-    
-}
-
 void DeviceList::output(cJSON* object)
 {
     cJSON *devices = cJSON_AddArrayToObject(object, "devices");
@@ -166,8 +161,8 @@ void DeviceList::output(cJSON* object)
             char custom_string[9] {0};
             char state[5] {0};
             char error[5] {0};
-            char uid0[20] {0};
-            char uid1[20] {0};
+            char uid0[22] {0};
+            char uid1[22] {0};
             char version[9] {0};
             char rollershutter_mode[9] {0};
             

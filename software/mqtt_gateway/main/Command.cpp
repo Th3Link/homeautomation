@@ -283,6 +283,10 @@ void Command::save_device(char* cmd, cJSON* root)
         char* type_string = cJSON_GetStringValue(type_json);
         data[1] = std::stoul(std::string(type_string), nullptr, 16) & 0xFF;
         
+        // send select uid0 first. there is a bypass by sending all 8 bytes zero.
+        // we just do this for now.
+        uint8_t uid0_data[8] {0};
+        send_can_command(root, ICAN::MSG_ID_t::DEVICE_UID0, &uid0_data[0], sizeof(uid0_data), false);
         send_can_command(root, ICAN::MSG_ID_t::DEVICE_ID_TYPE, &data[0], 2, false);
     }
 

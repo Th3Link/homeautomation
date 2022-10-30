@@ -25,17 +25,21 @@ void Update::init(const uint8_t const_type)
     }
 
     nvs_close(nvs_handle);
+    esp_ota_img_states_t ota_state = ESP_OTA_IMG_VALID;
+    esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota_state);
     
-    if (type != const_type)
+    if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
     {
-        ESP_LOGI(TAG, "Image not valid, wrong type\n");
-        esp_ota_mark_app_invalid_rollback_and_reboot();
+        if (type != const_type)
+        {
+            ESP_LOGI(TAG, "Image not valid, wrong type\n");
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+        }
+        else
+        {
+            esp_ota_mark_app_valid_cancel_rollback();
+        }
     }
-    else
-    {
-        esp_ota_mark_app_valid_cancel_rollback();
-    }
-    
 }
 
 bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
@@ -83,6 +87,11 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                     ESP_LOGI(TAG, "update complete, restarting\n");
                     esp_ota_end(ota_handle);
                     esp_ota_set_boot_partition(partition);
+                    esp_restart();
+                }
+                else
+                {
+                    // just do a normal restart as requested
                     esp_restart();
                 }
                 update_mode = false;
