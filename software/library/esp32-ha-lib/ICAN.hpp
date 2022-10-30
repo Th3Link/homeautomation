@@ -78,7 +78,10 @@ public:
     {
         RELEASED = 0,
         PRESSED = 1,
-        HOLD = 2
+        HOLD = 2,
+        SINGLE = 3,
+        DOUBLE = 4,
+        TRIPPLE = 5
     };
 
     enum class DEVICE_t : uint32_t
