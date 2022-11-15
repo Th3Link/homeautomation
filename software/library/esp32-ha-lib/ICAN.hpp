@@ -146,7 +146,7 @@ public:
             case ICAN::DEVICE_t::Gateway:
                 return "Gateway";
         }
-        return "b50";
+        return "Unknown";
     }
 
     static inline const char* bitrate_string(ICAN::BITRATE_t b)

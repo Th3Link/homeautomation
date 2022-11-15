@@ -314,7 +314,7 @@ void Command::save_device(char* cmd, cJSON* root)
     {
         char* rollershutter_mode_string = cJSON_GetStringValue(rollershutter_mode_json);
         uint8_t rollershutter_mode = 1;
-        if (strcmp(rollershutter_mode_string, "HARDWARE"))
+        if (strcmp(rollershutter_mode_string, "HARDWARE") == 0)
         {
             rollershutter_mode = 2;
         }

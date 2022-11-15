@@ -344,8 +344,6 @@ bool Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(data[0]);
                 nvs_commit(nvs_handle);
                 nvs_close(nvs_handle);
-                m_can.deinit();
-                m_can.init();
             }
             return true;
         }
