@@ -1,8 +1,8 @@
-use <din_clip_01.scad>
+use <../library/din_clip_01.scad>
 
-PCB_HEIGHT=97;
-PCB_WIDTH1=91;
-PCB_WIDTH2=97;
+PCB_HEIGHT=98;
+PCB_WIDTH1=90;
+PCB_WIDTH2=96;
 PCB_T =2;
 PCB_FREE_SPACE=74;
 T=2;
@@ -18,6 +18,7 @@ difference() {
     translate([PCB_FREE_SPACE,PCB_HEIGHT,0]) cube([width-PCB_FREE_SPACE+1.5,3,3+3*T]);
 }
 }
+
 half(PCB_WIDTH1);
 translate([0,25,22]) half(PCB_WIDTH1);
 //translate([PCB_WIDTH1+PCB_WIDTH2+20,0,0]) mirror([1,0,0]) half(PCB_WIDTH2);
@@ -28,4 +29,4 @@ color("red") translate([0,0,3+3*T]) rotate([-48.5,0,0]) translate([0,-20,0]) cub
 color("red") translate([0,PCB_WIDTH2+16.24,-14.97]) rotate([-48.5,0,0]) translate([0,-20,0]) cube([2,20,50]);
 }
 
-translate([50/2,25,T]) rotate([0,90,0]) din_clip(50);
+translate([25/2,25,T]) rotate([0,90,0]) din_clip(h=25);
