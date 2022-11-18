@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>/home/th3link/workbench/homeautomation/homeautomation/hardware/canhub/canhubline.kicad_sch</source>
+    <date>Thu 17 Nov 2022 08:26:32 PM CET</date>
+    <tool>Eeschema (6.0.9)</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title/>
+        <company/>
+        <rev/>
+        <date/>
+        <source>canhubline.kicad_sch</source>
+        <comment number="1" value=""/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="H1">
+      <value>MountingHole</value>
+      <footprint>MountingHole:MountingHole_3.2mm_M3</footprint>
+      <libsource lib="Mechanical" part="MountingHole" description="Mounting Hole without connection"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>081df0c7-b325-4a6e-9c56-1fc6e51192e8</tstamps>
+    </comp>
+    <comp ref="H2">
+      <value>MountingHole</value>
+      <footprint>MountingHole:MountingHole_3.2mm_M3</footprint>
+      <libsource lib="Mechanical" part="MountingHole" description="Mounting Hole without connection"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>adba2574-7e7f-4e81-8cf8-4da3494326fe</tstamps>
+    </comp>
+    <comp ref="H3">
+      <value>MountingHole</value>
+      <footprint>MountingHole:MountingHole_3.2mm_M3</footprint>
+      <libsource lib="Mechanical" part="MountingHole" description="Mounting Hole without connection"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a016a0f9-e86e-4f0a-8a32-60374efe2b35</tstamps>
+    </comp>
+    <comp ref="H4">
+      <value>MountingHole</value>
+      <footprint>MountingHole:MountingHole_3.2mm_M3</footprint>
+      <libsource lib="Mechanical" part="MountingHole" description="Mounting Hole without connection"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>676d5b02-b3f5-4191-82a7-581894f23cb8</tstamps>
+    </comp>
+    <comp ref="J1">
+      <value>WAGO250-205</value>
+      <footprint>awesome:WAGO250-205</footprint>
+      <datasheet>https://cdn-reichelt.de/documents/datenblatt/C151/WAGO250-20X.pdf</datasheet>
+      <libsource lib="awesome" part="WAGO250-205" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006100581c</tstamps>
+    </comp>
+    <comp ref="J2UPLINK1">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000060ff1757</tstamps>
+    </comp>
+    <comp ref="J3">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000060ff5013</tstamps>
+    </comp>
+    <comp ref="J4">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006101df43</tstamps>
+    </comp>
+    <comp ref="J5">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000061020e3c</tstamps>
+    </comp>
+    <comp ref="J6">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000061033109</tstamps>
+    </comp>
+    <comp ref="J7">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006103310f</tstamps>
+    </comp>
+    <comp ref="J8">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000061033145</tstamps>
+    </comp>
+    <comp ref="J9">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-000061033163</tstamps>
+    </comp>
+    <comp ref="J10">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006103b145</tstamps>
+    </comp>
+    <comp ref="J11">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006103b14b</tstamps>
+    </comp>
+    <comp ref="J12">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006103b181</tstamps>
+    </comp>
+    <comp ref="J13">
+      <value>RJ45-CAN</value>
+      <footprint>Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</footprint>
+      <libsource lib="awesome" part="RJ45-CAN" description="RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="canhubline.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>00000000-0000-0000-0000-00006103b19f</tstamps>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="Mechanical" part="MountingHole">
+      <description>Mounting Hole without connection</description>
+      <docs>~</docs>
+      <footprints>
+        <fp>MountingHole*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">H</field>
+        <field name="Value">MountingHole</field>
+        <field name="Datasheet">~</field>
+      </fields>
+    </libpart>
+    <libpart lib="awesome" part="RJ45-CAN">
+      <description>RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45</description>
+      <docs>~</docs>
+      <footprints>
+        <fp>8P8C*</fp>
+        <fp>RJ45*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">RJ45-CAN</field>
+        <field name="Footprint">Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="GND" type="passive"/>
+        <pin num="2" name="+12V" type="passive"/>
+        <pin num="3" name="CANL" type="passive"/>
+        <pin num="4" name="CANL" type="passive"/>
+        <pin num="5" name="CANH" type="passive"/>
+        <pin num="6" name="CANH" type="passive"/>
+        <pin num="7" name="+5V" type="passive"/>
+        <pin num="8" name="GND" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="awesome" part="WAGO250-205">
+      <docs>https://cdn-reichelt.de/documents/datenblatt/C151/WAGO250-20X.pdf</docs>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">WAGO250-205</field>
+        <field name="Footprint">awesome:WAGO250-205</field>
+        <field name="Datasheet">https://cdn-reichelt.de/documents/datenblatt/C151/WAGO250-20X.pdf</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+        <pin num="3" name="3" type="passive"/>
+        <pin num="4" name="4" type="passive"/>
+        <pin num="5" name="5" type="passive"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="Mechanical">
+      <uri>/usr/share/kicad/symbols//Mechanical.kicad_sym</uri>
+    </library>
+    <library logical="awesome">
+      <uri>/home/th3link/workbench/homeautomation/homeautomation/hardware/canhub/../awesome-kicad-library/awesome.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="+5V">
+      <node ref="J1" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="J10" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J11" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J12" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J13" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J2UPLINK1" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J3" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J4" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J5" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J6" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J7" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J8" pin="7" pinfunction="+5V" pintype="passive"/>
+      <node ref="J9" pin="7" pinfunction="+5V" pintype="passive"/>
+    </net>
+    <net code="2" name="+12V">
+      <node ref="J1" pin="3" pinfunction="3" pintype="passive"/>
+      <node ref="J10" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J11" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J12" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J13" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J2UPLINK1" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J3" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J4" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J5" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J6" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J7" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J8" pin="2" pinfunction="+12V" pintype="passive"/>
+      <node ref="J9" pin="2" pinfunction="+12V" pintype="passive"/>
+    </net>
+    <net code="3" name="GND">
+      <node ref="J1" pin="1" pinfunction="1" pintype="passive"/>
+      <node ref="J1" pin="4" pinfunction="4" pintype="passive"/>
+      <node ref="J10" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J10" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J11" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J11" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J12" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J12" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J13" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J13" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J2UPLINK1" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J2UPLINK1" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J3" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J3" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J4" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J4" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J5" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J5" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J6" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J6" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J7" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J7" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J8" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J8" pin="8" pinfunction="GND" pintype="passive"/>
+      <node ref="J9" pin="1" pinfunction="GND" pintype="passive"/>
+      <node ref="J9" pin="8" pinfunction="GND" pintype="passive"/>
+    </net>
+    <net code="4" name="Net-(J2UPLINK1-Pad3)">
+      <node ref="J2UPLINK1" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J4" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="5" name="Net-(J2UPLINK1-Pad4)">
+      <node ref="J2UPLINK1" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J3" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="6" name="Net-(J2UPLINK1-Pad5)">
+      <node ref="J2UPLINK1" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J3" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="7" name="Net-(J2UPLINK1-Pad6)">
+      <node ref="J2UPLINK1" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J4" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="8" name="Net-(J3-Pad3)">
+      <node ref="J3" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J5" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="9" name="Net-(J3-Pad6)">
+      <node ref="J3" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J5" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="10" name="Net-(J4-Pad4)">
+      <node ref="J4" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J6" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="11" name="Net-(J4-Pad5)">
+      <node ref="J4" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J6" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="12" name="Net-(J5-Pad3)">
+      <node ref="J5" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J7" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="13" name="Net-(J5-Pad6)">
+      <node ref="J5" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J7" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="14" name="Net-(J6-Pad4)">
+      <node ref="J6" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J8" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="15" name="Net-(J6-Pad5)">
+      <node ref="J6" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J8" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="16" name="Net-(J7-Pad3)">
+      <node ref="J7" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J9" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="17" name="Net-(J7-Pad6)">
+      <node ref="J7" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J9" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="18" name="Net-(J10-Pad3)">
+      <node ref="J10" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J8" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="19" name="Net-(J10-Pad4)">
+      <node ref="J10" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J12" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="20" name="Net-(J10-Pad5)">
+      <node ref="J10" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J12" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="21" name="Net-(J10-Pad6)">
+      <node ref="J10" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J8" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="22" name="Net-(J11-Pad3)">
+      <node ref="J11" pin="3" pinfunction="CANL" pintype="passive"/>
+      <node ref="J13" pin="4" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="23" name="Net-(J11-Pad4)">
+      <node ref="J11" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J9" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="24" name="Net-(J11-Pad5)">
+      <node ref="J11" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J9" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="25" name="Net-(J11-Pad6)">
+      <node ref="J11" pin="6" pinfunction="CANH" pintype="passive"/>
+      <node ref="J13" pin="5" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="26" name="Net-(J12-Pad4)">
+      <node ref="J12" pin="4" pinfunction="CANL" pintype="passive"/>
+      <node ref="J13" pin="3" pinfunction="CANL" pintype="passive"/>
+    </net>
+    <net code="27" name="Net-(J12-Pad5)">
+      <node ref="J12" pin="5" pinfunction="CANH" pintype="passive"/>
+      <node ref="J13" pin="6" pinfunction="CANH" pintype="passive"/>
+    </net>
+    <net code="28" name="unconnected-(J1-Pad5)">
+      <node ref="J1" pin="5" pinfunction="5" pintype="passive"/>
+    </net>
+  </nets>
+</export>
