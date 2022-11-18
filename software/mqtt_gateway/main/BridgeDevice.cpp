@@ -3,7 +3,7 @@
 
 const char* BridgeDevice::TAG = "BridgeDevice";
 const char canbusavailable_topic[] = "canbus/available/";
-BridgeDevice::BridgeDevice(ICAN& ic, IMQTT& im) : m_can(ic), m_mqtt(im)
+BridgeDevice::BridgeDevice(ICAN& ic, IMQTT& im, DeviceList& dl) : m_can(ic), m_mqtt(im), m_device_list(dl)
 {
     //m_mqtt.add_dispatcher(this);
     m_can.add_dispatcher(this);

@@ -1,4 +1,5 @@
 #include "DeviceList.hpp"
+#include "helper.hpp"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -11,7 +12,7 @@ const char* DeviceList::TAG = "DeviceList";
 
 DeviceList::DeviceList(ICAN& ic) : m_can(ic)
 {
-    for (unsigned int i = 0; i < 50; i++)
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++)
     {
         m_deviceList[i].id = 0;
     }
@@ -146,6 +147,40 @@ bool DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_
         }
     }
     return false;
+}
+
+std::string DeviceList::entry(uint32_t id)
+{
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++)
+    {
+        if (m_deviceList[i].id == id)
+        {
+            return std::string(m_deviceList[i].custom_string.data());
+        }
+    }
+    return "";
+}
+
+uint32_t DeviceList::resolve(std::string device_string)
+{
+    std::string prefix = "0x";
+    if (std::equal(prefix.begin(), prefix.end(), device_string.begin()))
+    {
+        return hextoInt(device_string);
+    }
+    
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++)
+    {
+        if (m_deviceList[i].id != 0)
+        {
+            std::string cs(m_deviceList[i].custom_string.data());
+            if (cs == device_string)
+            {
+                return m_deviceList[i].id;
+            }
+        }
+    }
+    return 0;
 }
 
 void DeviceList::output(cJSON* object)

@@ -2,11 +2,12 @@
 
 #include "esp32-ha-lib/ICAN.hpp"
 #include "IMQTT.hpp"
+#include "DeviceList.hpp"
 
 class BridgeButton : public ICANDispatcher, public IMQTTDispatcher
 {
 public:
-    BridgeButton(ICAN&, IMQTT&);
+    BridgeButton(ICAN&, IMQTT&, DeviceList&);
     void init();
     bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
     void dispatch(const char* topic, size_t topic_len, const char* data, size_t data_len) override;
@@ -14,5 +15,6 @@ public:
 private:
     ICAN& m_can;
     IMQTT& m_mqtt;
+    DeviceList& m_device_list;
     static const char* TAG;
 };

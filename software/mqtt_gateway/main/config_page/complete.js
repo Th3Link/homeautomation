@@ -916,10 +916,12 @@ function updateTable(header, elements) {
         document.getElementById(elements[i].uid + "_device_type").value = elements[i].device_type;
         document.getElementById(elements[i].uid + "_custom_string").value = elements[i].custom_string;
         document.getElementById(elements[i].uid + "_can_baudrate").value = elements[i].baudrate;
+        document.getElementById(elements[i].uid + "_rollershutter_mode").value = elements[i].rollershutter_mode;
         document.getElementById(elements[i].uid + "_device_id").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_device_type").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_custom_string").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_can_baudrate").dispatchEvent(new window.Event('change'));
+        document.getElementById(elements[i].uid + "_rollershutter_mode").dispatchEvent(new window.Event('change'));
     }
 }
 
@@ -1027,7 +1029,14 @@ function save_click(uid) {
         }
     }
     xhr.send(JSON.stringify(save_command));
-    updateDeviceList();
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    
+    //setTimeout(function() {
+    //     location.reload();
+    //}, 8000);
+    
 }
 
 function restart_click(uid) {
@@ -1440,10 +1449,15 @@ function update_click(uid) {
         var p = Math.round(100 / e.total * e.loaded);
         document.getElementById(uid + "_progress").innerHTML = p + "%";
     };
-
+    
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "Update complete";
+    }
+    
     req.onload = function(e) {
         document.getElementById(uid + "_progress").innerHTML = "100%";
-        var xmlhttp = new XMLHttpRequest();
+        
         xmlhttp.open("POST", "/control.json");
         xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
 
@@ -1452,11 +1466,6 @@ function update_click(uid) {
             setTimeout(function() {
                  location.reload();
             }, 8000);
-        } else {
-            xmlhttp.onload = function(e) {
-                document.getElementById(uid + "_progress").innerHTML = "Update complete";
-                updateDeviceList();
-            }
         }
         xmlhttp.send(JSON.stringify({ command:"update_complete" }));
     };

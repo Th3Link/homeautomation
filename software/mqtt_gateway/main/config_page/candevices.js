@@ -567,10 +567,12 @@ function updateTable(header, elements) {
         document.getElementById(elements[i].uid + "_device_type").value = elements[i].device_type;
         document.getElementById(elements[i].uid + "_custom_string").value = elements[i].custom_string;
         document.getElementById(elements[i].uid + "_can_baudrate").value = elements[i].baudrate;
+        document.getElementById(elements[i].uid + "_rollershutter_mode").value = elements[i].rollershutter_mode;
         document.getElementById(elements[i].uid + "_device_id").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_device_type").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_custom_string").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_can_baudrate").dispatchEvent(new window.Event('change'));
+        document.getElementById(elements[i].uid + "_rollershutter_mode").dispatchEvent(new window.Event('change'));
     }
 }
 
@@ -678,7 +680,14 @@ function save_click(uid) {
         }
     }
     xhr.send(JSON.stringify(save_command));
-    updateDeviceList();
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    
+    //setTimeout(function() {
+    //     location.reload();
+    //}, 8000);
+    
 }
 
 function restart_click(uid) {

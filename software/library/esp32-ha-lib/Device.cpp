@@ -32,7 +32,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::CUSTOM_STRING), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::UPTIME), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::BAUDRATE), data, data_len, request);
-            return true;
+            return false;
         }
         case ICAN::MSG_ID_t::DEVICE_GROUP:
         {

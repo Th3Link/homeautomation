@@ -45,11 +45,11 @@ static CANUpdate can_update(can_logging);
 static DeviceList device_list(can_logging);
 static WiFi wifi;
 static Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
-static BridgeDevice bridge_device(can_logging, mqtt);
-static BridgeRelais bridge_relais(can_logging, mqtt);
-static BridgeButton bridge_button(can_logging, mqtt);
-static BridgeLamps bridge_lamps(can_logging, mqtt);
-static BridgeDebug bridge_debug(can_logging, mqtt);
+static BridgeDevice bridge_device(can_logging, mqtt, device_list);
+static BridgeRelais bridge_relais(can_logging, mqtt, device_list);
+static BridgeButton bridge_button(can_logging, mqtt, device_list);
+static BridgeLamps bridge_lamps(can_logging, mqtt, device_list);
+static BridgeDebug bridge_debug(can_logging, mqtt, device_list);
 
 extern "C"
 void app_main()

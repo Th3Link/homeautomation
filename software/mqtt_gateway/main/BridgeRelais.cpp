@@ -6,7 +6,7 @@ const char canbusrollershutter_topic[] = "canbus/rollershutter_command/#";
 
 const char* BridgeRelais::TAG = "BridgeRelais";
 
-BridgeRelais::BridgeRelais(ICAN& ic, IMQTT& im) : m_can(ic), m_mqtt(im)
+BridgeRelais::BridgeRelais(ICAN& ic, IMQTT& im, DeviceList& dl) : m_can(ic), m_mqtt(im), m_device_list(dl)
 {
     m_can.add_dispatcher(this);
     m_mqtt.add_dispatcher(this);
@@ -26,6 +26,14 @@ bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
             toHexString(ICAN::GET_NOT_MSG(identifier));
         std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
+        
+        std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
+        if (custom_string.length() > 0)
+        {
+            std::string relaisStateTopic_cs = "canbus/relais_state/" + custom_string;
+            m_mqtt.publish(relaisStateTopic_cs.c_str(), relaisStateData.c_str());
+        }
+        
         return true;
     }
     else if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::ROLLERSHUTTER_STATE))
@@ -34,6 +42,14 @@ bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
             toHexString(ICAN::GET_NOT_MSG(identifier));
         std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
+        
+        std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
+        if (custom_string.length() > 0)
+        {
+            std::string relaisStateTopic_cs = "canbus/rollershutter_state/" + custom_string;
+            m_mqtt.publish(relaisStateTopic_cs.c_str(), relaisStateData.c_str());
+        }
+        
         return true;
     }
     return false;
@@ -45,8 +61,7 @@ void BridgeRelais::dispatch(const char* topic, size_t topic_len, const char* dat
     bool rollershuttercommand = (strncmp(topic,canbusrollershutter_topic,sizeof(canbusrollershutter_topic)-2) == 0);
     if (relaiscommand || rollershuttercommand)
     {
-        uint32_t id = hextoInt(mqtt_split(topic,topic_len,2));
-        
+        uint32_t id = m_device_list.resolve(mqtt_split(topic,topic_len,2));
         union {
             uint8_t data_bytes[8];
             struct {

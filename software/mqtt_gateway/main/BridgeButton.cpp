@@ -3,7 +3,7 @@
 
 const char* BridgeButton::TAG = "BridgeButton";
 
-BridgeButton::BridgeButton(ICAN& ic, IMQTT& im) : m_can(ic), m_mqtt(im)
+BridgeButton::BridgeButton(ICAN& ic, IMQTT& im, DeviceList& dl) : m_can(ic), m_mqtt(im), m_device_list(dl)
 {
     m_can.add_dispatcher(this);
     //m_mqtt.add_dispatcher(this);
@@ -15,7 +15,7 @@ void BridgeButton::init()
 }
 
 bool BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
-{
+{   
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::BUTTON_EVENT))
     {
         union {
@@ -56,11 +56,18 @@ bool BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
                 buttonData += "tripple";
                 break;
         }
-        
 
-        
-        buttonData += "/" + std::to_string(u.s.count);
+        buttonData += "/" + std::to_string(u.s.count);        
+
+        std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
+        if (custom_string.length() > 0)
+        {
+            std::string buttonTopic_cs = "canbus/button/" + custom_string;
+            m_mqtt.publish(buttonTopic_cs.c_str(), buttonData.c_str());
+        }
         m_mqtt.publish(buttonTopic.c_str(), buttonData.c_str());
+        
+        
         return true;
     }
     return false;

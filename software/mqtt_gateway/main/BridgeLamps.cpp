@@ -6,7 +6,7 @@ const char canbuslamps_topic[] = "canbus/lamp_command/#";
 
 const char* BridgeLamps::TAG = "BridgeLamps";
 
-BridgeLamps::BridgeLamps(ICAN& ic, IMQTT& im) : m_can(ic), m_mqtt(im)
+BridgeLamps::BridgeLamps(ICAN& ic, IMQTT& im, DeviceList& dl) : m_can(ic), m_mqtt(im), m_device_list(dl)
 {
     //m_can.add_dispatcher(this);
     m_mqtt.add_dispatcher(this);
@@ -29,7 +29,7 @@ void BridgeLamps::dispatch(const char* topic, size_t topic_len, const char* data
     bool lampscommand = (strncmp(topic,canbuslamps_topic,sizeof(canbuslamps_topic)-2) == 0);
     if (lampscommand)
     {
-        uint32_t id = hextoInt(mqtt_split(topic,topic_len,2));
+        uint32_t id = m_device_list.resolve(mqtt_split(topic,topic_len,2));
         union {
             uint8_t data8[4];
             uint32_t value_bitmask;

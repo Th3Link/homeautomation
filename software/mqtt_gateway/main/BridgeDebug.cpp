@@ -5,7 +5,7 @@ const char* BridgeDebug::TAG = "BridgeDebug";
 
 const char debug_topic[] = "canbus/debug/#";
 
-BridgeDebug::BridgeDebug(ICAN& ic, IMQTT& im) : m_can(ic), m_mqtt(im)
+BridgeDebug::BridgeDebug(ICAN& ic, IMQTT& im, DeviceList& dl) : m_can(ic), m_mqtt(im), m_device_list(dl)
 {
     m_mqtt.add_dispatcher(this);
 }

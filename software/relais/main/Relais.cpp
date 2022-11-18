@@ -144,7 +144,7 @@ bool Relais::setRollershutter(uint8_t p_number, uint8_t p_state, uint32_t p_time
     else if (p_state == 1 || p_state == 2)
     {
         // go up
-        if ((m_states[p_number] == rollershutter_state_t::STOP) && hwoff && p_time > 0)
+        if ((m_states[p_number] == rollershutter_state_t::STOP) && hwoff)
         {
             if (m_rollershutter_mode == ICAN::ROLLERSHUTTER_MODE_t::HARDWARE)
             {
@@ -159,9 +159,12 @@ bool Relais::setRollershutter(uint8_t p_number, uint8_t p_state, uint32_t p_time
             
             m_states[p_number] = rollershutter_state_t::MOVING;
             m_actions[p_number]++;
-            message::Message<rollershutter_action_t>::send(m_queue, *this, 
-                message::Event::STOP_TIME, {p_number, m_actions[p_number]}, 
-                std::chrono::milliseconds(p_time));
+            if (p_time > 0)
+            {
+                message::Message<rollershutter_action_t>::send(m_queue, *this, 
+                    message::Event::STOP_TIME, {p_number, m_actions[p_number]}, 
+                    std::chrono::milliseconds(p_time));
+            }
             sendRollershutter(p_number);
         }
         else
@@ -215,7 +218,7 @@ void Relais::init()
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READONLY, &nvs_handle);
     uint8_t rsmode = static_cast<uint8_t>(ICAN::ROLLERSHUTTER_MODE_t::SOFTWARE);
-    nvs_get_u8(nvs_handle, "rollershutter_mode", &rsmode);
+    nvs_get_u8(nvs_handle, "rs_mode", &rsmode);
     nvs_close(nvs_handle);
     m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(rsmode);
     
@@ -298,6 +301,12 @@ bool Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
     
     switch (static_cast<ICAN::MSG_ID_t>(identifier & 0xFF))
     {
+        case ICAN::MSG_ID_t::REQUEST_PARAMETER:
+        {
+            Relais::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(
+                ICAN::MSG_ID_t::ROLLERSHUTTER_MODE), data, data_len, request);
+            return false;
+        }
         case ICAN::MSG_ID_t::RELAIS:
         {
             if (request)
@@ -329,22 +338,19 @@ bool Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
         }
         case ICAN::MSG_ID_t::ROLLERSHUTTER_MODE:
         {
-            if (request)
-            {
-                uint8_t mode[1] {0};
-                mode[0] = static_cast<uint8_t>(m_rollershutter_mode);
-                m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, mode, 1, false);
-            }
-            else if (data_len == 1)
+            if (data_len == 1 && !request)
             {
                 nvs_handle_t nvs_handle;
                 nvs_open("storage", NVS_READWRITE, &nvs_handle);
-
-                nvs_set_u8(nvs_handle, "rollershutter_mode", data[0]);
+                nvs_set_u8(nvs_handle, "rs_mode", data[0]);
                 m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(data[0]);
                 nvs_commit(nvs_handle);
                 nvs_close(nvs_handle);
+                
             }
+            uint8_t mode[1] {0};
+            mode[0] = static_cast<uint8_t>(m_rollershutter_mode);
+            m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, mode, 1, false);
             return true;
         }
         

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <array>
+#include <string>
 #include "cJSON.h"
 #include "esp32-ha-lib/ICAN.hpp"
 
@@ -12,7 +13,8 @@ public:
     bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;
     void init();
     void output(cJSON* object);
-    
+    std::string entry(uint32_t id);
+    uint32_t resolve(std::string);
     struct DeviceListEntry
     {
         uint32_t id;
