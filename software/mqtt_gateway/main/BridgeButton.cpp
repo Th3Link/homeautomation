@@ -70,6 +70,51 @@ bool BridgeButton::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
         
         return true;
     }
+    
+    if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::PIR_SENSOR))
+    {
+        union {
+            uint8_t data8[4];
+            struct
+            {
+                uint32_t button_id : 8;
+                uint32_t button_event : 8;
+                uint32_t count : 16;
+            } s;
+        } u;
+
+        for (auto i = 0; i < data_len; i++)
+        {
+            u.data8[i] = data[i];
+        };
+        
+        std::string presenceData;
+        
+        switch (static_cast<ICAN::BUTTON_EVENT_t>(u.s.button_event))
+        {
+            case ICAN::BUTTON_EVENT_t::RELEASED:
+                presenceData += "8/release/";
+                break;
+            case ICAN::BUTTON_EVENT_t::HOLD:
+            case ICAN::BUTTON_EVENT_t::PRESSED:
+            case ICAN::BUTTON_EVENT_t::SINGLE:
+            case ICAN::BUTTON_EVENT_t::DOUBLE:
+            case ICAN::BUTTON_EVENT_t::TRIPPLE:
+                presenceData += "8/hold/";
+                break;
+        }
+        
+        std::string presenceTopic = "canbus/presence/0x" + toHexString(ICAN::GET_NOT_MSG(identifier));
+        presenceData += std::to_string(u.s.count);
+        
+        std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
+        if (custom_string.length() > 0)
+        {
+            std::string buttonTopic_cs = "canbus/presence/" + custom_string;
+            m_mqtt.publish(buttonTopic_cs.c_str(), presenceData.c_str());
+        }
+        m_mqtt.publish(presenceTopic.c_str(), presenceData.c_str());
+    }
     return false;
 }
 

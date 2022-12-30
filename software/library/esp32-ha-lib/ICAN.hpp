@@ -58,7 +58,9 @@ public:
         RELAIS_STATE = 131,
         ROLLERSHUTTER = 132,
         ROLLERSHUTTER_STATE = 133,
-        ROLLERSHUTTER_MODE = 134
+        ROLLERSHUTTER_MODE = 134,
+        AMBIENT_LIGHT_SENSOR = 140,
+        AMBIENT_LIGHT_SENSOR_WHITE = 141
         //30      button reading
         //31      temperature reading
         //32...56 get lamp state

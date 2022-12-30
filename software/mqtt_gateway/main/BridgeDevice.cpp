@@ -66,6 +66,33 @@ bool BridgeDevice::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
         m_mqtt.publish(humidityTopic.c_str(), humidityData.c_str());
         return true;
     }
+    if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::AMBIENT_LIGHT_SENSOR))
+    {
+        union {
+            uint8_t data[4];
+            uint32_t data32;
+        } t;
+
+        for (auto i = 0; i < std::min(data_len,4); i++)
+        {
+            t.data[i] = data[i];
+        };
+
+        //brightness sensors
+        std::string brightnessTopic = "canbus/brightness/0x" + toHexString(ICAN::GET_NOT_MSG(identifier));
+        + toHexString(t.id);
+        
+        std::string brightnessData = std::to_string(data32);
+        
+        if (custom_string.length() > 0)
+        {
+            std::string brightnessTopic_cs = "canbus/brightness/" + custom_string;
+            m_mqtt.publish(brightnessTopic_cs.c_str(), brightnessData.c_str());
+        }
+        
+        m_mqtt.publish(brightnessTopic.c_str(), brightnessData.c_str());
+        return true;
+    }
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::AVAILABLE))
     {
         std::string availableTopic = std::string(canbusavailable_topic)

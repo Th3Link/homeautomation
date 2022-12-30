@@ -19,6 +19,8 @@
 #include "esp32-ha-lib/THSensor.hpp"
 #include "esp32-ha-lib/EEPROM.hpp"
 #include "esp32-ha-lib/PresenceSensor.hpp"
+#include "esp32-ha-lib/I2C.hpp"
+#include "esp32-ha-lib/AmbientLightSensor.hpp"
 #include "ExtensionBoard.hpp"
 #include "Light.hpp"
 #include "gpio_definition.hpp"
@@ -41,7 +43,9 @@ void app_main()
     Light light(can);
     THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE);
     THSensor thsensor(can, ONEWIRE_GPIO_NUM);
+    I2C i2c;
     EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);
+    AmbientLightSensor ambient_light_sensor(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     PresenceSensor presence_sensor(can, EXT_SENSOR_OUT);
     ExtensionBoard extension_board;
     Button sw1(can, SW1_GPIO_NUM, Button::button_id_t::SW1);
@@ -70,6 +74,9 @@ void app_main()
     {
         eeprom.deinit();
     }
+    
+    i2c.init();
+    ambient_light_sensor.init();
     
     if (ext_thsensor.active && !eeprom_found)
     {
