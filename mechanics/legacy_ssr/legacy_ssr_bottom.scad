@@ -15,7 +15,7 @@ t1 = 3;
 t2 = 2*t1;
 bore_r = 2.8/2;
 
-/*
+module bottom() {
 intersection() {
 difference() {
 union() {
@@ -43,8 +43,9 @@ translate([-t1,0,0]) difference() {
 translate([-15+t1+pcb[0],0,0]) rotate([0,90,0]) din_clip(30);
 translate([75,0,0]) rotate([0,40,0]) translate([0,0,-20-1]) cube([40,pcb[1],20]);
 }
-*/
+}
 
+module lid() {
 translate([0,0,30]) {
     union() {
     difference() {
@@ -81,3 +82,6 @@ translate([holes[3][0], holes[3][1],0]) cylinder(r=2.5*bore_r,h=6);
     translate([holes[3][0], holes[3][1],0]) cylinder(r=bore_r+0.6,h=6);
 }
 }
+}
+
+bottom();

@@ -2,7 +2,7 @@ $fn=50;
 hole_dx = 32;
 hole_dy = 14.8;
 hole_r = 2.98;
-hole_h = 8.5;
+hole_h = 10;
 
 plate_h = 71;
 plate_h2 = 55;
@@ -59,9 +59,9 @@ module roundovercube(v,r, center=false) {
     }
 }
 
-module blocks(b,h) {
-    translate([plate_h/2-15.5,plate_h/2,hole_h/2+plate_t/2]) roundovercube([b,h,hole_h+plate_t], 2, center=true);
-    translate([plate_h/2+15.5,plate_h/2,hole_h/2+plate_t/2]) roundovercube([b,h,hole_h+plate_t], 2, center=true);
+module blocks(b,h,height=hole_h+plate_t) {
+    translate([plate_h/2-15.5,plate_h/2,height/2]) roundovercube([b,h,height], 2, center=true);
+    translate([plate_h/2+15.5,plate_h/2,height/2]) roundovercube([b,h,height], 2, center=true);
 }
 
 module switches() {
@@ -97,6 +97,13 @@ module plate() {
     }
 }
 
+module blocks_with_holes(height) {
+    translate([-14,-17.5,0]) difference() {
+    blocks(8,32, height);
+    translate([plate_h/2-hole_dx/2,plate_h/2-hole_dy/2,0]) holes(h=height);
+    }
+}
+
 difference() {
 union() {
     difference() {
@@ -128,7 +135,8 @@ difference() {
 translate([plate_h/2,plate_h/2,plate_t]) rotate([0,0,90]) union() {
 translate([-52/2,-20/2,0]) cube([3,20,1]);
 translate([52/2-3,-20/2,0]) cube([3,20,1]);
-translate([-52/2+1.5,-20/2,2]) rotate([-90,0,0]) cylinder(r=4/2,h=20);
-translate([52/2-3+1.5,-20/2,2]) rotate([-90,0,0]) cylinder(r=4/2,h=20);
+// clamps for the frame
+translate([-51.6/2+1.5,-20/2,2]) rotate([-90,0,0]) cylinder(r=4/2,h=20);
+translate([51.6/2-3+1.5,-20/2,2]) rotate([-90,0,0]) cylinder(r=4/2,h=20);
 }
 }
