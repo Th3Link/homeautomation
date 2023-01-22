@@ -30,7 +30,7 @@ public:
     void receive(message::Message<ICAN::RELAIS_MSG_t>&) override;
     void receive(message::Message<rollershutter_action_t>&) override;
     static const char* TAG;
-    message::Queue<80,80> m_queue;
+    message::Queue<256,128> m_queue;
 private:
     
     bool setRollershutter(uint8_t number, uint8_t state, uint32_t time);

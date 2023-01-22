@@ -223,7 +223,9 @@ void Relais::init()
     m_rollershutter_mode = static_cast<ICAN::ROLLERSHUTTER_MODE_t>(rsmode);
     
     ESP_ERROR_CHECK(i2cdev_init());
-    
+
+    pca9534_port_write(&m_device, relais1_address, 0);
+    pca9534_port_write(&m_device, relais2_address, 0);    
     pca9534_port_set_mode(&m_device, relais1_address,0);
     pca9534_port_set_mode(&m_device, relais2_address,0);
     pca9534_port_write(&m_device, relais1_address, 0);
