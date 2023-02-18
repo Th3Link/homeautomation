@@ -73,16 +73,16 @@ bool BridgeDevice::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
             uint32_t data32;
         } t;
 
-        for (auto i = 0; i < std::min(data_len,4); i++)
+        for (auto i = 0; i < std::min(data_len,static_cast<unsigned int>(4)); i++)
         {
             t.data[i] = data[i];
         };
 
         //brightness sensors
         std::string brightnessTopic = "canbus/brightness/0x" + toHexString(ICAN::GET_NOT_MSG(identifier));
-        + toHexString(t.id);
         
-        std::string brightnessData = std::to_string(data32);
+        std::string brightnessData = std::to_string(t.data32);
+        std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
         
         if (custom_string.length() > 0)
         {

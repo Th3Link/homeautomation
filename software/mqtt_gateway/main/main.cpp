@@ -15,6 +15,7 @@
 #include "Logging.hpp"
 #include "MQTT.hpp"
 #include "WiFi.hpp"
+#include "LAN.hpp"
 #include "DeviceList.hpp"
 #include "Web.hpp"
 #include "esp32-ha-lib/CAN.hpp"
@@ -44,6 +45,7 @@ static Update update;
 static CANUpdate can_update(can_logging);
 static DeviceList device_list(can_logging);
 static WiFi wifi;
+static LAN lan;
 static Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
 static BridgeDevice bridge_device(can_logging, mqtt, device_list);
 static BridgeRelais bridge_relais(can_logging, mqtt, device_list);
@@ -61,7 +63,9 @@ void app_main()
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    wifi.init();
+    
+    lan.init();
+    //wifi.init();
     web.init();
     
     can_logging.init();

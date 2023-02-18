@@ -21,14 +21,15 @@ struct gpio_channel_map_t {
 };
 
 static const gpio_channel_map_t gpio_channel_map[] {
-    {LEDC_CHANNEL_0, DIM1_GPIO_NUM},
     {LEDC_CHANNEL_1, DIM2_GPIO_NUM},
-    {LEDC_CHANNEL_2, DIM3_GPIO_NUM},
-    {LEDC_CHANNEL_3, DIM4_GPIO_NUM},
+    {LEDC_CHANNEL_2, DIM6_GPIO_NUM},
+    {LEDC_CHANNEL_3, DIM1_GPIO_NUM},
     {LEDC_CHANNEL_4, DIM5_GPIO_NUM},
-    {LEDC_CHANNEL_5, DIM6_GPIO_NUM},
-    {LEDC_CHANNEL_6, DIM7_GPIO_NUM},
-    {LEDC_CHANNEL_7, DIM8_GPIO_NUM},
+    {LEDC_CHANNEL_5, DIM4_GPIO_NUM},
+    {LEDC_CHANNEL_6, DIM8_GPIO_NUM}
+//    {LEDC_CHANNEL_2, DIM3_GPIO_NUM},
+//    {LEDC_CHANNEL_6, DIM7_GPIO_NUM},
+    
 };
 
 Light::Light(ICAN& ic) : m_can(ic)
@@ -90,7 +91,7 @@ bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, 
     {
         case ICAN::MSG_ID_t::LAMP_GROUP:
         {
-            for (unsigned int i = 0; i < 8; i++)
+            for (unsigned int i = 0; i < 6; i++)
             {
                 if (lamps.bitmask & (1 << i))
                 {
