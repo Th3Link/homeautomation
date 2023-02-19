@@ -7,6 +7,7 @@
 #include <esp_err.h>
 #include <esp_log.h>
 #include <driver/i2c.h>
+#include <veml7700.h>
 // local
 #include "AmbientLightSensor.hpp"
 
@@ -41,7 +42,7 @@ void AmbientLightSensor::init()
     
     if (probe())
     {
-        veml7700_config(&m_device, &m_config);
+        veml7700_set_config(&m_device, &m_config);
         ESP_LOGI(TAG, "start_task");
         xTaskCreate(ambient_light_sensor_task, "als_task",  configMINIMAL_STACK_SIZE * 4, 
             this, 5, NULL);
@@ -66,7 +67,7 @@ void AmbientLightSensor::read()
     
     m_device.addr = VEML7700_I2C_ADDR;
     
-    veml7700_ambient_light(&m_device, &m_config, &als);
+    veml7700_get_ambient_light(&m_device, &m_config, &als);
     
     ESP_LOGI(TAG, "ALS: %lu lx", als);
     

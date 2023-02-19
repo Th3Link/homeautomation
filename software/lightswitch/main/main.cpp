@@ -41,9 +41,9 @@ void app_main()
     Update update(can);
     Device device(can);
     Light light(can);
-    THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE);
-    THSensor thsensor(can, ONEWIRE_GPIO_NUM);
     I2C i2c;
+    THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
+    THSensor thsensor(can, ONEWIRE_GPIO_NUM);
     EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     AmbientLightSensor ambient_light_sensor(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     PresenceSensor presence_sensor(can, EXT_SENSOR_OUT);
@@ -65,20 +65,22 @@ void app_main()
     
     extension_board.sensor_board_setup();
     
+    i2c.init();
+    
     ext_thsensor.init();
     thsensor.init();
-    
+    /*
     eeprom.init();
     auto eeprom_found = eeprom.probe();
     if (!eeprom_found)
     {
         eeprom.deinit();
     }
-    
-    i2c.init();
+    */
+
     ambient_light_sensor.init();
     
-    if (ext_thsensor.active && !eeprom_found)
+    if (ext_thsensor.active/* && !eeprom_found*/)
     {
         presence_sensor.init();
     }
@@ -87,7 +89,7 @@ void app_main()
     sw2.init();
     sw3.init();
     sw4.init();
-    
+    /*
     if (!(ext_thsensor.active || eeprom_found))
     {
         extension_board.button_board_setup();
@@ -96,7 +98,7 @@ void app_main()
         ext_sw3.init();
         ext_sw4.init();
     }
-    
+    */
     // init update at last; rollback will be disabled on init
     update.init(static_cast<uint8_t>(ICAN::DEVICE_t::Button));
     
