@@ -187,10 +187,10 @@ static void bme680_task(void *this_ptr)
                         values.temperature, values.humidity, values.pressure, values.gas_resistance);
             
                 thsensor->dispatch(
-                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD, 
+                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD00, 
                     ICAN::MSG_ID_t::TEMPERATURE_SENSOR);
                 thsensor->dispatch(
-                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD, 
+                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD00, 
                     ICAN::MSG_ID_t::HUMIDITY_SENSOR);
             }
         }
@@ -202,15 +202,15 @@ static void bme680_task(void *this_ptr)
                 printf("BME680 Sensor: %.2f °C, %.2f %%, %.2f hPa, %.2f Ohm\n",
                         values.temperature, values.humidity, values.pressure, values.gas_resistance);
                 thsensor->dispatch(
-                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD, 
+                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD00, 
                     ICAN::MSG_ID_t::TEMPERATURE_SENSOR);
                 thsensor->dispatch(
-                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD, 
+                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD00, 
                     ICAN::MSG_ID_t::HUMIDITY_SENSOR);
             }
         }
         // passive waiting until 1 second is over
-        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(20000));
+        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(10000));
     }
 }
 

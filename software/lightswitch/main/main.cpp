@@ -21,6 +21,7 @@
 #include "esp32-ha-lib/PresenceSensor.hpp"
 #include "esp32-ha-lib/I2C.hpp"
 #include "esp32-ha-lib/AmbientLightSensor.hpp"
+#include "esp32-ha-lib/Nightlight.hpp"
 #include "ExtensionBoard.hpp"
 #include "Light.hpp"
 #include "gpio_definition.hpp"
@@ -46,6 +47,7 @@ void app_main()
     THSensor thsensor(can, ONEWIRE_GPIO_NUM);
     EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     AmbientLightSensor ambient_light_sensor(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
+    Nightlight nightlight(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     PresenceSensor presence_sensor(can, EXT_SENSOR_OUT);
     ExtensionBoard extension_board;
     Button sw1(can, SW1_GPIO_NUM, Button::button_id_t::SW1);
@@ -66,9 +68,11 @@ void app_main()
     extension_board.sensor_board_setup();
     
     i2c.init();
-    
+
     ext_thsensor.init();
     thsensor.init();
+    
+    nightlight.init();
     /*
     eeprom.init();
     auto eeprom_found = eeprom.probe();
@@ -89,8 +93,8 @@ void app_main()
     sw2.init();
     sw3.init();
     sw4.init();
-    /*
-    if (!(ext_thsensor.active || eeprom_found))
+    
+    if (!(ext_thsensor.active || nightlight.active()))
     {
         extension_board.button_board_setup();
         ext_sw1.init();
@@ -98,7 +102,7 @@ void app_main()
         ext_sw3.init();
         ext_sw4.init();
     }
-    */
+    
     // init update at last; rollback will be disabled on init
     update.init(static_cast<uint8_t>(ICAN::DEVICE_t::Button));
     
