@@ -81,7 +81,7 @@ PresenceSensor::PresenceSensor(ICAN& ic, gpio_num_t out_pin) : m_can(ic)
 {
     m_out_pir.gpio = out_pin;
     m_out_pir.pressed_level = 1;
-    m_out_pir.internal_pull = true;
+    m_out_pir.internal_pull = false;
     m_out_pir.autorepeat = true;
     m_out_pir.callback = pir_dispatch;
     m_out_pir.ctx = this;
