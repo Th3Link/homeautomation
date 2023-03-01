@@ -12,6 +12,7 @@ constexpr gpio_num_t DIM5_GPIO_NUM      = GPIO_NUM_23;
 constexpr gpio_num_t DIM6_GPIO_NUM      = GPIO_NUM_22;
 //constexpr gpio_num_t DIM7_GPIO_NUM      = GPIO_NUM_35;
 constexpr gpio_num_t DIM8_GPIO_NUM      = GPIO_NUM_32;
+
 constexpr gpio_num_t EXT_SENSOR_OUT     = GPIO_NUM_18; //OUT     //SW3
 constexpr gpio_num_t EXT_SENSOR_ONEWIRE = GPIO_NUM_17; //ONEWIRE //SW2
 constexpr gpio_num_t EXT_SENSOR_SCL     = GPIO_NUM_16; //SCL     //SW1

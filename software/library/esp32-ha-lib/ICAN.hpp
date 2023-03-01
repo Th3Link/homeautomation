@@ -60,7 +60,7 @@ public:
         ROLLERSHUTTER_STATE = 133,
         ROLLERSHUTTER_MODE = 134,
         AMBIENT_LIGHT_SENSOR = 140,
-        AMBIENT_LIGHT_SENSOR_WHITE = 141
+        AMBIENT_LIGHT_SENSOR_WHITE = 141,
         NIGHTLIGHT = 150
         //30      button reading
         //31      temperature reading

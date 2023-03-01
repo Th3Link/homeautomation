@@ -5,8 +5,8 @@ hole_r = 2.98;
 hole_h = 10;
 
 plate_h = 71;
-plate_h2 = 55;
-plate_r = 78/2;
+plate_h2 = 71;
+plate_r = 90/2;
 plate_holes_r = 30;
 plate_holes_rk = 3.4/2;
 plate_holes_rg = 5.5/2;
@@ -116,9 +116,9 @@ union() {
             translate([plate_h/2,plate_h/2,0]) pcb_mount(3.5,4);
         }
         translate([plate_h/2,plate_h/2,0]) union() {
-            //mountRing();
+            mountRing();
             rotate([0,0,90]) mountRing();
-            //rotate([0,0,180]) mountRing();
+            rotate([0,0,180]) mountRing();
             rotate([0,0,270])mountRing();
         }
         blocks(14,34);

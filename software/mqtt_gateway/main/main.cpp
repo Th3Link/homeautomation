@@ -64,8 +64,8 @@ void app_main()
     }
     ESP_ERROR_CHECK(ret);
     
-    lan.init();
-    //wifi.init();
+    //lan.init();
+    wifi.init();
     web.init();
     
     can_logging.init();

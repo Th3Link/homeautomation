@@ -2,7 +2,7 @@ $fn=90;
 hole_r = 2.2/2;
 tube_r = 5/2;
 hole_dx = 28;
-h1 = 6;
+h1 = 6.3;
 h2 = 2;
 difference() {
     union() {

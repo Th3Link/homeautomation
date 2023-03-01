@@ -71,5 +71,5 @@ void AmbientLightSensor::read()
     
     ESP_LOGI(TAG, "ALS: %lu lx", als);
     
-    m_can.send(ICAN::MSG_ID_t::AMBIENT_LIGHT_SENSOR, als_8, 2, false);
+    m_can.send(ICAN::MSG_ID_t::AMBIENT_LIGHT_SENSOR, als_8, 4, false);
 }
