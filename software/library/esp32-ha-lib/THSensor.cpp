@@ -160,8 +160,10 @@ static void bme680_task(void *this_ptr)
     // Change the IIR filter size for temperature and pressure to 7.
     bme680_set_filter_size(thsensor->bme680_sensor(), BME680_IIR_SIZE_7);
 
-    // Change the heater profile 0 to 200 degree Celsius for 100 ms.
-    bme680_use_heater_profile(thsensor->bme680_sensor(), BME680_HEATER_NOT_USED);
+    // Change the heater profile 0 to 350 degree Celsius for 100 ms.
+    bme680_set_heater_profile(thsensor->bme680_sensor(), 0, 250, 100);
+    bme680_use_heater_profile(thsensor->bme680_sensor(), 0);
+    
     // Set ambient temperature to 10 degree Celsius
     bme680_set_ambient_temperature(thsensor->bme680_sensor(), 21);
 

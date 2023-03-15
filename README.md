@@ -103,7 +103,7 @@ NO depends on the amount of chained relais.
 - 32-39 0b11
 The state is 0 for OFF, 1 for UP, 2 for DOWN. The TIMEOUT is in milliseconds
 
-#### canbus/lamp_command/&lt;CANID> &lt;VALUE>/&lt;BITMASK>
+#### canbus/lamp_command/&lt;CANID> &lt;VALUE>/&lt;BITMASK>/&lt;BANK>
 The value accepts values from 0 to 255 where 0 is OFF und 255 is the maximum brightness.
 The bitmask must be given in HEX, the first byte are leds 0-7 (little endian). The bitmask
 musk always be 3 bytes long

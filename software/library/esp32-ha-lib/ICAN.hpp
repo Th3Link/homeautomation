@@ -117,7 +117,8 @@ public:
     {
         uint32_t value : 8;
         uint32_t bitmask : 24;
-        uint32_t reserved : 32;
+        uint32_t bank : 8;
+        uint32_t reserved : 24;
     };
     #pragma pack(pop)
     virtual void init() = 0;

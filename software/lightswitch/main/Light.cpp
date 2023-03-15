@@ -32,8 +32,8 @@ static const gpio_channel_map_t gpio_channel_map[] {
     
 };
 
-Light::Light(ICAN& ic) : m_can(ic)
-{
+Light::Light(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : m_can(ic)
+{   
     m_can.add_dispatcher(this);
     
     // Prepare and then apply the LEDC PWM timer configuration
@@ -63,26 +63,82 @@ Light::Light(ICAN& ic) : m_can(ic)
         };
         ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
     }
+    
+    memset(&m_pca9685, 0, sizeof(pwm_extender_t)*PWM_EXTENDER);
+    for (int i = 0; i < PWM_EXTENDER; i++)
+    {
+        ESP_ERROR_CHECK(pca9685_init_desc(&m_pca9685[i].dev, PCA9685_ADDR_BASE+i, 0, sda_pin, scl_pin));
+    }
 }
 
-void Light::set(uint8_t num, uint8_t duty)
+void Light::init()
 {
-    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, static_cast<ledc_channel_t>(num), LEDC_DUTY*duty/255));
-    ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, static_cast<ledc_channel_t>(num)));
+    for (int i = 0; i < PWM_EXTENDER; i++)
+    {
+        i2c_dev_t* dev = &m_pca9685[i].dev;
+        if (i2c_dev_probe(dev, I2C_DEV_WRITE) == ESP_OK)
+        {
+            m_pca9685[i].active = true;
+            ESP_ERROR_CHECK(pca9685_init(dev));
+            ESP_ERROR_CHECK(pca9685_restart(dev));
+            ESP_ERROR_CHECK(pca9685_set_pwm_frequency(dev, LEDC_FREQUENCY));
+            ESP_LOGI(Light::TAG, "Found PWM Expander %d\n",i);
+        }
+    }
+}
+void Light::set_onboard(ICAN::LAMP_MSG_t& lamps)
+{
+    if (lamps.bank != 0)
+    {
+        return;
+    }
+    
+    for (unsigned int num = 0; num < 6; num++)
+    {
+        if (lamps.bitmask & (1 << num))
+        {
+            ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, static_cast<ledc_channel_t>(num), LEDC_DUTY*lamps.value/255));
+            ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, static_cast<ledc_channel_t>(num)));
+        }
+    }
+}
+
+void Light::set_ext(ICAN::LAMP_MSG_t& lamps)
+{
+    if (lamps.bank == 0)
+    {
+        return;
+    }
+    //decrease to match arrays
+    uint8_t num = lamps.bank - 1;
+    
+    if (num >= PWM_EXTENDER || !m_pca9685[num].active)
+    {
+        return;
+    }
+    for (unsigned int i = 0; i < PWM_CHANNELS; i++)
+    {
+        if (!(lamps.bitmask & (1 << i)))
+        {
+            continue;
+        }
+        m_pca9685[num].value[i] = (4095 * lamps.value) / 255;
+    }
+    pca9685_set_pwm_values(&m_pca9685[num].dev, 0, PWM_CHANNELS, m_pca9685[num].value);
 }
 
 bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     union {
         ICAN::LAMP_MSG_t lamps;
-        uint8_t data8[sizeof(ICAN::RELAIS_MSG_t)];
+        uint8_t data8[sizeof(ICAN::LAMP_MSG_t)];
     };
     
     for(auto& d : data8)
     {
         d = 0;
     }
-    for (unsigned int i = 0; i < std::min(data_len, sizeof(ICAN::RELAIS_MSG_t)); i++)
+    for (unsigned int i = 0; i < std::min(data_len, sizeof(ICAN::LAMP_MSG_t)); i++)
     {
         data8[i] = data[i];
     }
@@ -91,13 +147,8 @@ bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, 
     {
         case ICAN::MSG_ID_t::LAMP_GROUP:
         {
-            for (unsigned int i = 0; i < 6; i++)
-            {
-                if (lamps.bitmask & (1 << i))
-                {
-                    set(i, lamps.value);
-                }
-            }
+            set_onboard(lamps);
+            set_ext(lamps);
             return true;
         }
         default:

@@ -41,8 +41,8 @@ void app_main()
     CAN can(RX_GPIO_NUM, TX_GPIO_NUM, true);
     Update update(can);
     Device device(can);
-    Light light(can);
     I2C i2c;
+    Light light(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
     THSensor thsensor(can, ONEWIRE_GPIO_NUM);
     EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);
@@ -68,7 +68,7 @@ void app_main()
     extension_board.sensor_board_setup();
     
     i2c.init();
-
+    light.init();
     ext_thsensor.init();
     thsensor.init();
     
