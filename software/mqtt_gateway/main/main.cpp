@@ -19,6 +19,7 @@
 #include "DeviceList.hpp"
 #include "Web.hpp"
 #include "esp32-ha-lib/CAN.hpp"
+#include "esp32-ha-lib/PinConfig.hpp"
 #include "BridgeDevice.hpp"
 #include "BridgeLamps.hpp"
 #include "BridgeRelais.hpp"
@@ -31,31 +32,29 @@
 #define NO_OF_ITERS                     3
 #define ITER_DELAY_MS                   1000
 #define RX_TASK_PRIO                    8       //Receiving task priority
-constexpr gpio_num_t TX_GPIO_NUM        = GPIO_NUM_13;
-constexpr gpio_num_t RX_GPIO_NUM        = GPIO_NUM_14;
 
 static const char *TAG = "main";
 
 static SemaphoreHandle_t shutdown_sem;
 
-//static CAN can(RX_GPIO_NUM, TX_GPIO_NUM, false);
-static MQTT mqtt;
-static Logging can_logging(RX_GPIO_NUM, TX_GPIO_NUM, false, mqtt);
-static Update update;
-static CANUpdate can_update(can_logging);
-static DeviceList device_list(can_logging);
-static WiFi wifi;
-static LAN lan;
-static Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
-static BridgeDevice bridge_device(can_logging, mqtt, device_list);
-static BridgeRelais bridge_relais(can_logging, mqtt, device_list);
-static BridgeButton bridge_button(can_logging, mqtt, device_list);
-static BridgeLamps bridge_lamps(can_logging, mqtt, device_list);
-static BridgeDebug bridge_debug(can_logging, mqtt, device_list);
-
 extern "C"
 void app_main()
-{   
+{
+    PinConfig pin_config;
+    MQTT mqtt;
+    Logging can_logging(pin_config.get_can_config(), false, mqtt);
+    Update update;
+    CANUpdate can_update(can_logging);
+    DeviceList device_list(can_logging);
+    WiFi wifi;
+    LAN lan;
+    Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
+    BridgeDevice bridge_device(can_logging, mqtt, device_list);
+    BridgeRelais bridge_relais(can_logging, mqtt, device_list);
+    BridgeButton bridge_button(can_logging, mqtt, device_list);
+    BridgeLamps bridge_lamps(can_logging, mqtt, device_list);
+    BridgeDebug bridge_debug(can_logging, mqtt, device_list);
+
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

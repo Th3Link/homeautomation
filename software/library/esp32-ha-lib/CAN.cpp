@@ -47,9 +47,9 @@ static void can_receive_task(void *this_ptr)
     vTaskDelete(NULL);
 }
 
-CAN::CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter) : 
+CAN::CAN(PinConfig::can_config_t can_config, bool enable_filter) : 
     m_enable_filter(enable_filter), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
-    m_type(0xFF), m_rx_pin(rx_pin), m_tx_pin(tx_pin), m_shutdown_request(false),
+    m_type(0xFF), m_rx_pin(can_config.rx), m_tx_pin(can_config.tx), m_shutdown_request(false),
     m_received(0), m_transmitted(0)
 {
     m_shutdown_sem  = xSemaphoreCreateBinary();

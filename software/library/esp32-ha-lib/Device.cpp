@@ -213,6 +213,46 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             }
             return true;
         }
+        case ICAN::MSG_ID_t::HW_REV:
+        {
+            if (data_len == 1 && !request)
+            {
+                nvs_handle_t nvs_handle;
+                nvs_open("storage", NVS_READWRITE, &nvs_handle);
+                nvs_set_u8(nvs_handle, "hw_rev", data[0]);
+                nvs_commit(nvs_handle);
+                nvs_close(nvs_handle);
+                
+            }
+            uint8_t rev[1] = {0};
+            nvs_handle_t nvs_handle;
+            nvs_open("storage", NVS_READONLY, &nvs_handle);
+            nvs_get_u8(nvs_handle, "hw_rev", rev);
+            nvs_commit(nvs_handle);
+            nvs_close(nvs_handle);
+            m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, rev, 1, false);
+            return true;
+        }
+        case ICAN::MSG_ID_t::SENSOR_LEGACY_MODE:
+        {
+            if (data_len == 1 && !request)
+            {
+                nvs_handle_t nvs_handle;
+                nvs_open("storage", NVS_READWRITE, &nvs_handle);
+                nvs_set_u8(nvs_handle, "leg_sen", data[0]);
+                nvs_commit(nvs_handle);
+                nvs_close(nvs_handle);
+                
+            }
+            uint8_t leg_sen[1] = {0};
+            nvs_handle_t nvs_handle;
+            nvs_open("storage", NVS_READONLY, &nvs_handle);
+            nvs_get_u8(nvs_handle, "leg_sen", leg_sen);
+            nvs_commit(nvs_handle);
+            nvs_close(nvs_handle);
+            m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, leg_sen, 1, false);
+            return true;
+        }
         default:
             break;
     }

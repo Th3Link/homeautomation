@@ -5,11 +5,11 @@
 #include <driver/gpio.h>
 #include <vector>
 #include "ICAN.hpp"
-
+#include "PinConfig.hpp"
 class CAN : public ICAN, public ICANDispatcher
 {
     public:      
-        CAN(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter);
+        CAN(PinConfig::can_config_t, bool enable_filter);
         void init() override;
         void deinit() override;
         void send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request) override;

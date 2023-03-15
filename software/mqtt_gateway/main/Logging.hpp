@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "IMQTT.hpp"
 #include "esp32-ha-lib/CAN.hpp"
+#include "esp32-ha-lib/PinConfig.hpp"
 
 class Logging : public CAN
 {
@@ -12,7 +13,7 @@ public:
         MQTT,
         WEB
     };*/
-    Logging(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter, IMQTT&);
+    Logging(PinConfig::can_config_t can_config, bool enable_filter, IMQTT&);
     void mqtt_log(uint32_t id, uint8_t* data, unsigned int data_len, bool request);
     void mqtt_logging(bool);
     bool mqtt_logging();

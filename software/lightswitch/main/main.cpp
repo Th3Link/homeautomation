@@ -22,6 +22,7 @@
 #include "esp32-ha-lib/I2C.hpp"
 #include "esp32-ha-lib/AmbientLightSensor.hpp"
 #include "esp32-ha-lib/Nightlight.hpp"
+#include "esp32-ha-lib/PinConfig.hpp"
 #include "ExtensionBoard.hpp"
 #include "Light.hpp"
 #include "gpio_definition.hpp"
@@ -37,8 +38,8 @@ static SemaphoreHandle_t shutdown_sem;
 extern "C"
 void app_main()
 {
-
-    CAN can(RX_GPIO_NUM, TX_GPIO_NUM, true);
+    PinConfig pin_config;
+    CAN can(pin_config.get_can_config(), true);
     Update update(can);
     Device device(can);
     I2C i2c;

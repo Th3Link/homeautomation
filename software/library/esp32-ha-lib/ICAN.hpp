@@ -51,6 +51,9 @@ public:
         FLASH_VERIFY = 20,
         BUTTON_EVENT = 30,
         TEMPERATURE_SENSOR = 31,
+        HW_TYPE = 40,
+        HW_REV = 41,
+        SENSOR_LEGACY_MODE = 42,
         LAMP_GROUP = 90,
         PIR_SENSOR = 128,
         HUMIDITY_SENSOR = 129,
@@ -93,7 +96,9 @@ public:
         LegacyLamps = 0x03,
         Button = 0x04,
         Relais = 0x05,
-        Gateway = 0x06
+        Gateway = 0x06,
+        Rollershutter = 0x07,
+        SSR = 0x08
     };
     
     enum class ROLLERSHUTTER_MODE_t : uint8_t
@@ -149,6 +154,10 @@ public:
                 return "Relais";
             case ICAN::DEVICE_t::Gateway:
                 return "Gateway";
+            case ICAN::DEVICE_t::Rollershutter:
+                return "Rollershutter";
+            case ICAN::DEVICE_t::SSR:
+                return "SSR";
         }
         return "Unknown";
     }

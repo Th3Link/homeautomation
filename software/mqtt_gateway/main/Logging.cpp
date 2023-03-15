@@ -5,8 +5,8 @@
 
 const char* Logging::TAG = "Logging";
 
-Logging::Logging(gpio_num_t rx_pin, gpio_num_t tx_pin, bool enable_filter, IMQTT& im) : 
-    CAN(rx_pin, tx_pin, enable_filter), m_mqtt(im), m_mqtt_logging(false)
+Logging::Logging(PinConfig::can_config_t can_config, bool enable_filter, IMQTT& im) : 
+    CAN(can_config, enable_filter), m_mqtt(im), m_mqtt_logging(false)
 {
     
 }
