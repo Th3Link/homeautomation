@@ -40,7 +40,7 @@ static void can_receive_task(void *this_ptr)
         uint32_t alerts;
         twai_read_alerts(&alerts, 0);
         if (alerts) {
-            ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
+            //ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
         }
     }
     can->shutdown();

@@ -23,6 +23,5 @@ public:
 private:
     ICAN& m_can;
     gpio_num_t m_onewire_pin;
-    bool m_use_i2s_sensors;
     bme680_t m_bme680;
 };

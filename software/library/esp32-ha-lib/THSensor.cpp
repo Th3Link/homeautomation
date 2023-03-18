@@ -217,7 +217,7 @@ static void bme680_task(void *this_ptr)
 }
 
 THSensor::THSensor(ICAN& ic) : 
-    m_can(ic), m_onewire_pin(GPIO_NUM_NC), m_use_i2s_sensors(false)
+    m_can(ic), m_onewire_pin(GPIO_NUM_NC)
 {
     memset(&m_bme680, 0, sizeof(bme680_t));
 }
@@ -271,10 +271,9 @@ void THSensor::init(gpio_num_t onewire_pin, PinConfig::i2c_config_t i2c)
     
     if (i2c.sda == GPIO_NUM_NC || i2c.scl == GPIO_NUM_NC)
     {
-        m_use_i2s_sensors = false;
         return;
     }
-    
+        
     ESP_ERROR_CHECK(bme680_init_desc(&m_bme680, BME680_I2C_ADDR_1, i2c.port, i2c.sda, i2c.scl));
     m_bme680.i2c_dev.cfg.sda_pullup_en = true;
     m_bme680.i2c_dev.cfg.scl_pullup_en = true;
@@ -282,18 +281,15 @@ void THSensor::init(gpio_num_t onewire_pin, PinConfig::i2c_config_t i2c)
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // probing BME680
-    if (m_use_i2s_sensors)
+    if (i2c_dev_probe(&(m_bme680.i2c_dev), I2C_DEV_WRITE) == ESP_OK)
     {
-        if (i2c_dev_probe(&(m_bme680.i2c_dev), I2C_DEV_WRITE) == ESP_OK)
-        {
-            ESP_LOGI(THSensor::TAG, "Sensor BME680 ok\n");
-            xTaskCreate(bme680_task, "bme680_task", configMINIMAL_STACK_SIZE * 4, this, 5, NULL);
-            active = true;
-        }
-        else
-        {
-            ESP_LOGI(THSensor::TAG, "Sensor BME680 probe failed\n");
-        }
+        ESP_LOGI(THSensor::TAG, "Sensor BME680 ok\n");
+        xTaskCreate(bme680_task, "bme680_task", configMINIMAL_STACK_SIZE * 4, this, 5, NULL);
+        active = true;
+    }
+    else
+    {
+        ESP_LOGI(THSensor::TAG, "Sensor BME680 probe failed\n");
     }
 }
 
