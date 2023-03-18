@@ -77,18 +77,24 @@ void pir_smooth_task(void *this_ptr)
     }
 }
 
-PresenceSensor::PresenceSensor(ICAN& ic, gpio_num_t out_pin) : m_can(ic)
+PresenceSensor::PresenceSensor(ICAN& ic) : m_can(ic)
 {
+}
+
+void PresenceSensor::init(gpio_num_t out_pin)
+{
+    if (out_pin == GPIO_NUM_NC)
+    {
+        return;
+    }
+
     m_out_pir.gpio = out_pin;
     m_out_pir.pressed_level = 1;
     m_out_pir.internal_pull = true;
     m_out_pir.autorepeat = true;
     m_out_pir.callback = pir_dispatch;
     m_out_pir.ctx = this;
-}
-
-void PresenceSensor::init()
-{
+    
     ESP_ERROR_CHECK(button_init(&m_out_pir));
     xTaskCreate(pir_smooth_task, "pir_smooth_task",  configMINIMAL_STACK_SIZE * 4, 
         this, 5, NULL);

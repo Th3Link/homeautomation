@@ -44,8 +44,8 @@ namespace message
         {
         }
         
-        Message() = delete;
     public:
+        Message(Receiver<MSG_T>& r) : receiver(r) {}
         Event event;
         Receiver<MSG_T>& receiver;
     public:

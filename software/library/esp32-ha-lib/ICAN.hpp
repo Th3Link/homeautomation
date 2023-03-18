@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <string>
 
 class ICANDispatcher
 {
@@ -92,6 +93,7 @@ public:
 
     enum class DEVICE_t : uint32_t
     {
+        Unknown = 0x00,
         LegacyRelais = 0x02,
         LegacyLamps = 0x03,
         Button = 0x04,
@@ -113,7 +115,8 @@ public:
         uint32_t number : 8;
         uint32_t state : 8;
         uint32_t time : 24;
-        uint32_t reserved : 24;
+        uint32_t bank : 8;
+        uint32_t reserved : 16;
     };
     #pragma pack(pop)
     
@@ -126,8 +129,7 @@ public:
         uint32_t reserved : 24;
     };
     #pragma pack(pop)
-    virtual void init() = 0;
-    virtual void deinit() = 0;
+
     virtual void add_dispatcher(ICANDispatcher*) = 0;
     virtual void send(MSG_ID_t, uint8_t* data, 
         unsigned int data_len, bool request) = 0;
@@ -139,6 +141,39 @@ public:
     virtual ICAN::BITRATE_t bitrate() = 0;
     virtual uint64_t received() = 0;
     virtual uint64_t transmitted() = 0;
+
+    static inline ICAN::DEVICE_t device_type(std::string s)
+    {
+        if (s == "LegacyRelais")
+        {
+            return ICAN::DEVICE_t::LegacyRelais;
+        }
+        else if (s == "LegacyLamps")
+        {
+            return ICAN::DEVICE_t::LegacyLamps;
+        }
+        else if (s == "Button")
+        {
+            return ICAN::DEVICE_t::Button;
+        }
+        else if (s == "Relais")
+        {
+            return ICAN::DEVICE_t::Relais;
+        }
+        else if (s == "Gateway")
+        {
+            return ICAN::DEVICE_t::Gateway;
+        }
+        else if (s == "Rollershutter")
+        {
+            return ICAN::DEVICE_t::Rollershutter;
+        }
+        else if (s == "SSR")
+        {
+            return ICAN::DEVICE_t::SSR;
+        }
+        return ICAN::DEVICE_t::Unknown;
+    }
 
     static inline const char* device_string(ICAN::DEVICE_t b)
     {
@@ -158,6 +193,8 @@ public:
                 return "Rollershutter";
             case ICAN::DEVICE_t::SSR:
                 return "SSR";
+            case ICAN::DEVICE_t::Unknown:
+                return "Unknown";
         }
         return "Unknown";
     }
@@ -193,6 +230,27 @@ public:
             return ICAN::BITRATE_t::BITRATE_50;
         }
         else if (strcmp(c, "b100") == 0)
+        {
+            return ICAN::BITRATE_t::BITRATE_100;
+        }
+        return ICAN::BITRATE_t::BITRATE_50;
+    }
+    
+    static inline ICAN::BITRATE_t bitrate(unsigned int i)
+    {
+        if (i == 22222)
+        {
+            return ICAN::BITRATE_t::BITRATE_22_222;
+        }
+        else if (i == 25000)
+        {
+            return ICAN::BITRATE_t::BITRATE_25;
+        }
+        else if (i == 50000)
+        {
+            return ICAN::BITRATE_t::BITRATE_50;
+        }
+        else if (i == 100000)
         {
             return ICAN::BITRATE_t::BITRATE_100;
         }

@@ -3,13 +3,14 @@
 #include "ICAN.hpp"
 #include <driver/gpio.h>
 #include <bme680.h>
+#include "PinConfig.hpp"
 
 class THSensor
 {
 public:
-    THSensor(ICAN&, gpio_num_t onewire_pin, gpio_num_t sda_pin, gpio_num_t scl_pin);
-    THSensor(ICAN&, gpio_num_t onewire_pin);
-    void init();
+    THSensor(ICAN&);
+    void init(gpio_num_t p_onewire_pin, PinConfig::i2c_config_t);
+    void init(gpio_num_t p_onewire_pin);
     bool active = false;
     void dispatch(uint16_t value, uint64_t id, ICAN::MSG_ID_t);
     gpio_num_t onewire_pin();

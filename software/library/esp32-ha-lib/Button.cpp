@@ -79,8 +79,17 @@ void Button::send_multi()
     button_data.state = ICAN::BUTTON_EVENT_t::RELEASED;
 }
 
-Button::Button(ICAN& ic, gpio_num_t gpio, button_id_t id) : can(ic), timer(NULL)
+Button::Button(ICAN& ic) : can(ic), timer(NULL)
 {
+}
+
+void Button::init(gpio_num_t gpio, button_id_t id)
+{
+    if (gpio == GPIO_NUM_NC)
+    {
+        return;
+    }
+
     button.gpio = gpio;
     button.pressed_level = 0;
     button.internal_pull = true;
@@ -94,10 +103,7 @@ Button::Button(ICAN& ic, gpio_num_t gpio, button_id_t id) : can(ic), timer(NULL)
     timer_args.name = "button_multi_click";
     timer_args.dispatch_method = ESP_TIMER_TASK;
     timer_args.callback = button_multi_click;
-}
-
-void Button::init()
-{
+    
     ESP_ERROR_CHECK(button_init(&button));
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
     esp_timer_stop(timer);

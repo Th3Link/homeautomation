@@ -3,7 +3,6 @@
 #include <driver/gpio.h>
 
 #include "ExtensionBoard.hpp"
-#include "gpio_definition.hpp"
 
 const char* ExtensionBoard::TAG = "ExtensionBoard";
 
@@ -12,11 +11,11 @@ ExtensionBoard::ExtensionBoard()
     
 }
 
-void ExtensionBoard::sensor_board_setup()
+void ExtensionBoard::sensor_board_setup(PinConfig::ext_board_t power_config)
 {
     ESP_LOGI(TAG, "Setup for extension sensor board");
 }
-void ExtensionBoard::button_board_setup()
+void ExtensionBoard::button_board_setup(PinConfig::ext_board_t power_config)
 {
     ESP_LOGI(TAG, "Setup for extension button board");
 }

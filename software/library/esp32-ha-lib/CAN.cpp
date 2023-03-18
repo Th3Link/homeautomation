@@ -47,16 +47,20 @@ static void can_receive_task(void *this_ptr)
     vTaskDelete(NULL);
 }
 
-CAN::CAN(PinConfig::can_config_t can_config, bool enable_filter) : 
-    m_enable_filter(enable_filter), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
-    m_type(0xFF), m_rx_pin(can_config.rx), m_tx_pin(can_config.tx), m_shutdown_request(false),
+CAN::CAN() : 
+    m_enable_filter(false), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
+    m_type(0xFF), m_rx_pin(GPIO_NUM_NC), m_tx_pin(GPIO_NUM_NC), m_shutdown_request(false),
     m_received(0), m_transmitted(0)
 {
-    m_shutdown_sem  = xSemaphoreCreateBinary();
 }
 
-void CAN::init()
+void CAN::init(PinConfig::can_config_t can_config, bool enable_filter)
 {
+    m_rx_pin = can_config.rx;
+    m_tx_pin = can_config.tx;
+    m_enable_filter = enable_filter;
+    m_shutdown_sem  = xSemaphoreCreateBinary();
+
     #define RX_TASK_PRIO                    10       //Receiving task priority
     static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
         m_tx_pin, m_rx_pin, TWAI_MODE_NORMAL);

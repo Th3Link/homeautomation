@@ -9,9 +9,9 @@
 class CAN : public ICAN, public ICANDispatcher
 {
     public:      
-        CAN(PinConfig::can_config_t, bool enable_filter);
-        void init() override;
-        void deinit() override;
+        CAN();
+        void init(PinConfig::can_config_t, bool enable_filter);
+        void deinit();
         void send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request) override;
         void send(uint32_t id, uint8_t* data, unsigned int data_len, bool request) override;
         bool dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request) override;

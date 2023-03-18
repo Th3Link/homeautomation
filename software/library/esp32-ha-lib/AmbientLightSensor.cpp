@@ -24,14 +24,20 @@ void ambient_light_sensor_task(void *this_ptr)
     }
 }
 
-AmbientLightSensor::AmbientLightSensor(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : m_can(ic)
+AmbientLightSensor::AmbientLightSensor(ICAN& ic) : m_can(ic),
+    m_active(false)
 {
     memset(&m_device, 0, sizeof(i2c_dev_t));
-    ESP_ERROR_CHECK(veml7700_init_desc(&m_device, I2C_NUM_1, sda_pin, scl_pin));
 }
 
-void AmbientLightSensor::init()
+void AmbientLightSensor::init(PinConfig::i2c_config_t i2c)
 {
+    if (i2c.sda == GPIO_NUM_NC || i2c.scl == GPIO_NUM_NC)
+    {
+        return;
+    }
+    ESP_ERROR_CHECK(veml7700_init_desc(&m_device, i2c.port, i2c.sda, i2c.scl));
+
     m_config.gain = VEML7700_GAIN_1;
     m_config.integration_time = VEML7700_INTEGRATION_TIME_400MS;
     m_config.persistence_protect = VEML7700_PERSISTENCE_PROTECTION_4;
@@ -44,8 +50,13 @@ void AmbientLightSensor::init()
     {
         veml7700_set_config(&m_device, &m_config);
         ESP_LOGI(TAG, "start_task");
+        m_active = true;
         xTaskCreate(ambient_light_sensor_task, "als_task",  configMINIMAL_STACK_SIZE * 4, 
             this, 5, NULL);
+    }
+    else
+    {
+        m_active = false;
     }
 }
 
@@ -72,4 +83,9 @@ void AmbientLightSensor::read()
     ESP_LOGI(TAG, "ALS: %lu lx", als);
     
     m_can.send(ICAN::MSG_ID_t::AMBIENT_LIGHT_SENSOR, als_8, 4, false);
+}
+
+bool AmbientLightSensor::active()
+{
+    return m_active;
 }

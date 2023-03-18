@@ -25,7 +25,10 @@
 #include "esp32-ha-lib/PinConfig.hpp"
 #include "ExtensionBoard.hpp"
 #include "Light.hpp"
-#include "gpio_definition.hpp"
+#include "Relais.hpp"
+#include "Console.hpp"
+#include "ConsoleCommandDevice.hpp"
+#include "Selftest.hpp"
 /* --------------------- Definitions and static variables ------------------ */
 
 #define TAG                     "CANLIGHTSWITCH"
@@ -35,77 +38,79 @@ static SemaphoreHandle_t shutdown_sem;
 
 /* --------------------------- Tasks and Functions -------------------------- */
 
+static PinConfig pin_config;
+static CAN can;
+static Update update(can);
+static Device device(can);
+static I2C i2c;
+static Light light(can);
+static THSensor ext_thsensor(can);
+static THSensor thsensor(can);
+static AmbientLightSensor ambient_light_sensor(can);
+static Nightlight nightlight(can);
+static PresenceSensor presence_sensor(can);
+static ExtensionBoard extension_board;
+static Relais relais(can);
+static Selftest selftest(relais, light);
+static Console console;
+static ConsoleCommandDevice console_command_device(console, relais, light, selftest);
+static PinConfig::switch_config_t onboard_switch = pin_config.get_onboard_switch_config();
+static PinConfig::switch_config_t ext_board_switch = pin_config.get_ext_board_switch_config();
+static Button sw1(can);
+static Button sw2(can);
+static Button sw3(can);
+static Button sw4(can);
+static Button ext_sw1(can);
+static Button ext_sw2(can);
+static Button ext_sw3(can);
+static Button ext_sw4(can);
+
 extern "C"
 void app_main()
 {
-    PinConfig pin_config;
-    CAN can(pin_config.get_can_config(), true);
-    Update update(can);
-    Device device(can);
-    I2C i2c;
-    Light light(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
-    THSensor ext_thsensor(can, EXT_SENSOR_ONEWIRE, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
-    THSensor thsensor(can, ONEWIRE_GPIO_NUM);
-    EEPROM eeprom(EXT_SENSOR_SDA, EXT_SENSOR_SCL);
-    AmbientLightSensor ambient_light_sensor(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
-    Nightlight nightlight(can, EXT_SENSOR_SDA, EXT_SENSOR_SCL);
-    PresenceSensor presence_sensor(can, EXT_SENSOR_OUT);
-    ExtensionBoard extension_board;
-    Button sw1(can, SW1_GPIO_NUM, Button::button_id_t::SW1);
-    Button sw2(can, SW2_GPIO_NUM, Button::button_id_t::SW2);
-    Button sw3(can, SW3_GPIO_NUM, Button::button_id_t::SW3);
-    Button sw4(can, SW4_GPIO_NUM, Button::button_id_t::SW4);
-    Button ext_sw1(can, EXT_BUTTON_SW1, Button::button_id_t::EXT_SW1);
-    Button ext_sw2(can, EXT_BUTTON_SW2, Button::button_id_t::EXT_SW2);
-    Button ext_sw3(can, EXT_BUTTON_SW3, Button::button_id_t::EXT_SW3);
-    Button ext_sw4(can, EXT_BUTTON_SW4, Button::button_id_t::EXT_SW4);
-
     //Create semaphores and tasks
     shutdown_sem  = xSemaphoreCreateBinary();
-
-    can.init();
+    
+    pin_config.init();
+    
+    can.init(pin_config.get_can_config(), true);
     device.init();
     
-    extension_board.sensor_board_setup();
+    extension_board.sensor_board_setup(pin_config.get_ext_board_power());
     
     i2c.init();
-    light.init();
-    ext_thsensor.init();
-    thsensor.init();
+    light.init(pin_config.get_onboard_pwm_config(), pin_config.get_ext_board_config());
+    relais.init(pin_config.get_onboard_relais_config(), pin_config.get_ext_board_config());
+    ext_thsensor.init(pin_config.get_ext_board_onewire(), pin_config.get_ext_board_config());
+    thsensor.init(pin_config.get_onboard_onewire());
     
-    nightlight.init();
-    /*
-    eeprom.init();
-    auto eeprom_found = eeprom.probe();
-    if (!eeprom_found)
-    {
-        eeprom.deinit();
-    }
-    */
+    nightlight.init(pin_config.get_ext_board_config());
 
-    ambient_light_sensor.init();
+    ambient_light_sensor.init(pin_config.get_ext_board_config());
     
-    if (ext_thsensor.active/* && !eeprom_found*/)
+    sw1.init(onboard_switch.sw1, Button::button_id_t::SW1);
+    sw2.init(onboard_switch.sw2, Button::button_id_t::SW2);
+    sw3.init(onboard_switch.sw3, Button::button_id_t::SW3);
+    sw4.init(onboard_switch.sw4, Button::button_id_t::SW4);
+    
+    if (ext_thsensor.active || ambient_light_sensor.active() || light.ext_active() || relais.ext_active())
     {
-        presence_sensor.init();
+        presence_sensor.init(pin_config.get_ext_board_pir());
     }
-    
-    sw1.init();
-    sw2.init();
-    sw3.init();
-    sw4.init();
-    
-    if (!(ext_thsensor.active || nightlight.active()))
+    else
     {
-        extension_board.button_board_setup();
-        ext_sw1.init();
-        ext_sw2.init();
-        ext_sw3.init();
-        ext_sw4.init();
+        extension_board.button_board_setup(pin_config.get_ext_board_power());
+        ext_sw1.init(ext_board_switch.sw1, Button::button_id_t::EXT_SW1);
+        ext_sw2.init(ext_board_switch.sw2, Button::button_id_t::EXT_SW2);
+        ext_sw3.init(ext_board_switch.sw3, Button::button_id_t::EXT_SW3);
+        ext_sw4.init(ext_board_switch.sw4, Button::button_id_t::EXT_SW4);
     }
     
     // init update at last; rollback will be disabled on init
     update.init(static_cast<uint8_t>(ICAN::DEVICE_t::Button));
+    
+    selftest.init();
+    console.init();
     
     xSemaphoreTake(shutdown_sem, portMAX_DELAY);    //Wait for tasks to complete
 

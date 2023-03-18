@@ -18,8 +18,8 @@ public:
         EXT_SW3 = 6,
         EXT_SW4 = 7
     };
-    Button(ICAN&, gpio_num_t, button_id_t);
-    void init();
+    Button(ICAN&);
+    void init(gpio_num_t, button_id_t);
     void dispatch(button_state_t);
     void send_multi();
     static const char* TAG;

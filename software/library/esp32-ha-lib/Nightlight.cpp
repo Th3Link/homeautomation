@@ -7,18 +7,24 @@
 
 const char* Nightlight::TAG = "Nightlight";
 
-Nightlight::Nightlight(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : 
+Nightlight::Nightlight(ICAN& ic) : 
     m_can(ic), m_active(false)
 {
     m_can.add_dispatcher(this);
     memset(&m_pcf8574, 0, sizeof(m_pcf8574));
-    ESP_ERROR_CHECK(pcf8574_init_desc(&m_pcf8574, 0x38, I2C_NUM_1, sda_pin, scl_pin));
-    m_pcf8574.cfg.sda_pullup_en = true;
-    m_pcf8574.cfg.scl_pullup_en = true;
 }
 
-void Nightlight::init()
+void Nightlight::init(PinConfig::i2c_config_t i2c)
 {
+    if (i2c.sda == GPIO_NUM_NC || i2c.scl == GPIO_NUM_NC)
+    {
+        return;
+    }
+    
+    ESP_ERROR_CHECK(pcf8574_init_desc(&m_pcf8574, 0x38, i2c.port, i2c.sda, i2c.scl));
+    m_pcf8574.cfg.sda_pullup_en = true;
+    m_pcf8574.cfg.scl_pullup_en = true;
+
     if (pcf8574_port_write(&m_pcf8574, 0xFF) == ESP_OK)
     {
         m_active = true;
@@ -31,6 +37,11 @@ bool Nightlight::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_
     {
         case ICAN::MSG_ID_t::NIGHTLIGHT:
         {
+            if (!m_active)
+            {
+                // error return here
+                return false;
+            }
             if (data_len == 1)
             {
                 uint8_t val = 0xFF;

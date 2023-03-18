@@ -3,7 +3,6 @@
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include "Light.hpp"
-#include "gpio_definition.hpp"
 #include <algorithm>
 
 const char* Light::TAG = "Light";
@@ -15,27 +14,25 @@ const char* Light::TAG = "Light";
 #define LEDC_DUTY               (8191) // Set duty to 100%. ((2 ** 13) - 1) = 8191
 #define LEDC_FREQUENCY          (1000) // Frequency in Hertz. Set frequency at 5 kHz
 
-struct gpio_channel_map_t {
-    ledc_channel_t channel;
-    gpio_num_t gpio;
+static const ledc_channel_t ledc_channels[] {
+    LEDC_CHANNEL_0,
+    LEDC_CHANNEL_1,
+    LEDC_CHANNEL_2,
+    LEDC_CHANNEL_3,
+    LEDC_CHANNEL_4,
+    LEDC_CHANNEL_5,
+    LEDC_CHANNEL_6,
+    LEDC_CHANNEL_7,
 };
 
-static const gpio_channel_map_t gpio_channel_map[] {
-    {LEDC_CHANNEL_1, DIM2_GPIO_NUM},
-    {LEDC_CHANNEL_2, DIM6_GPIO_NUM},
-    {LEDC_CHANNEL_3, DIM1_GPIO_NUM},
-    {LEDC_CHANNEL_4, DIM5_GPIO_NUM},
-    {LEDC_CHANNEL_5, DIM4_GPIO_NUM},
-    {LEDC_CHANNEL_6, DIM8_GPIO_NUM}
-//    {LEDC_CHANNEL_2, DIM3_GPIO_NUM},
-//    {LEDC_CHANNEL_6, DIM7_GPIO_NUM},
-    
-};
-
-Light::Light(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : m_can(ic)
+Light::Light(ICAN& ic) : 
+    m_can(ic), m_ext_active(false), m_ext_disabled(true)
 {   
     m_can.add_dispatcher(this);
-    
+}
+
+void Light::init(PinConfig::pwm_config_t pwm, PinConfig::i2c_config_t i2c)
+{
     // Prepare and then apply the LEDC PWM timer configuration
     ledc_timer_config_t ledc_timer = {
         .speed_mode       = LEDC_MODE,
@@ -45,14 +42,18 @@ Light::Light(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : m_can(ic)
         .clk_cfg          = LEDC_AUTO_CLK
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-    
-    for (auto& gpio_channel_map_entry : gpio_channel_map)
+    unsigned int j = 0;
+    for (unsigned int i = 0; i < 8; i++)
     {
+        if (pwm.dim[i] == GPIO_NUM_NC)
+        {
+            continue;
+        }
         // Prepare and then apply the LEDC PWM channel configuration
         ledc_channel_config_t ledc_channel = {
-            .gpio_num       = gpio_channel_map_entry.gpio,
+            .gpio_num       = pwm.dim[i],
             .speed_mode     = LEDC_MODE,
-            .channel        = gpio_channel_map_entry.channel,
+            .channel        = ledc_channels[j],
             .intr_type      = LEDC_INTR_DISABLE,
             .timer_sel      = LEDC_TIMER,
             .duty           = 0, // Set duty to 0%
@@ -62,17 +63,27 @@ Light::Light(ICAN& ic, gpio_num_t sda_pin, gpio_num_t scl_pin) : m_can(ic)
             }
         };
         ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+        j++;
     }
     
     memset(&m_pca9685, 0, sizeof(pwm_extender_t)*PWM_EXTENDER);
+    if (i2c.sda == GPIO_NUM_NC || i2c.scl == GPIO_NUM_NC)
+    {
+        return;
+    }
     for (int i = 0; i < PWM_EXTENDER; i++)
     {
-        ESP_ERROR_CHECK(pca9685_init_desc(&m_pca9685[i].dev, PCA9685_ADDR_BASE+i, 0, sda_pin, scl_pin));
+        ESP_ERROR_CHECK(pca9685_init_desc(&m_pca9685[i].dev, PCA9685_ADDR_BASE+i, i2c.port, i2c.sda, i2c.scl));
+        m_pca9685[i].dev.cfg.sda_pullup_en = true;
+        m_pca9685[i].dev.cfg.scl_pullup_en = true;
     }
-}
-
-void Light::init()
-{
+    m_ext_disabled = true;
+    
+    if (m_ext_disabled)
+    {
+        return;
+    }
+    
     for (int i = 0; i < PWM_EXTENDER; i++)
     {
         i2c_dev_t* dev = &m_pca9685[i].dev;
@@ -83,6 +94,7 @@ void Light::init()
             ESP_ERROR_CHECK(pca9685_restart(dev));
             ESP_ERROR_CHECK(pca9685_set_pwm_frequency(dev, LEDC_FREQUENCY));
             ESP_LOGI(Light::TAG, "Found PWM Expander %d\n",i);
+            m_ext_active = true;
         }
     }
 }
@@ -93,7 +105,7 @@ void Light::set_onboard(ICAN::LAMP_MSG_t& lamps)
         return;
     }
     
-    for (unsigned int num = 0; num < 6; num++)
+    for (unsigned int num = 0; num < 8; num++)
     {
         if (lamps.bitmask & (1 << num))
         {
@@ -155,4 +167,9 @@ bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, 
             break;
     }
     return false;
+}
+
+bool Light::ext_active()
+{
+    return m_ext_active;
 }

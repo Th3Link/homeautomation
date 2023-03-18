@@ -1,6 +1,7 @@
 #include "esp32-ha-lib/PinConfig.hpp"
 #include <nvs_flash.h>
 #include <esp_log.h>
+#include "esp32-ha-lib/ICAN.hpp"
 
 PinConfig::PinConfig()
 {
@@ -44,7 +45,7 @@ void PinConfig::init()
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
     uint8_t type = 0;
-    if (nvs_get_u8(nvs_handle, "hw_type", &type) != ESP_OK)
+    if (nvs_get_u8(nvs_handle, "can_type", &type) != ESP_OK)
     {
         
     }
@@ -60,8 +61,10 @@ void PinConfig::init()
     
     nvs_close(nvs_handle);
     
-    switch (static_cast<hw_type_t>(type))
+    switch (static_cast<ICAN::DEVICE_t>(type))
     {
+        case ICAN::DEVICE_t::Gateway:
+            break;
         default:
             break;
     }

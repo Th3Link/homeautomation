@@ -7,8 +7,8 @@
 class PresenceSensor
 {
 public:
-    PresenceSensor(ICAN&, gpio_num_t out_pin);
-    void init();
+    PresenceSensor(ICAN&);
+    void init(gpio_num_t out_pin);
     void deinit();
     void send(uint8_t* data, unsigned int data_len);
     static const char* TAG;

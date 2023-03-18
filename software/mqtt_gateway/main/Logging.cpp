@@ -5,15 +5,15 @@
 
 const char* Logging::TAG = "Logging";
 
-Logging::Logging(PinConfig::can_config_t can_config, bool enable_filter, IMQTT& im) : 
-    CAN(can_config, enable_filter), m_mqtt(im), m_mqtt_logging(false)
+Logging::Logging(IMQTT& im) : 
+    CAN(), m_mqtt(im), m_mqtt_logging(false)
 {
     
 }
 
-void Logging::init()
+void Logging::init(PinConfig::can_config_t can_config, bool enable_filter)
 {
-    CAN::init();
+    CAN::init(can_config, enable_filter);
 }
 
 void Logging::mqtt_log(uint32_t id, uint8_t* data, unsigned int data_len, bool request)

@@ -3,6 +3,8 @@
 #include <nvs_flash.h>
 #include <esp_log.h>
 
+const char* PinConfig::TAG = "PinConfig";
+
 static void set_switch_config(PinConfig::board_config_t& bc, uint8_t rev, uint8_t legacy_sensors)
 {
     switch (rev)
@@ -143,6 +145,7 @@ PinConfig::PinConfig()
     
     m_board_config.onboard_relais.scl = GPIO_NUM_NC;
     m_board_config.onboard_relais.sda = GPIO_NUM_NC;
+    m_board_config.onboard_relais.port = I2C_NUM_0;
     
     m_board_config.onboard_switch.sw1 = GPIO_NUM_NC;
     m_board_config.onboard_switch.sw2 = GPIO_NUM_NC;
@@ -151,6 +154,7 @@ PinConfig::PinConfig()
     
     m_board_config.ext_board_i2c.scl = GPIO_NUM_NC;
     m_board_config.ext_board_i2c.sda = GPIO_NUM_NC;
+    m_board_config.ext_board_i2c.port = I2C_NUM_1;
     m_board_config.ext_board_onewire = GPIO_NUM_NC;
     m_board_config.ext_board_pir = GPIO_NUM_NC;
     m_board_config.ext_board_switch.sw1 = GPIO_NUM_NC;
@@ -166,12 +170,20 @@ PinConfig::PinConfig()
 
 void PinConfig::init()
 {
+    //Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+    
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
     uint8_t type = 0;
     if (nvs_get_u8(nvs_handle, "can_type", &type) != ESP_OK)
     {
-        
+        ESP_LOGE(TAG, "Device type not set");
     }
 
     uint8_t legacy_sensors = 0;
@@ -180,6 +192,7 @@ void PinConfig::init()
     uint8_t rev = 0;
     if (nvs_get_u8(nvs_handle, "hw_rev", &rev) != ESP_OK)
     {
+        ESP_LOGE(TAG, "Hardware Revision not set");
         return;
     }
     
@@ -188,6 +201,7 @@ void PinConfig::init()
     switch (static_cast<ICAN::DEVICE_t>(type))
     {
         case ICAN::DEVICE_t::Button:
+            ESP_LOGI(TAG, "Configure Buttons");
             set_switch_config(m_board_config, rev, legacy_sensors);
             break;
         case ICAN::DEVICE_t::Rollershutter:
@@ -195,6 +209,7 @@ void PinConfig::init()
         case ICAN::DEVICE_t::Relais:
             // fall through
         case ICAN::DEVICE_t::SSR:
+            ESP_LOGI(TAG, "Configure Relais");
             set_relais_config(m_board_config, rev, legacy_sensors);
             break;
         default:

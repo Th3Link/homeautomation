@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <driver/gpio.h>
+#include <driver/i2c.h>
 
 class PinConfig
 {
@@ -22,6 +23,7 @@ public:
     {
         gpio_num_t sda;
         gpio_num_t scl;
+        i2c_port_t port;
     };
     struct switch_config_t
     {
@@ -61,6 +63,7 @@ public:
     i2c_config_t get_ext_board_config();
     pwm_config_t get_onboard_pwm_config();
     ext_board_t get_ext_board_power();
+    static const char* TAG;
 private:
     board_config_t m_board_config;
 };
