@@ -17,7 +17,7 @@ Command::Command(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging
 void Command::command(char* cmd, cJSON* root)
 {
     save_config(cmd, root);
-    relais_rollenshutter(cmd, root);
+    relais_rollershutter(cmd, root);
     lamps(cmd, root);
     mqtt_logging(cmd, root);
     save_device(cmd, root);
@@ -168,7 +168,7 @@ void Command::save_config(char* cmd, cJSON* root)
     nvs_close(nvs_handle);
 }
 
-void Command::relais_rollenshutter(char* cmd, cJSON* root)
+void Command::relais_rollershutter(char* cmd, cJSON* root)
 {
     bool relais = (strcmp (cmd, "relais") == 0);
     bool rollershutter = (strcmp (cmd, "rollershutter") == 0);
@@ -180,29 +180,22 @@ void Command::relais_rollenshutter(char* cmd, cJSON* root)
     cJSON* num_json = cJSON_GetObjectItem(root, "num");
     cJSON* state_json = cJSON_GetObjectItem(root, "state");
     cJSON* time_json = cJSON_GetObjectItem(root, "time");
+    cJSON* bank_json = cJSON_GetObjectItem(root, "bank");
     
-    if (!cJSON_IsNumber(num_json) || !cJSON_IsNumber(state_json) || !cJSON_IsNumber(time_json))
+    if (!cJSON_IsNumber(num_json) || !cJSON_IsNumber(state_json) || 
+        !cJSON_IsNumber(time_json) || !cJSON_IsNumber(bank_json))
     {
         return;
     }
     
-    #pragma pack(push,1)
-    struct RELAIS_MSG_t
-    {
-        uint32_t number : 8;
-        uint32_t state : 8;
-        uint32_t time : 24;
-        uint32_t reserved : 24;
-    };
-    #pragma pack(pop)
-    
     union {
-        RELAIS_MSG_t relais_msg;
+        ICAN::RELAIS_MSG_t relais_msg;
         uint8_t data[8];
     };
     relais_msg.number = static_cast<uint8_t>(cJSON_GetNumberValue(num_json));
     relais_msg.state = static_cast<uint8_t>(cJSON_GetNumberValue(state_json));
     relais_msg.time = static_cast<uint32_t>(cJSON_GetNumberValue(time_json));
+    relais_msg.bank = static_cast<uint32_t>(cJSON_GetNumberValue(bank_json));
     if (relais)
     {
         send_can_command(root, ICAN::MSG_ID_t::RELAIS, &data[0], 8, false);   
@@ -222,28 +215,22 @@ void Command::lamps(char* cmd, cJSON* root)
     
     cJSON* value_json = cJSON_GetObjectItem(root, "value");
     cJSON* bitmask_json = cJSON_GetObjectItem(root, "bitmask");
+    cJSON* bank_json = cJSON_GetObjectItem(root, "bank");
 
-    if (!cJSON_IsNumber(value_json) || !cJSON_IsNumber(bitmask_json))
+    if (!cJSON_IsNumber(value_json) || !cJSON_IsNumber(bitmask_json) 
+        || !cJSON_IsNumber(bank_json))
     {
         return;
     }
-
-    #pragma pack(push,1)
-    struct LAMP_MSG_t
-    {
-        uint32_t value : 8;
-        uint32_t bitmask : 24;
-        uint32_t reserved : 32;
-    };
-    #pragma pack(pop)
     
     union {
-        LAMP_MSG_t lamp_msg;
+        ICAN::LAMP_MSG_t lamp_msg;
         uint8_t data[8];
     };
     
     lamp_msg.value = static_cast<uint8_t>(cJSON_GetNumberValue(value_json));
     lamp_msg.bitmask = static_cast<uint32_t>(cJSON_GetNumberValue(bitmask_json));
+    lamp_msg.bank = static_cast<uint32_t>(cJSON_GetNumberValue(bank_json));
     send_can_command(root, ICAN::MSG_ID_t::LAMP_GROUP, &data[0], 4, false); 
 }
 
@@ -288,6 +275,7 @@ void Command::save_device(char* cmd, cJSON* root)
         uint8_t uid0_data[8] {0};
         send_can_command(root, ICAN::MSG_ID_t::DEVICE_UID0, &uid0_data[0], sizeof(uid0_data), false);
         send_can_command(root, ICAN::MSG_ID_t::DEVICE_ID_TYPE, &data[0], 2, false);
+        send_can_command(root, ICAN::MSG_ID_t::DEVICE_ID_TYPE, NULL, 0, true);
     }
 
     cJSON* baudrate_json = cJSON_GetObjectItem(root, "baudrate");
@@ -295,7 +283,25 @@ void Command::save_device(char* cmd, cJSON* root)
     {
         uint8_t bitrate = static_cast<uint8_t>(ICAN::bitrate(cJSON_GetStringValue(baudrate_json)));
         send_can_command(root, ICAN::MSG_ID_t::BAUDRATE, &bitrate, 1, false);
+        send_can_command(root, ICAN::MSG_ID_t::BAUDRATE, NULL, 0, true);
     }
+    
+    cJSON* hwrev_json = cJSON_GetObjectItem(root, "hwrev");
+    if (cJSON_IsNumber(hwrev_json))
+    {
+        uint8_t hwrev = static_cast<uint8_t>(cJSON_GetNumberValue(hwrev_json));
+        send_can_command(root, ICAN::MSG_ID_t::HW_REV, &hwrev, 1, false);
+        send_can_command(root, ICAN::MSG_ID_t::HW_REV, NULL, 0, true);
+    }
+    
+    cJSON* legacy_sensor_json = cJSON_GetObjectItem(root, "legacy_sensor");
+    if (cJSON_IsNumber(legacy_sensor_json))
+    {
+        uint8_t legacy_sensor = static_cast<uint8_t>(cJSON_GetNumberValue(legacy_sensor_json));
+        send_can_command(root, ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, &legacy_sensor, 1, false);
+        send_can_command(root, ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, NULL, 0, true);
+    }
+    
     cJSON* custom_string_json = cJSON_GetObjectItem(root, "custom_string");
     if (cJSON_IsString(custom_string_json))
     {
@@ -308,6 +314,7 @@ void Command::save_device(char* cmd, cJSON* root)
             custom_string[i] = custom_string_string[i];
         }
         send_can_command(root, ICAN::MSG_ID_t::CUSTOM_STRING, &custom_string[0], min_len, false);
+        send_can_command(root, ICAN::MSG_ID_t::CUSTOM_STRING, NULL, 0, true);
     }
     cJSON* rollershutter_mode_json = cJSON_GetObjectItem(root, "rollershutter_mode");
     if (cJSON_IsString(rollershutter_mode_json))
@@ -320,6 +327,7 @@ void Command::save_device(char* cmd, cJSON* root)
         }
         
         send_can_command(root, ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, &rollershutter_mode, 1, false);
+        send_can_command(root, ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, NULL, 0, true);
     }
 }
 

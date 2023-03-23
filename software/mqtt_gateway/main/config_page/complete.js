@@ -401,6 +401,7 @@ function build_id(uid, obj_to_replace, msg) {
 function update_relais_exec_label(uid, exec) {
     var label = document.getElementById(uid + "_label_exec_relais");
     var rtype = document.getElementById(uid + "_relais_type");
+    var rbank = document.getElementById(uid + "_relais_bank");
     var rnum = document.getElementById(uid + "_relais_num");
     var rstate = document.getElementById(uid + "_relais_state");
     var rtime = document.getElementById(uid + "_input_relais_time");
@@ -431,18 +432,24 @@ function update_relais_exec_label(uid, exec) {
     state.style = "color:#00AA00";
     var t = decimalToHex(rtime.value,6);
     var time = document.createElement("span");
-    time.innerHTML = t.substring(4,6) + t.substring(2,4) + t.substring(0,2) + " ";
+    time.innerHTML = t.substring(4,6) + t.substring(2,4) + t.substring(0,2);
     time.style = "color:#AA0000";
+    var bank = document.createElement("span");
+    bank.innerHTML = decimalToHex(rbank.value,2) + " ";
+    bank.style = "color:#0000AA";
     label.appendChild(num);
     label.appendChild(state);
     label.appendChild(time);
+    label.appendChild(bank);
     
     if (exec)
     {
         var xhr = new XMLHttpRequest();
         xhr.open("POST", '/control.json', true);
         xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        var r_command = { command: rtype.value, unit: "can_by_uid", commandId: uid ,num: parseInt(rnum.value), state: parseInt(rstate_hex, 16) , time: parseInt(rtime.value) };
+        var r_command = { command: rtype.value, unit: "can_by_uid", commandId: uid,
+            num: parseInt(rnum.value), state: parseInt(rstate_hex, 16),
+            time: parseInt(rtime.value), bank: parseInt(rbank.value)};
         xhr.send(JSON.stringify(r_command));
     }
 }
@@ -450,7 +457,7 @@ function update_relais_exec_label(uid, exec) {
 function update_lamps_exec_label(uid, exec) {
     var label = document.getElementById(uid + "_label_exec_lamps");
     var lvalue = document.getElementById(uid + "_input_lamps_value");
-    
+    var lbank = document.getElementById(uid + "_lamps_bank");
     build_id(uid,label,decimalToHex(90,2));
 
     var value = document.createElement("span");
@@ -464,14 +471,18 @@ function update_lamps_exec_label(uid, exec) {
         var cb = document.getElementById(uid + "_input_lamps_bitmask_" + i);
         if (cb.checked)
         {
-            bitmask_value += (1 << i);
+            bitmask_value += (1 << 23-i);
         }
     }
     var b = decimalToHex(bitmask_value,6);
-    bitmask.innerHTML = b.substring(4,6) + b.substring(2,4) + b.substring(0,2) + " ";
+    bitmask.innerHTML = b.substring(0,2) + b.substring(2,4) + b.substring(4,6);
     bitmask.style = "color:#00AA00";
+    var bank = document.createElement("span");
+    bank.innerHTML = decimalToHex(lbank.value,2) + " ";
+    bank.style = "color:#0000AA";
     label.appendChild(value);
     label.appendChild(bitmask);
+    label.appendChild(bank);
     
     var instant = document.getElementById(uid + "_input_lamps_instant").checked;
     
@@ -480,7 +491,8 @@ function update_lamps_exec_label(uid, exec) {
         var xhr = new XMLHttpRequest();
         xhr.open("POST", '/control.json', true);
         xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-        var lamps_command = { command: "lamps", unit: "can_by_uid", commandId: uid, value: parseInt(lvalue.value), bitmask: bitmask_value };
+        var lamps_command = { command: "lamps", unit: "can_by_uid", commandId: uid,
+            value: parseInt(lvalue.value), bitmask: bitmask_value, bank: parseInt(lbank.value)};
         xhr.send(JSON.stringify(lamps_command));
     }
 }
@@ -512,6 +524,24 @@ function addControls(uid) {
     div_relais_type.appendChild(select_relais_type);
     div_relais.appendChild(div_relais_type);
     
+    var div_relais_bank = document.createElement("div");
+    div_relais_bank.classList.add("in_float");
+    var label_relais_bank = document.createElement("label");
+    label_relais_bank.for = uid + "_relais_bank";
+    label_relais_bank.innerText = "Bank ";
+    var input_relais_bank = document.createElement("input");
+    input_relais_bank.id = uid + "_relais_bank";
+    input_relais_bank.name = "relais_bank";
+    input_relais_bank.type = "text";
+    input_relais_bank.value = "0";
+    input_relais_bank.classList.add("small_input");
+    input_relais_bank.addEventListener("change", function () {
+        update_relais_exec_label(uid, false);
+    });
+    div_relais_bank.appendChild(label_relais_bank);
+    div_relais_bank.appendChild(input_relais_bank);
+    div_relais.appendChild(div_relais_bank);
+    
     var div_relais_num = document.createElement("div");
     div_relais_num.classList.add("in_float");
     var label_relais_num = document.createElement("label");
@@ -522,6 +552,7 @@ function addControls(uid) {
     input_relais_num.name = "relais_num";
     input_relais_num.type = "text";
     input_relais_num.value = "0";
+    input_relais_num.classList.add("small_input");
     input_relais_num.addEventListener("change", function () {
         update_relais_exec_label(uid, false);
     });
@@ -637,6 +668,24 @@ function addControls(uid) {
     div_lamps_instant.appendChild(input_lamps_instant);
     div_lamps.appendChild(div_lamps_instant);
     
+    var div_lamps_bank = document.createElement("div");
+    div_lamps_bank.classList.add("in_float");
+    var label_lamps_bank = document.createElement("label");
+    label_lamps_bank.for = uid + "_lamps_bank";
+    label_lamps_bank.innerText = "Bank ";
+    var input_lamps_bank = document.createElement("input");
+    input_lamps_bank.id = uid + "_lamps_bank";
+    input_lamps_bank.name = "lamps_bank";
+    input_lamps_bank.type = "text";
+    input_lamps_bank.value = "0";
+    input_lamps_bank.classList.add("small_input");
+    input_lamps_bank.addEventListener("change", function () {
+        update_lamps_exec_label(uid, false);
+    });
+    div_lamps_bank.appendChild(label_lamps_bank);
+    div_lamps_bank.appendChild(input_lamps_bank);
+    div_lamps.appendChild(div_lamps_bank);
+    
     var div_lamps_value = document.createElement("div");
     div_lamps_value.classList.add("in_float");
     var label_lamps_value = document.createElement("label");
@@ -652,7 +701,7 @@ function addControls(uid) {
         update_lamps_exec_label(uid, false);
     });
     input_lamps_value.maxLength = 3;
-
+    
     div_lamps_value.appendChild(label_lamps_value);
     div_lamps_value.appendChild(input_lamps_value);
     div_lamps.appendChild(div_lamps_value);
@@ -713,6 +762,7 @@ function addDetails(uid) {
     div.classList.add("state");
     div.classList.add("in_float");
     div.appendChild(c1("Firmware Version: ", uid + "_firmware"));
+    div.appendChild(c1("HW Revision: ", uid + "_hwrev"));
     div.appendChild(c1("Last Message: ", uid + "_last_message"));
     div.appendChild(c1("Device UID0: ", uid + "_uid0"));
     div.appendChild(c1("Device UID1: ", uid + "_uid1"));
@@ -731,6 +781,8 @@ function addDetails(uid) {
     details.appendChild(createRollershutterMode(uid, "in_float"));
     details.appendChild(createDeviceID(uid, "in_float"));
     details.appendChild(createDeviceType(uid, "in_float"));
+    details.appendChild(createHWREV(uid, "in_float"));
+    details.appendChild(createLegacySensor(uid, "in_float"));
     details.appendChild(createCustomString(uid, "in_float"));
     details.appendChild(createBaudrate(uid, "in_float"));
     details.appendChild(createSaveRestart(uid, "last_float"));
@@ -820,8 +872,6 @@ function updateTable(header, elements) {
 
     var tbl = document.getElementById("device_table");
     if (tbl == null) {
-
-
         tbl = document.createElement("table");
         var tblBody = document.createElement("tbody");
         tblBody.id = "device_table_body";
@@ -905,8 +955,9 @@ function updateTable(header, elements) {
         device_tr.childNodes[6].childNodes[0].textContent = elements[i].last_seen;
         device_tr.childNodes[7].childNodes[0].textContent = elements[i].state;
         device_tr.childNodes[8].childNodes[0].textContent = elements[i].last_error;
-        
+
         document.getElementById(elements[i].uid + "_firmware").textContent = elements[i].version;
+        document.getElementById(elements[i].uid + "_hwrev").textContent = elements[i].hwrev;
         document.getElementById(elements[i].uid + "_uid0").textContent = elements[i].uid0;
         document.getElementById(elements[i].uid + "_uid1").textContent = elements[i].uid1;
         document.getElementById(elements[i].uid + "_uptime").textContent = elements[i].uptime;
@@ -916,11 +967,14 @@ function updateTable(header, elements) {
         document.getElementById(elements[i].uid + "_device_type").value = elements[i].device_type;
         document.getElementById(elements[i].uid + "_custom_string").value = elements[i].custom_string;
         document.getElementById(elements[i].uid + "_can_baudrate").value = elements[i].baudrate;
+        document.getElementById(elements[i].uid + "_hwrevinput").value = elements[i].hwrev;
+        document.getElementById(elements[i].uid + "_legacy_sensor").value = elements[i].legacy_sensor;
         document.getElementById(elements[i].uid + "_rollershutter_mode").value = elements[i].rollershutter_mode;
         document.getElementById(elements[i].uid + "_device_id").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_device_type").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_custom_string").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_can_baudrate").dispatchEvent(new window.Event('change'));
+        document.getElementById(elements[i].uid + "_hwrevinput").dispatchEvent(new window.Event('change'));
         document.getElementById(elements[i].uid + "_rollershutter_mode").dispatchEvent(new window.Event('change'));
     }
 }
@@ -964,7 +1018,7 @@ function updateTypeOptions() {
 }
 
 function updateDeviceList() {
-    get_config(function (loaded_config) {        
+    get_config(function (loaded_config) {
         updateTypes(loaded_config);
         updateTable(loaded_config.header, loaded_config.devices);
     });
@@ -1000,6 +1054,8 @@ function save_click(uid) {
     var type = document.getElementById(uid+"_device_type");
     var baudrate = document.getElementById(uid+"_can_baudrate");
     var rollershutter_mode = document.getElementById(uid+"_rollershutter_mode");
+    var hwrev = document.getElementById(uid+"_hwrevinput");
+    var legacy_sensor = document.getElementById(uid+"_legacy_sensor");
     var save_command = { command: "save" };
     save_command = add_unit(uid, save_command);
     if (type.classList.contains("to_save"))
@@ -1013,6 +1069,14 @@ function save_click(uid) {
     if (rollershutter_mode.classList.contains("to_save"))
     {
         save_command.rollershutter_mode = rollershutter_mode.value;
+    }
+    if (hwrev.classList.contains("to_save"))
+    {
+        save_command.hwrev = parseInt(hwrev.value);
+    }
+    if (legacy_sensor.classList.contains("to_save"))
+    {
+        save_command.legacy_sensor = parseInt(legacy_sensor.value);
     }
     if ((uid != "selected") && (uid != "by_type"))
     {
@@ -1140,6 +1204,7 @@ function createDeviceID(uid, cl) {
     input.id = uid + "_device_id";
     input.name = "device_id";
     input.type = "text";
+    input.style = "width:40px";
     input.addEventListener("change", function () {
         var device_object = get_device_object(uid);
         if (device_object.device_id != input.value)
@@ -1168,9 +1233,68 @@ function createDeviceType(uid, cl) {
     input.id = uid + "_device_type";
     input.name = "device_type";
     input.type = "text";
+    input.style = "width:40px";
     input.addEventListener("change", function () {
         var device_object = get_device_object(uid);
         if (device_object.device_type != input.value)
+        {
+            div.classList.add("changed");
+            input.classList.add("to_save");
+        }
+        else
+        {
+            div.classList.remove("changed");
+            input.classList.remove("to_save");
+        }
+    });
+    div.appendChild(label);
+    div.appendChild(input);
+    return div;
+}
+
+function createHWREV(uid, cl) {
+    var div = document.createElement("div");
+    div.classList.add(cl);
+    var label = document.createElement("label");
+    label.for = "hwrev";
+    label.innerText = "HW Rev ";
+    var input = document.createElement("input");
+    input.id = uid + "_hwrevinput";
+    input.name = "hwrev";
+    input.type = "text";
+    input.style = "width:30px";   
+    input.addEventListener("change", function () {
+        var device_object = get_device_object(uid);
+        if (device_object.hwrev != input.value)
+        {
+            div.classList.add("changed");
+            input.classList.add("to_save");
+        }
+        else
+        {
+            div.classList.remove("changed");
+            input.classList.remove("to_save");
+        }
+    });
+    div.appendChild(label);
+    div.appendChild(input);
+    return div;
+}
+
+function createLegacySensor(uid, cl) {
+    var div = document.createElement("div");
+    div.classList.add(cl);
+    var label = document.createElement("label");
+    label.for = "legacy_sensor";
+    label.innerText = "Legacy Sensor";
+    var input = document.createElement("input");
+    input.id = uid + "_legacy_sensor";
+    input.name = "legacy_sensor";
+    input.type = "text";
+    input.style = "width:30px";   
+    input.addEventListener("change", function () {
+        var device_object = get_device_object(uid);
+        if (device_object.legacy_sensor != input.value)
         {
             div.classList.add("changed");
             input.classList.add("to_save");

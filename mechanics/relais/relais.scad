@@ -4,7 +4,7 @@ PCB_HEIGHT=98;
 PCB_WIDTH1=90;
 PCB_WIDTH2=96;
 PCB_T =2;
-PCB_FREE_SPACE=74;
+PCB_FREE_SPACE=34;
 T=2;
 
 module half(width) {

@@ -93,6 +93,7 @@ void WiFi::init()
     
     if (m_mode == Mode::Client)
     {
+        ESP_LOGI(TAG, "client mode");
         if (!init_client())
         {
             strcat(m_ssid, "_ap");
@@ -204,10 +205,10 @@ void WiFi::init_softap(const unsigned char channel)
 
 void WiFi::read_nvs()
 {
-    char wifi_mode[20];
+    char wifi_mode[20] {0};
     size_t ssid_len = sizeof(m_ssid);
     size_t pw_len = sizeof(m_password);
-    size_t wifi_mode_len = sizeof(m_mode);
+    size_t wifi_mode_len = sizeof(wifi_mode);
     size_t hostname_len = sizeof(m_hostname);
     
     nvs_handle_t nvs_handle;
@@ -215,12 +216,13 @@ void WiFi::read_nvs()
     
     if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
     {
+        ESP_LOGI(WiFi::TAG, "Set wifi mode to ap");
         wifi_mode_len = sizeof(wifi_mode);
         nvs_set_str(nvs_handle, "wifi_mode", "ap");
         nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len);
     }
     
-    if (strcmp(wifi_mode, "client"))
+    if (strcmp(wifi_mode, "client") == 0)
     {
         m_mode = Mode::Client;
     }

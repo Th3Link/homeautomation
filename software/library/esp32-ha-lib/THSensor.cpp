@@ -1,12 +1,10 @@
 #include <dht.h>
 #include <ds18x20.h>
 
-
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_err.h>
 #include <esp_log.h>
-#include <esp_mac.h>
 #include "THSensor.hpp"
 
 struct sensor_data_t {
@@ -56,12 +54,12 @@ static void dht_task(void *this_ptr)
         uint8_t chipid[8];
         uint64_t chipid64;
     };
-    esp_efuse_mac_get_default(chipid);
+    chipid64 = 0;
+    chipid[0] = 32;
     while (1)
     {
         if (dht_read_float_data(DHT_TYPE_AM2301, thsensor->onewire_pin(), &humidity, &temperature) == ESP_OK)
         {
-            ESP_LOGI(THSensor::TAG, "Humidity: %.1f%% Temp: %.1fC\n", humidity, temperature);
             thsensor->dispatch(
                 static_cast<uint16_t>(temperature*16), chipid64 + thsensor->onewire_pin(), 
                 ICAN::MSG_ID_t::TEMPERATURE_SENSOR);
@@ -146,80 +144,10 @@ static void ds18x20_task(void *this_ptr)
     }
 }
 
-static void bme680_task(void *this_ptr)
-{
-    auto thsensor = reinterpret_cast<THSensor*>(this_ptr);
-
-    // init the sensor
-    ESP_ERROR_CHECK(bme680_init_sensor(thsensor->bme680_sensor()));
-
-    // Changes the oversampling rates to 4x oversampling for temperature
-    // and 2x oversampling for humidity. Pressure measurement is skipped.
-    bme680_set_oversampling_rates(thsensor->bme680_sensor(), BME680_OSR_4X, BME680_OSR_4X, BME680_OSR_4X);
-
-    // Change the IIR filter size for temperature and pressure to 7.
-    bme680_set_filter_size(thsensor->bme680_sensor(), BME680_IIR_SIZE_7);
-
-    // Change the heater profile 0 to 350 degree Celsius for 100 ms.
-    bme680_set_heater_profile(thsensor->bme680_sensor(), 0, 250, 100);
-    bme680_use_heater_profile(thsensor->bme680_sensor(), 0);
-    
-    // Set ambient temperature to 10 degree Celsius
-    bme680_set_ambient_temperature(thsensor->bme680_sensor(), 21);
-
-    // as long as sensor configuration isn't changed, duration is constant
-    uint32_t duration;
-    bme680_get_measurement_duration(thsensor->bme680_sensor(), &duration);
-
-    TickType_t last_wakeup = xTaskGetTickCount();
-
-    bme680_values_float_t values;
-    while (1)
-    {
-        // trigger the sensor to start one TPHG measurement cycle
-        if (bme680_force_measurement(thsensor->bme680_sensor()) == ESP_OK)
-        {
-            // passive waiting until measurement results are available
-            vTaskDelay(duration);
-
-            // get the results and do something with them
-            if (bme680_get_results_float(thsensor->bme680_sensor(), &values) == ESP_OK)
-            {
-                printf("BME680 Sensor: %.2f °C, %.2f %%, %.2f hPa, %.2f Ohm\n",
-                        values.temperature, values.humidity, values.pressure, values.gas_resistance);
-            
-                thsensor->dispatch(
-                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD00, 
-                    ICAN::MSG_ID_t::TEMPERATURE_SENSOR);
-                thsensor->dispatch(
-                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD00, 
-                    ICAN::MSG_ID_t::HUMIDITY_SENSOR);
-            }
-        }
-        else
-        {
-            // get the results and do something with them
-            if (bme680_get_results_float(thsensor->bme680_sensor(), &values) == ESP_OK)
-            {
-                printf("BME680 Sensor: %.2f °C, %.2f %%, %.2f hPa, %.2f Ohm\n",
-                        values.temperature, values.humidity, values.pressure, values.gas_resistance);
-                thsensor->dispatch(
-                    static_cast<uint16_t>(values.temperature*16), 0xBADBAD00, 
-                    ICAN::MSG_ID_t::TEMPERATURE_SENSOR);
-                thsensor->dispatch(
-                    static_cast<uint16_t>(values.humidity*16), 0xBADBAD00, 
-                    ICAN::MSG_ID_t::HUMIDITY_SENSOR);
-            }
-        }
-        // passive waiting until 1 second is over
-        vTaskDelayUntil(&last_wakeup, pdMS_TO_TICKS(10000));
-    }
-}
-
 THSensor::THSensor(ICAN& ic) : 
-    m_can(ic), m_onewire_pin(GPIO_NUM_NC)
+    m_can(ic), m_onewire_pin(GPIO_NUM_NC), m_bme680(ic)
 {
-    memset(&m_bme680, 0, sizeof(bme680_t));
+    
 }
 
 void THSensor::init(gpio_num_t p_onewire_pin)
@@ -268,37 +196,14 @@ void THSensor::init(gpio_num_t p_onewire_pin)
 void THSensor::init(gpio_num_t onewire_pin, PinConfig::i2c_config_t i2c)
 {
     init(onewire_pin);
-    
-    if (i2c.sda == GPIO_NUM_NC || i2c.scl == GPIO_NUM_NC)
+    m_bme680.init(i2c);
+    if (m_bme680.active())
     {
-        return;
-    }
-        
-    ESP_ERROR_CHECK(bme680_init_desc(&m_bme680, BME680_I2C_ADDR_1, i2c.port, i2c.sda, i2c.scl));
-    m_bme680.i2c_dev.cfg.sda_pullup_en = true;
-    m_bme680.i2c_dev.cfg.scl_pullup_en = true;
-    
-    vTaskDelay(pdMS_TO_TICKS(500));
-    
-    // probing BME680
-    if (i2c_dev_probe(&(m_bme680.i2c_dev), I2C_DEV_WRITE) == ESP_OK)
-    {
-        ESP_LOGI(THSensor::TAG, "Sensor BME680 ok\n");
-        xTaskCreate(bme680_task, "bme680_task", configMINIMAL_STACK_SIZE * 4, this, 5, NULL);
         active = true;
-    }
-    else
-    {
-        ESP_LOGI(THSensor::TAG, "Sensor BME680 probe failed\n");
     }
 }
 
 gpio_num_t THSensor::onewire_pin()
 {
     return m_onewire_pin;
-}
-
-bme680_t* THSensor::bme680_sensor()
-{
-    return &m_bme680;
 }

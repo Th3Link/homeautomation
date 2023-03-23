@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Console.hpp"
+#include "esp32-ha-lib/Console.hpp"
+#include "esp32-ha-lib/cmd_device.h"
 #include "Relais.hpp"
 #include "Light.hpp"
 #include "Selftest.hpp"
@@ -22,5 +23,3 @@ private:
     Light& m_light;
     Selftest& m_selftest;
 };
-
-void register_device();

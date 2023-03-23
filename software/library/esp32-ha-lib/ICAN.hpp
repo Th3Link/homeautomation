@@ -52,7 +52,6 @@ public:
         FLASH_VERIFY = 20,
         BUTTON_EVENT = 30,
         TEMPERATURE_SENSOR = 31,
-        HW_TYPE = 40,
         HW_REV = 41,
         SENSOR_LEGACY_MODE = 42,
         LAMP_GROUP = 90,
@@ -65,7 +64,11 @@ public:
         ROLLERSHUTTER_MODE = 134,
         AMBIENT_LIGHT_SENSOR = 140,
         AMBIENT_LIGHT_SENSOR_WHITE = 141,
-        NIGHTLIGHT = 150
+        NIGHTLIGHT = 150,
+        PRESSURE_SENSOR = 151,
+        CO2_EQUIVALENT = 152,
+        VOC_BREATH = 153,
+        AIR_QUALITY = 154,
         //30      button reading
         //31      temperature reading
         //32...56 get lamp state
@@ -288,9 +291,9 @@ public:
         return (id & ID_ID_MASK) >> 8;
     }
 
-    static constexpr uint32_t GET_MSG(uint32_t id)
+    static constexpr MSG_ID_t GET_MSG(uint32_t id)
     {
-        return id & ID_MSG_MASK;
+        return static_cast<MSG_ID_t>(id & ID_MSG_MASK);
     }
 
     static constexpr uint32_t GET_NOT_MSG(uint32_t id)

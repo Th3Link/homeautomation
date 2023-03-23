@@ -77,12 +77,6 @@ void Light::init(PinConfig::pwm_config_t pwm, PinConfig::i2c_config_t i2c)
         m_pca9685[i].dev.cfg.sda_pullup_en = true;
         m_pca9685[i].dev.cfg.scl_pullup_en = true;
     }
-    m_ext_disabled = true;
-    
-    if (m_ext_disabled)
-    {
-        return;
-    }
     
     for (int i = 0; i < PWM_EXTENDER; i++)
     {

@@ -8,6 +8,7 @@ function createDeviceID(uid, cl) {
     input.id = uid + "_device_id";
     input.name = "device_id";
     input.type = "text";
+    input.style = "width:40px";
     input.addEventListener("change", function () {
         var device_object = get_device_object(uid);
         if (device_object.device_id != input.value)
@@ -36,9 +37,68 @@ function createDeviceType(uid, cl) {
     input.id = uid + "_device_type";
     input.name = "device_type";
     input.type = "text";
+    input.style = "width:40px";
     input.addEventListener("change", function () {
         var device_object = get_device_object(uid);
         if (device_object.device_type != input.value)
+        {
+            div.classList.add("changed");
+            input.classList.add("to_save");
+        }
+        else
+        {
+            div.classList.remove("changed");
+            input.classList.remove("to_save");
+        }
+    });
+    div.appendChild(label);
+    div.appendChild(input);
+    return div;
+}
+
+function createHWREV(uid, cl) {
+    var div = document.createElement("div");
+    div.classList.add(cl);
+    var label = document.createElement("label");
+    label.for = "hwrev";
+    label.innerText = "HW Rev ";
+    var input = document.createElement("input");
+    input.id = uid + "_hwrevinput";
+    input.name = "hwrev";
+    input.type = "text";
+    input.style = "width:30px";   
+    input.addEventListener("change", function () {
+        var device_object = get_device_object(uid);
+        if (device_object.hwrev != input.value)
+        {
+            div.classList.add("changed");
+            input.classList.add("to_save");
+        }
+        else
+        {
+            div.classList.remove("changed");
+            input.classList.remove("to_save");
+        }
+    });
+    div.appendChild(label);
+    div.appendChild(input);
+    return div;
+}
+
+function createLegacySensor(uid, cl) {
+    var div = document.createElement("div");
+    div.classList.add(cl);
+    var label = document.createElement("label");
+    label.for = "legacy_sensor";
+    label.innerText = "Legacy Sensor";
+    var input = document.createElement("input");
+    input.id = uid + "_legacy_sensor";
+    input.name = "legacy_sensor";
+    input.type = "text";
+    input.style = "width:30px";   
+    input.addEventListener("change", function () {
+        var device_object = get_device_object(uid);
+        if (device_object.legacy_sensor != input.value)
         {
             div.classList.add("changed");
             input.classList.add("to_save");

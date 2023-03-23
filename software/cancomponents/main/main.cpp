@@ -23,10 +23,10 @@
 #include "esp32-ha-lib/AmbientLightSensor.hpp"
 #include "esp32-ha-lib/Nightlight.hpp"
 #include "esp32-ha-lib/PinConfig.hpp"
+#include "esp32-ha-lib/Console.hpp"
 #include "ExtensionBoard.hpp"
 #include "Light.hpp"
 #include "Relais.hpp"
-#include "Console.hpp"
 #include "ConsoleCommandDevice.hpp"
 #include "Selftest.hpp"
 /* --------------------- Definitions and static variables ------------------ */
@@ -54,8 +54,6 @@ static Relais relais(can);
 static Selftest selftest(relais, light);
 static Console console;
 static ConsoleCommandDevice console_command_device(console, relais, light, selftest);
-static PinConfig::switch_config_t onboard_switch = pin_config.get_onboard_switch_config();
-static PinConfig::switch_config_t ext_board_switch = pin_config.get_ext_board_switch_config();
 static Button sw1(can);
 static Button sw2(can);
 static Button sw3(can);
@@ -72,6 +70,9 @@ void app_main()
     shutdown_sem  = xSemaphoreCreateBinary();
     
     pin_config.init();
+
+    PinConfig::switch_config_t onboard_switch = pin_config.get_onboard_switch_config();
+    PinConfig::switch_config_t ext_board_switch = pin_config.get_ext_board_switch_config();
     
     can.init(pin_config.get_can_config(), true);
     device.init();

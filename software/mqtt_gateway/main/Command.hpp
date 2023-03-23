@@ -18,7 +18,7 @@ public:
     void send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* data,  size_t data_len, 
         bool request);
     void save_config(char* cmd, cJSON* root);
-    void relais_rollenshutter(char* cmd, cJSON* root);
+    void relais_rollershutter(char* cmd, cJSON* root);
     void lamps(char* cmd, cJSON* root);
     void mqtt_logging(char* cmd, cJSON* root);
     void web_logging(char* cmd, cJSON* root);

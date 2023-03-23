@@ -14,7 +14,7 @@
 #include "nvs_flash.h"
 #include "cmd_system.h"
 #include "cmd_nvs.h"
-#include "ConsoleCommandDevice.hpp"
+#include "cmd_device.h"
 
 #define PROMPT_STR CONFIG_IDF_TARGET
 

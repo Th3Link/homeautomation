@@ -64,6 +64,8 @@ void CAN::init(PinConfig::can_config_t can_config, bool enable_filter)
     #define RX_TASK_PRIO                    10       //Receiving task priority
     static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
         m_tx_pin, m_rx_pin, TWAI_MODE_NORMAL);
+    g_config.tx_queue_len = 100;
+    g_config.tx_queue_len = 100;
     static const twai_timing_config_t t_config_22_222 = {.brp = 200, .tseg_1 = 11, 
         .tseg_2 = 6, .sjw = 3, .triple_sampling = true};
     static const twai_timing_config_t t_config_25 = TWAI_TIMING_CONFIG_25KBITS();
