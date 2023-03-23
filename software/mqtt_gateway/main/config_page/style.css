@@ -69,6 +69,10 @@ html, body {
     width: 100px;
   }
   
+  .details .small_input {
+    width: 30px;
+  }
+  
   .details input.upload, #batch_body input.upload {
     width: 180px;
   }

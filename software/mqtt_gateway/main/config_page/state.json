@@ -42,7 +42,10 @@
       "baudrate":"b100",
       "rollershutter_mode":"SOFTWARE",
       "mqtt_logging":false,
-      "web_logging":false
+      "web_logging":false,
+      "version": "2.0",
+      "hwrev": 2,
+      "legacy_sensor": 0
     },
     {
       "uid": "0x223456781234567812345678",
@@ -52,7 +55,10 @@
       "custom_string": "ABCDEFGH",
       "last_seen": 345064,
       "state" : "application",
-      "last_error": "0x0"
+      "last_error": "0x0",
+      "version": "2.0",
+      "hwrev": "2",
+      "legacy_sensor": 1
     },
     {
       "uid": "0x323456781234567812345678",
@@ -62,7 +68,10 @@
       "custom_string": "ABCDEFGH",
       "last_seen": -1,
       "state" : "application",
-      "last_error": "0x0"
+      "last_error": "0x0",
+      "version": "2.0",
+      "hwrev": "2",
+      "legacy_sensor": 0
     },
     {
       "uid": "0x423456781234567812345678",
@@ -72,7 +81,10 @@
       "custom_string": "ABCDEFGH",
       "last_seen": 4000,
       "state" : "application",
-      "last_error": "0x0"
+      "last_error": "0x0",
+      "version": "2.0",
+      "hwrev": "2",
+      "legacy_sensor": 0
     },
     {
       "uid": "0x523456781234567812345678",
@@ -82,7 +94,10 @@
       "custom_string": "ABCDEFGH",
       "last_seen": 4000,
       "state" : "application",
-      "last_error": "0x0"
+      "last_error": "0x0",
+      "version": "2.0",
+      "hwrev": "2",
+      "legacy_sensor": 0
     }
   ]
 }

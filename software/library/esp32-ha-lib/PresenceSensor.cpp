@@ -71,8 +71,8 @@ void pir_smooth_task(void *this_ptr)
             }
             button_data.count++;
         }
-        ESP_LOGI(presence_sensor->TAG, "Dispatch PIR state %d\n", 
-            static_cast<uint8_t>(button_data.state));
+        //ESP_LOGI(presence_sensor->TAG, "Dispatch PIR state %d\n", 
+        //    static_cast<uint8_t>(button_data.state));
         presence_sensor->send(data, sizeof(data));
     }
 }

@@ -46,6 +46,6 @@ private:
     ICAN::ROLLERSHUTTER_MODE_t m_rollershutter_mode;
     std::array<std::array<rollershutter_state_t, MAX_CHANNEL_COUNT/2>,MAX_RELAIS_COUNT> m_states;
     std::array<std::array<uint32_t, MAX_CHANNEL_COUNT/2>,MAX_RELAIS_COUNT> m_actions;
-    std::array<bool, MAX_RELAIS_COUNT> m_active;
+    std::array<std::array<bool, 2>, MAX_RELAIS_COUNT> m_active;
     std::array<bool, MAX_RELAIS_COUNT> m_relais_mapping;
 };

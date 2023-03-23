@@ -218,7 +218,8 @@ Relais::Relais(ICAN& ic)
         }
         memset(&m_device[i][0], 0, sizeof(i2c_dev_t));
         memset(&m_device[i][1], 0, sizeof(i2c_dev_t));
-        m_active[i] = false;
+        m_active[i][0] = false;
+        m_active[i][1] = false;
         m_state[i] = 0;
         m_relais_mapping[i] = false;
     }
@@ -255,72 +256,59 @@ void Relais::init(PinConfig::i2c_config_t onboard_i2c,
         m_relais_mapping[0] = true;
     }
 
-    for (unsigned int i = 1; i < MAX_RELAIS_COUNT; i++)
-    {
-        if (relais_remapping & (1 << (i - 1)))
-        {
-            m_relais_mapping[i] = true;
-        }
-    }
-
     if (onboard_i2c.sda != GPIO_NUM_NC && onboard_i2c.scl != GPIO_NUM_NC)
     {
-        ESP_ERROR_CHECK(pca9557_init_desc(&m_device[0][0], TCA9534_I2C_ADDR_BASE + 0x6,
-            onboard_i2c.port, onboard_i2c.sda, onboard_i2c.scl));
-        m_device[0][0].cfg.sda_pullup_en = true;
-        m_device[0][0].cfg.scl_pullup_en = true;
-        ESP_ERROR_CHECK(pca9557_init_desc(&m_device[0][1], TCA9534_I2C_ADDR_BASE + 0x7,
-            onboard_i2c.port, onboard_i2c.sda, onboard_i2c.scl));
-        m_device[0][1].cfg.sda_pullup_en = true;
-        m_device[0][1].cfg.scl_pullup_en = true;
-        
-        if (i2c_dev_probe(&m_device[0][0], I2C_DEV_WRITE) == ESP_OK)
+        for (unsigned int i = 0; i < 2; i++)
         {
-            // both io expander must be probed.
-            ESP_ERROR_CHECK(i2c_dev_probe(&m_device[0][1], I2C_DEV_WRITE));
-            m_active[0] = true;
-            ESP_LOGI(TAG, "Probing %d successful", 0);
+            ESP_ERROR_CHECK(pca9557_init_desc(&m_device[0][i], TCA9534_I2C_ADDR_BASE + 0x6 + i,
+                onboard_i2c.port, onboard_i2c.sda, onboard_i2c.scl));
+            m_device[0][i].cfg.sda_pullup_en = true;
+            m_device[0][i].cfg.scl_pullup_en = true;
+            if (i2c_dev_probe(&m_device[0][i], I2C_DEV_WRITE) == ESP_OK)
+            {
+                m_active[0][i] = true;
+                ESP_LOGI(TAG, "Probing %d:%d successful", 0, i);
+            }
         }
     }
     if (ext_board_i2c.sda != GPIO_NUM_NC && ext_board_i2c.scl != GPIO_NUM_NC)
     {
         for (unsigned int i = 1; i < MAX_RELAIS_COUNT; i++)
         {
-            uint8_t addr = ((i - 1) << 1);
-            ESP_ERROR_CHECK(pca9557_init_desc(&m_device[i][0], TCA9534_I2C_ADDR_BASE + addr,
-                ext_board_i2c.port, ext_board_i2c.sda, ext_board_i2c.scl));
-            m_device[i][0].cfg.sda_pullup_en = true;
-            m_device[i][0].cfg.scl_pullup_en = true;
-            ESP_ERROR_CHECK(pca9557_init_desc(&m_device[i][1], TCA9534_I2C_ADDR_BASE + addr + 1,
-                ext_board_i2c.port, ext_board_i2c.sda, ext_board_i2c.scl));
-            m_device[i][1].cfg.sda_pullup_en = true;
-            m_device[i][1].cfg.scl_pullup_en = true;
-        }
-        for (unsigned int i = 1; i < MAX_RELAIS_COUNT; i++)
-        {
-            if (i2c_dev_probe(&m_device[i][0], I2C_DEV_WRITE) == ESP_OK)
+            if (relais_remapping & (1 << (i - 1)))
             {
-                // both io expander must be probed.
-                ESP_ERROR_CHECK(i2c_dev_probe(&m_device[i][1], I2C_DEV_WRITE));
-                m_active[i] = true;
-                ESP_LOGI(TAG, "Probing %d successful", i);
+                m_relais_mapping[i] = true;
+            }
+            
+            for (unsigned int j = 0; j < 2; j++)
+            {
+                uint8_t addr = ((i - 1) << 1);
+                ESP_ERROR_CHECK(pca9557_init_desc(&m_device[i][j], 
+                    TCA9534_I2C_ADDR_BASE + addr + j,
+                    ext_board_i2c.port, ext_board_i2c.sda, ext_board_i2c.scl));
+                m_device[i][j].cfg.sda_pullup_en = true;
+                m_device[i][j].cfg.scl_pullup_en = true;
+                if (i2c_dev_probe(&m_device[i][j], I2C_DEV_WRITE) == ESP_OK)
+                {
+                    m_active[i][j] = true;
+                    ESP_LOGI(TAG, "Probing %d:%d successful", i, j);
+                }
             }
         }
     }
     
     for (unsigned int i = 0; i < MAX_RELAIS_COUNT; i++)
     {
-        if (!m_active[i])
+        for (unsigned int j = 0; j < 2; j++)
         {
-            continue;
+            if (!m_active[i][j])
+            {
+                continue;
+            }
+            pca9557_port_write(&m_device[i][j], 0);
+            pca9557_port_set_mode(&m_device[i][j], 0);
+            pca9557_port_write(&m_device[i][j], 0);
         }
-
-        pca9557_port_write(&m_device[i][0], 0);
-        pca9557_port_write(&m_device[i][1], 0);
-        pca9557_port_set_mode(&m_device[i][0], 0);
-        pca9557_port_set_mode(&m_device[i][1], 0);
-        pca9557_port_write(&m_device[i][0], 0);
-        pca9557_port_write(&m_device[i][1], 0);
     }
     xTaskCreate(message_task, "message_task", configMINIMAL_STACK_SIZE * 3, this, 5, NULL);
 }
@@ -359,20 +347,16 @@ uint8_t real_num(uint8_t num)
 
 void Relais::state(uint8_t p_bank, uint8_t p_num, bool p_state)
 {
-    if (!m_active[p_bank])
-    {
-        return;
-    }
-    
     if (m_relais_mapping[p_bank]) {
         p_num = real_num(p_num);
     }
+    
     m_state[p_bank] = (m_state[p_bank] & ~(1 << p_num)) | (p_state << p_num);
-    if (p_num < 8)
+    if ((p_num < 8) && m_active[p_bank][0])
     {
         ESP_ERROR_CHECK(pca9557_port_write(&m_device[p_bank][0], m_state[p_bank] & 0xFF));
     }
-    else
+    else if (m_active[p_bank][1])
     {
         ESP_ERROR_CHECK(pca9557_port_write(&m_device[p_bank][1], (m_state[p_bank] >> 8)));
     }
@@ -452,9 +436,12 @@ bool Relais::ext_active()
 {
     for (unsigned int i = 1; i < MAX_RELAIS_COUNT; i++)
     {
-        if (m_active[i])
+        for (unsigned int j = 0; j < 2; j++)
         {
-            return true;
+            if (m_active[i][j])
+            {
+                return true;
+            }
         }
     }
     return false;

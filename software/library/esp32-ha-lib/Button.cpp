@@ -16,7 +16,7 @@ static void button_multi_click(void *arg)
 
 void Button::dispatch(button_state_t s)
 {
-    ESP_LOGI(Button::TAG, "Dispatch Button %d state %d\n", button_data.identifier, s);
+    //ESP_LOGI(Button::TAG, "Dispatch Button %d state %d\n", button_data.identifier, s);
     
     switch (s)
     {

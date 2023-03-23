@@ -99,7 +99,7 @@ for ( hole = holes ){
     }
     
     //connectors
-    translate([17,17,0]) cube([60, 64,7]);
+    translate([17,15.5,0]) cube([60, 65.5,7]);
     translate([1,64,0]) cube([60, 17,7]);
     //component hight
     translate([0,0,0]) cube([pcb[0], pcb[1],5]);

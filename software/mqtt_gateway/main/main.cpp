@@ -20,11 +20,13 @@
 #include "Web.hpp"
 #include "esp32-ha-lib/CAN.hpp"
 #include "esp32-ha-lib/PinConfig.hpp"
+#include "esp32-ha-lib/Console.hpp"
 #include "BridgeDevice.hpp"
 #include "BridgeLamps.hpp"
 #include "BridgeRelais.hpp"
 #include "BridgeButton.hpp"
 #include "BridgeDebug.hpp"
+#include "ConsoleCommandDevice.hpp"
 
 /* --------------------- Definitions and static variables ------------------ */
 //Example Configuration
@@ -51,6 +53,8 @@ static BridgeRelais bridge_relais(can_logging, mqtt, device_list);
 static BridgeButton bridge_button(can_logging, mqtt, device_list);
 static BridgeLamps bridge_lamps(can_logging, mqtt, device_list);
 static BridgeDebug bridge_debug(can_logging, mqtt, device_list);
+static Console console;
+static ConsoleCommandDevice console_command_device(console);
 
 extern "C"
 void app_main()
@@ -83,7 +87,7 @@ void app_main()
     }
     
     update.verified();
-    
+    console.init();
     xSemaphoreTake(shutdown_sem, portMAX_DELAY);    //Wait for tasks to complete
 
     twai_stop();

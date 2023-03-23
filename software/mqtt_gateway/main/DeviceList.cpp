@@ -113,6 +113,12 @@ static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifi
         case ICAN::MSG_ID_t::ROLLERSHUTTER_MODE:
             device.rollershutter_mode = data[0];
             break;
+        case ICAN::MSG_ID_t::HW_REV:
+            device.hwrev = data[0];
+            break;
+        case ICAN::MSG_ID_t::SENSOR_LEGACY_MODE:
+            device.legacy_sensor = data[0];
+            break;
         default:
             break;
     }
@@ -261,6 +267,8 @@ void DeviceList::output(cJSON* object)
                 static_cast<ICAN::BITRATE_t>(m_deviceList[i].baudrate)));
             cJSON_AddStringToObject(device, "rollershutter_mode", &rollershutter_mode[0]);
             cJSON_AddNumberToObject(device, "last_seen", ls);
+            cJSON_AddNumberToObject(device, "hwrev", m_deviceList[i].hwrev);
+            cJSON_AddNumberToObject(device, "legacy_sensor", m_deviceList[i].hwrev);
             cJSON_AddStringToObject(device, "state", &state[0]);
             cJSON_AddStringToObject(device, "last_error", &error[0]);
             cJSON_AddItemToArray(devices, device);

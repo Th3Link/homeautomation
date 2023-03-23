@@ -3,8 +3,11 @@
 #include <esp_log.h>
 #include "esp32-ha-lib/ICAN.hpp"
 
+const char* PinConfig::TAG = "PinConfig";
+
 PinConfig::PinConfig()
 {
+    ESP_LOGI(TAG, "Configure Gateway");
     m_board_config.can_config.rx = GPIO_NUM_14;
     m_board_config.can_config.tx = GPIO_NUM_13;
     m_board_config.onboard_onewire = GPIO_NUM_NC;

@@ -115,8 +115,8 @@ static void set_relais_config(PinConfig::board_config_t& bc, uint8_t rev, uint8_
             bc.onboard_relais.scl = GPIO_NUM_19;
             bc.onboard_relais.sda = GPIO_NUM_21;
                         
-            bc.ext_board_i2c.scl = GPIO_NUM_15;
-            bc.ext_board_i2c.sda = GPIO_NUM_16;
+            bc.ext_board_i2c.sda = GPIO_NUM_15;
+            bc.ext_board_i2c.scl = GPIO_NUM_16;
             bc.ext_board_onewire = GPIO_NUM_17;
             bc.ext_board_pir = GPIO_NUM_18;
             bc.ext_board_switch.sw1 = GPIO_NUM_15;

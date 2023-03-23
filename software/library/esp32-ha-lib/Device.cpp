@@ -30,8 +30,11 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID0), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::DEVICE_UID1), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::CUSTOM_STRING), data, data_len, request);
+            
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::UPTIME), data, data_len, request);
             Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::BAUDRATE), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::HW_REV), data, data_len, request);
+            Device::dispatch((identifier & 0xFFFFFF00) + static_cast<uint8_t>(ICAN::MSG_ID_t::SENSOR_LEGACY_MODE), data, data_len, request);
             return false;
         }
         case ICAN::MSG_ID_t::DEVICE_GROUP:
@@ -71,8 +74,6 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                         data[i] = desc->version[i];
                     }
                 }
-
-                ESP_LOGI(TAG, "APP VERSION %s %d", desc->version, len);
                 m_can.send(ICAN::MSG_ID_t::APPLICATION_VERSION_STRING, data, min_len, false);
             }
             return true;
@@ -177,7 +178,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 nvs_get_str(nvs_handle, "custom_string", reinterpret_cast<char*>(&custom_string[0]), &custom_string_len);
 
                 m_can.send(ICAN::MSG_ID_t::CUSTOM_STRING, custom_string, 
-                    custom_string_len, false);
+                    std::min(static_cast<size_t>(8), custom_string_len), false);
             }
             else
             {
@@ -230,7 +231,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             nvs_get_u8(nvs_handle, "hw_rev", rev);
             nvs_commit(nvs_handle);
             nvs_close(nvs_handle);
-            m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, rev, 1, false);
+            m_can.send(ICAN::MSG_ID_t::HW_REV, rev, 1, false);
             return true;
         }
         case ICAN::MSG_ID_t::SENSOR_LEGACY_MODE:
@@ -250,7 +251,7 @@ bool Device::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             nvs_get_u8(nvs_handle, "leg_sen", leg_sen);
             nvs_commit(nvs_handle);
             nvs_close(nvs_handle);
-            m_can.send(ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, leg_sen, 1, false);
+            m_can.send(ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, leg_sen, 1, false);
             return true;
         }
         default:
