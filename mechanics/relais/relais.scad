@@ -1,7 +1,7 @@
 use <../library/din_clip_01.scad>
 
 PCB_HEIGHT=98;
-PCB_WIDTH1=90;
+PCB_WIDTH1=95;
 PCB_WIDTH2=96;
 PCB_T =2;
 PCB_FREE_SPACE=34;
