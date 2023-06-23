@@ -5,8 +5,8 @@ t=3;
 spacer=9;
 
 dht22=1;
-pir=0;
-nightlight=1;
+pir=1;
+nightlight=0;
 vents=0;
 
 module vents(l=20,r=1,t=3,d=1.5) {

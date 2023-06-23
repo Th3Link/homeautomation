@@ -367,7 +367,7 @@ bool Relais::state(uint8_t p_bank, uint8_t p_num)
     if (m_relais_mapping[p_bank]) {
         p_num = real_num(p_num);
     }
-    return (m_state[p_bank] & ~(1 << p_num));
+    return (m_state[p_bank] & (1 << p_num));
 }
 
 bool Relais::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)

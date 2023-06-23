@@ -30,15 +30,7 @@ void Update::init(const uint8_t const_type)
     
     if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
     {
-        if (type != const_type)
-        {
-            ESP_LOGI(TAG, "Image not valid, wrong type\n");
-            esp_ota_mark_app_invalid_rollback_and_reboot();
-        }
-        else
-        {
-            esp_ota_mark_app_valid_cancel_rollback();
-        }
+        esp_ota_mark_app_valid_cancel_rollback();
     }
 }
 

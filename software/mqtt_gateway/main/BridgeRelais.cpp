@@ -24,7 +24,7 @@ bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
     {
         std::string relaisStateTopic = "canbus/relais_state/0x" + 
             toHexString(ICAN::GET_NOT_MSG(identifier));
-        std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
+        std::string relaisStateData = std::to_string(data[0]);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
         
         std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
@@ -38,15 +38,26 @@ bool BridgeRelais::dispatch(uint32_t identifier, uint8_t* data, unsigned int dat
     }
     else if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::ROLLERSHUTTER_STATE))
     {
+        union {
+          uint8_t data[sizeof(ICAN::RELAIS_MSG_t)];
+          ICAN::RELAIS_MSG_t rm;
+        } u;
+        
+        for (unsigned int i = 0; i < std::min(data_len, sizeof(ICAN::RELAIS_MSG_t)); i++)
+        {
+            u.data[i] = data[i];
+        }
+        
+        std::string bank_number = "/" + std::to_string(u.rm.bank) + "/" + std::to_string(u.rm.number);
         std::string relaisStateTopic = "canbus/rollershutter_state/0x" + 
-            toHexString(ICAN::GET_NOT_MSG(identifier));
-        std::string relaisStateData = std::to_string(data[0]) + "/" + std::to_string(data[1]);
+            toHexString(ICAN::GET_NOT_MSG(identifier)) + bank_number;
+        std::string relaisStateData = std::to_string(u.rm.state);
         m_mqtt.publish(relaisStateTopic.c_str(), relaisStateData.c_str());
         
         std::string custom_string = m_device_list.entry(identifier & 0xFFFFFF00);
         if (custom_string.length() > 0)
         {
-            std::string relaisStateTopic_cs = "canbus/rollershutter_state/" + custom_string;
+            std::string relaisStateTopic_cs = "canbus/rollershutter_state/" + custom_string + bank_number;
             m_mqtt.publish(relaisStateTopic_cs.c_str(), relaisStateData.c_str());
         }
         

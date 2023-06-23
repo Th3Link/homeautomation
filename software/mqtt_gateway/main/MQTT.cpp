@@ -98,19 +98,27 @@ void MQTT::init()
     }
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
-
+    
+    ESP_LOGI(MQTT::TAG, "MQTT connect to %s:%s@%s", m_username, m_password, m_uri);
+    
     esp_mqtt_client_config_t mqtt_cfg;
     memset(&mqtt_cfg, 0, sizeof(mqtt_cfg));
     mqtt_cfg.broker.address.uri = m_uri;
     if (strcmp(m_username, "") != 0)
     {
-        mqtt_cfg.credentials.username = m_password;
+        mqtt_cfg.credentials.username = m_username;
     }
     
     if (strcmp(m_password, "") != 0)
     {
         mqtt_cfg.credentials.authentication.password = m_password;
     }
+    
+    ESP_LOGI(MQTT::TAG, "MQTT connect to %s:%s@%s", 
+        mqtt_cfg.credentials.username, 
+        mqtt_cfg.credentials.authentication.password, 
+        mqtt_cfg.broker.address.uri);
+    
     
     m_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(m_client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID), 
@@ -151,9 +159,9 @@ void MQTT::username(const char* username, size_t username_len)
     memset(&m_username[0], 0, mqtt_username_len);
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
-    nvs_set_str(nvs_handle, "mqtt_uri", username);
+    nvs_set_str(nvs_handle, "mqtt_user", username);
     nvs_commit(nvs_handle);
-    nvs_get_str(nvs_handle, "mqtt_uri", &m_username[0], &mqtt_username_len);
+    nvs_get_str(nvs_handle, "mqtt_user", &m_username[0], &mqtt_username_len);
     nvs_close(nvs_handle);
 }
 void MQTT::password(const char* password, size_t password_len)
@@ -162,9 +170,9 @@ void MQTT::password(const char* password, size_t password_len)
     memset(&m_password[0], 0, mqtt_password_len);
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
-    nvs_set_str(nvs_handle, "mqtt_uri", password);
+    nvs_set_str(nvs_handle, "mqtt_pw", password);
     nvs_commit(nvs_handle);
-    nvs_get_str(nvs_handle, "mqtt_uri", &m_password[0], &mqtt_password_len);
+    nvs_get_str(nvs_handle, "mqtt_pw", &m_password[0], &mqtt_password_len);
     nvs_close(nvs_handle);
 }
 

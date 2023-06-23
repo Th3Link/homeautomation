@@ -29,6 +29,7 @@ void CANUpdate::by_uid_start(char* uid, uint32_t filesize)
 void CANUpdate::start(uint32_t filesize)
 {
     m_filesize = filesize;
+    filesize = 0xC400;
     //switch to update mode
     uint8_t data[8] {0};
     data[0] = static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE);
@@ -94,10 +95,10 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
         {
             buffer[buffer_len] = p_data[addr+i];
             buffer_len++;
-            if (buffer_len == can_max)
+            if (buffer_len == to_send)
             {
                 m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
-                &buffer[0], can_max, false);
+                &buffer[0], to_send, false);
                 buffer_len = 0;
             }
         }
