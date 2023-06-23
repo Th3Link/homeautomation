@@ -34,12 +34,12 @@ static void set_switch_config(PinConfig::board_config_t& bc, uint8_t rev, uint8_
             bc.ext_board_power.sensors_gnd = GPIO_NUM_2;
             if (legacy_sensors)
             {
-                bc.ext_board_power.sensors_vcc = GPIO_NUM_2;
-                bc.ext_board_power.sensors_gnd = GPIO_NUM_18;
+                bc.ext_board_power.sensors_vcc = GPIO_NUM_18;
+                bc.ext_board_power.sensors_gnd = GPIO_NUM_2;
             }
             
-            bc.ext_board_i2c.scl = GPIO_NUM_15;
             bc.ext_board_i2c.sda = GPIO_NUM_5;
+            bc.ext_board_i2c.scl = GPIO_NUM_15;
             bc.ext_board_onewire = GPIO_NUM_16;
             bc.ext_board_pir = GPIO_NUM_17;
             bc.ext_board_switch.sw1 = GPIO_NUM_15;
