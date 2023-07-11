@@ -1,0 +1,60 @@
+### Footprint positions - created on Mon 03 Jul 2023 12:54:33 PM CEST ###
+### Printed by KiCad version 7.0.5
+## Unit = mm, Angle = deg.
+## Side : top
+# Ref     Val                            Package                                           PosX       PosY       Rot  Side
+C1        10u                            C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   166.2920   -89.9500    0.0000  top
+C2        100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   166.2920   -92.0645    0.0000  top
+C3        100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   164.7000  -103.7000  -90.0000  top
+C4        47u                            C_0805_2012Metric_Pad1.18x1.45mm_HandSolder   166.3000   -87.8500    0.0000  top
+C5        10u                            C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   166.8000  -103.7000  -90.0000  top
+C6        47u                            C_0805_2012Metric_Pad1.18x1.45mm_HandSolder   168.9000  -103.7000  -90.0000  top
+C7        100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   119.8880  -100.1765  -90.0000  top
+C8        100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   115.9245  -100.7110    0.0000  top
+C9        100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   158.0000   -89.4000  180.0000  top
+C10       22u                            C_0805_2012Metric_Pad1.18x1.45mm_HandSolder   106.4260  -111.2520   90.0000  top
+C11       100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   108.2040  -111.2520  -90.0000  top
+C12       10u                            C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   150.0000  -113.4000  -90.0000  top
+C13       100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   148.4000  -113.3850  -90.0000  top
+C14       100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   115.2155  -114.0460    0.0000  top
+C15       2u2                            C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   118.3640  -100.1765  -90.0000  top
+C16       22u                            C_0805_2012Metric_Pad1.18x1.45mm_HandSolder   115.6970   -98.9330  180.0000  top
+C18       20n                            C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   122.6000   -94.2000  180.0000  top
+C19       100n                           C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   158.0000   -98.4000  180.0000  top
+C20       1u                             C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   149.4000  -109.2000    0.0000  top
+FB1       BLM18KG331SH1D                 C_0603_1608Metric_Pad1.08x0.95mm_HandSolder   118.6180   -96.5200   90.0000  top
+J1        awesome:RJ45-CAN               RJ45_OST_PJ012-8P8CX_Vertical                 149.2000   -84.0000  180.0000  top
+J2        Button-Sensors-MicroMatch2X03  02x03MicroMatch                               109.1230   -90.5000  -90.0000  top
+J3        RJ45_Amphenol_RJMG1BD3B8K1ANR  RJ45_Amphenol_RJMG1BD3B8K1ANR                 128.5020   -88.3660  180.0000  top
+J4        WAGO250-204                    WAGO250-204                                   168.7000   -80.5000  180.0000  top
+J5        Button-Sensors-MicroMatch2X03  02x03MicroMatch                               173.4000   -87.4000  -90.0000  top
+R1        100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   111.0000   -84.6000   90.0000  top
+R3        100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   109.6000   -96.4000  -90.0000  top
+R4        100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   108.5000   -84.6000   90.0000  top
+R5        100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   107.1000   -96.4000  -90.0000  top
+R6        10K                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   126.1000  -102.9000  180.0000  top
+R8        4K7                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   113.4110   -77.9545  -90.0000  top
+R9        4K7                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   134.8000   -88.6225  -90.0000  top
+R10       220R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   134.8000   -91.9225  -90.0000  top
+R11       220R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   113.4000   -81.3035  -90.0000  top
+R12       R                              R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   158.0000   -86.9000  180.0000  top
+R13       10K                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   149.4000  -110.8000  180.0000  top
+R19       33R                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   126.1000  -100.0760  180.0000  top
+R24       100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   175.4000   -81.5000   90.0000  top
+R25       10K                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   125.6030  -113.6650  -90.0000  top
+R26       2K2                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   111.0000   -81.1000  -90.0000  top
+R27       2K2                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   150.7875  -100.9000  180.0000  top
+R28       10K                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   107.4420  -107.1880    0.0000  top
+R29       100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   176.2000   -93.6000  -90.0000  top
+R30       100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   172.7000   -81.5000   90.0000  top
+R31       100R                           R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   173.9000   -93.3000  -90.0000  top
+R32       2K2                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   108.3500   -99.8000   90.0000  top
+R33       2K2                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   150.8000  -102.5000  180.0000  top
+R35       10K                            R_0603_1608Metric_Pad0.98x0.95mm_HandSolder   149.8600   -98.2980   90.0000  top
+U1        wuerthDebug6                   wuerthDebug6                                  158.3690  -113.2840   90.0000  top
+U2        LD1117S33TR_SOT223             SOT-223-3_TabPin2                             169.4670   -97.3000  -90.0000  top
+U3        PESD2CAN                       SOT-23                                        157.9245   -84.1000   90.0000  top
+U4        MCP2562-E-SN                   SOIC-8_3.9x4.9mm_P1.27mm                      157.9660   -93.9290   90.0000  top
+U5        KSZ8081MLX                     LQFP-48_7x7mm_P0.5mm                          115.2500  -107.8375  -90.0000  top
+U6        ESP32-WROOM-32                 ESP32-WROOM-32                                137.7730  -105.7650  180.0000  top
+## End
