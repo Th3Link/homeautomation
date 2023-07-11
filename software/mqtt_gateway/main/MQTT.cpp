@@ -114,12 +114,6 @@ void MQTT::init()
         mqtt_cfg.credentials.authentication.password = m_password;
     }
     
-    ESP_LOGI(MQTT::TAG, "MQTT connect to %s:%s@%s", 
-        mqtt_cfg.credentials.username, 
-        mqtt_cfg.credentials.authentication.password, 
-        mqtt_cfg.broker.address.uri);
-    
-    
     m_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(m_client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID), 
         mqtt_event_handler, this);

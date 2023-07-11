@@ -86,9 +86,9 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
     while ((remaining > 0) && (m_filesize > 0))
     {
         // slow down transmission. slaves are too slow to compete
-        if ((addr % 16) == 0)
+        if ((addr % 8) == 0)
         {
-            vTaskDelay(pdMS_TO_TICKS(30));
+            vTaskDelay(pdMS_TO_TICKS(40));
         }
         uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);       
         for (unsigned int i = 0; i < to_send; i++)

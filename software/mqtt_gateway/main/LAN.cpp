@@ -49,6 +49,21 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+/** Event handler for IP_EVENT_ETH_GOT_IP */
+static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
+                                 int32_t event_id, void *event_data)
+{
+    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+    const esp_netif_ip_info_t *ip_info = &event->ip_info;
+
+    ESP_LOGI(TAG, "Ethernet Got IP Address");
+    ESP_LOGI(TAG, "~~~~~~~~~~~");
+    ESP_LOGI(TAG, "ETHIP:" IPSTR, IP2STR(&ip_info->ip));
+    ESP_LOGI(TAG, "ETHMASK:" IPSTR, IP2STR(&ip_info->netmask));
+    ESP_LOGI(TAG, "ETHGW:" IPSTR, IP2STR(&ip_info->gw));
+    ESP_LOGI(TAG, "~~~~~~~~~~~");
+}
+
 LAN::LAN() : m_hostname({0})
 {   
 
@@ -79,7 +94,17 @@ void LAN::init()
     esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
     ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
     
+    // Use ESP_NETIF_DEFAULT_ETH when just one Ethernet interface is used and you don't need to modify
+    // default esp-netif configuration parameters.
+    esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
+    esp_netif_t *eth_netif = esp_netif_new(&cfg);
+    // Attach Ethernet driver to TCP/IP stack
+    ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+    
     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL); // register Ethernet event handler (to deal with user-specific stuff when events like link up/down happened)
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+    
+    esp_eth_start(eth_handle);
 }
 
 void LAN::read_nvs()

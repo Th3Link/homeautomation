@@ -33,10 +33,10 @@ namespace message
         }
         void* operator new(size_t size, ReceiverQueue& queue,
             std::chrono::milliseconds delay,
-            uint16_t** timeoutSize, uint16_t& length)
+            uint16_t** timeoutSize, uint16_t& length, uint32_t id)
         {
             return(static_cast<Message<MSG_T>*>(queue.alloc(size, delay,
-                timeoutSize, length)));
+                timeoutSize, length, id)));
         }
         
         Message(Receiver<MSG_T>& r, Event e, MSG_T&& d) : event(e), 
@@ -49,14 +49,22 @@ namespace message
         Event event;
         Receiver<MSG_T>& receiver;
     public:
-        static void send(ReceiverQueue& q, Receiver<MSG_T>& r, Event e, MSG_T&& data, std::chrono::milliseconds delay)
+        static void send(ReceiverQueue& q, Receiver<MSG_T>& r, Event e, MSG_T&& data, std::chrono::milliseconds delay, uint32_t id = 0)
         {
+            // cancel all other timeouts for this id
+            if (id != 0)
+            {
+                message::atomic(true);
+                q.cancelTimeouts(id);
+                message::atomic(false);
+            }
+            
             if (q.enoughTimeoutSpace(sizeof(Message<MSG_T>)))
             {
                 message::atomic(true);
                 uint16_t* size = 0;
                 uint16_t len;
-                new(q, delay, &size, len) Message<MSG_T>(r, e, std::move(data));
+                new(q, delay, &size, len, id) Message<MSG_T>(r, e, std::move(data));
                 /* 
                  * assure that the size is written after the data (and the fx pointer)
                  * is set. size is the indirect marker for an active timeout.
