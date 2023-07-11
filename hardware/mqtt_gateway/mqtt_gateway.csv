@@ -1,31 +1,33 @@
-"Id";"Designator";"Package";"Quantity";"Designation";"Supplier and ref";
-1;"FB1";"C_0603_1608Metric_Pad1.08x0.95mm_HandSolder";1;"Ferrite_Bead_Small";;;
-2;"C1,C12,C5";"C_0603_1608Metric_Pad1.08x0.95mm_HandSolder";3;"10u";;;
-3;"C2,C3,C9,C13,C19";"C_0603_1608Metric_Pad1.08x0.95mm_HandSolder";5;"100n";;;
-4;"C14";"C_0402_1005Metric_Pad0.74x0.62mm_HandSolder";1;"470p";;;
-5;"C15,C16";"C_0402_1005Metric_Pad0.74x0.62mm_HandSolder";2;"1u";;;
-6;"C17,C8,C7";"C_0402_1005Metric_Pad0.74x0.62mm_HandSolder";3;"100n";;;
-7;"C18";"C_0603_1608Metric_Pad1.08x0.95mm_HandSolder";1;"20n";;;
-8;"J1";"RJ45_OST_PJ012-8P8CX_Vertical";1;"awesome:RJ45-CAN";;;
-9;"J3";"RJ45_Amphenol_RJMG1BD3B8K1ANR";1;"RJ45_Amphenol_RJMG1BD3B8K1ANR";;;
-10;"R6,R8,R9,R13,R28,R25";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";6;"10K";;;
-11;"R7";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";1;"12K1 1%";;;
-12;"R10,R11";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";2;"1K";;;
-13;"U2";"SOT-223-3_TabPin2";1;"LD1117S33TR_SOT223";;;
-14;"U3";"SOT-23";1;"PESD2CAN";;;
-15;"U4";"SOIC-8_3.9x4.9mm_P1.27mm";1;"MCP2562-E-SN";;;
-16;"U7";"QFN-24-1EP_4x4mm_P0.5mm_EP2.6x2.6mm";1;"LAN8720A";;;
-17;"R12";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";1;"R";;;
-18;"H2,H3,H4,H1";"MountingHole_3.2mm_M3";4;"MountingHole";;;
-19;"U6";"ESP32-WROOM-32";1;"ESP32-WROOM-32";;;
-20;"C20";"C_0603_1608Metric_Pad1.08x0.95mm_HandSolder";1;"1u";;;
-21;"J4";"WAGO250-204";1;"WAGO250-204";;;
-22;"C4,C6";"C_0805_2012Metric_Pad1.18x1.45mm_HandSolder";2;"47u";;;
-23;"R2,R16";"R_0402_1005Metric_Pad0.72x0.64mm_HandSolder";2;"33R";;;
-24;"R18";"R_0402_1005Metric_Pad0.72x0.64mm_HandSolder";1;"10K";;;
-25;"R19";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";1;"33R";;;
-26;"R30,R31,R29,R4,R24,R3,R1,R5";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";8;"100R";;;
-27;"R32,R27,R26,R33";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";4;"2K2";;;
-28;"J2,J5";"02x03MicroMatch";2;"Button-Sensors-MicroMatch2X03";;;
-29;"U1";"wuerthDebug6";1;"wuerthDebug6";;;
-30;"R20,R21,R22,R23";"R_0603_1608Metric_Pad0.98x0.95mm_HandSolder";4;"50R";;;
+"Source:","/home/th3link/workbench/homeautomation/homeautomation/hardware/mqtt_gateway/mqtt_gateway.kicad_sch"
+"Date:","Mon 03 Jul 2023 12:00:04 PM CEST"
+"Tool:","Eeschema 7.0.5"
+"Generator:","/usr/share/kicad/plugins/bom_csv_grouped_by_value_with_fp.py"
+"Component Count:","64"
+"Ref","Qnty","Value","Cmp name","Footprint","Description","Vendor","DNP"
+"C1, C5, C12","3","10u","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"C2, C3, C7, C8, C9, C11, C13, C14, C19","9","100n","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"C4, C6","2","47u","C","Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder","Unpolarized capacitor","",""
+"C10, C16","2","22u","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"C15","1","2u2","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"C18","1","20n","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"C20","1","1u","C","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Unpolarized capacitor","",""
+"FB1","1","BLM18KG331SH1D","FerriteBead_Small","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","Ferrite bead, small symbol","",""
+"H1, H2, H3, H4","4","MountingHole","MountingHole","MountingHole:MountingHole_3.2mm_M3","Mounting Hole without connection","",""
+"J1","1","awesome:RJ45-CAN","RJ45-CAN","Connector_RJ:RJ45_OST_PJ012-8P8CX_Vertical","RJ connector, 8P8C (8 positions 8 connected), two LEDs, RJ45","",""
+"J2, J5","2","Button-Sensors-MicroMatch2X03","Button-Sensors-MicroMatch2X03","awesome:02x03MicroMatch","","",""
+"J3","1","RJ45_Amphenol_RJMG1BD3B8K1ANR","RJ45_Amphenol_RJMG1BD3B8K1ANR","Connector_RJ:RJ45_Amphenol_RJMG1BD3B8K1ANR","1 Port RJ45 Magjack Connector Through Hole 10/100 Base-T, AutoMDIX","",""
+"J4","1","WAGO250-204","WAGO250-204","awesome:WAGO250-204","","",""
+"R1, R3, R4, R5, R24, R29, R30, R31","8","100R","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R2, R16, R19","3","33R","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R6, R13, R25, R28, R35","5","10K","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R8, R9","2","4K7","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R10, R11","2","220R","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R12","1","R","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R20, R21, R22, R23","4","50R","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"R26, R27, R32, R33","4","2K2","R","Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder","Resistor","",""
+"U1","1","wuerthDebug6","wuerthDebug6","awesome:wuerthDebug6","","",""
+"U2","1","LD1117S33TR_SOT223","LD1117S33TR_SOT223","Package_TO_SOT_SMD:SOT-223-3_TabPin2","800mA Fixed Low Drop Positive Voltage Regulator, Fixed Output 3.3V, SOT-223","",""
+"U3","1","PESD2CAN","PESD2CAN","Package_TO_SOT_SMD:SOT-23","","",""
+"U4","1","MCP2562-E-SN","MCP2562-E-SN","Package_SO:SOIC-8_3.9x4.9mm_P1.27mm","High-Speed CAN Transceiver, 1Mbps, 5V supply, Vio pin, -40C to +125C, SOIC-8","",""
+"U5","1","KSZ8081MLX","KSZ8081MLX","Package_QFP:LQFP-48_7x7mm_P0.5mm","10BASE-T/100BASE-TX PHY with RMII Support, 25 MHz input clock, LQFP-48","",""
+"U6","1","ESP32-WROOM-32","ESP32-WROOM-32","awesome:ESP32-WROOM-32","RF Module, ESP32-D0WDQ6 SoC, Wi-Fi 802.11b/g/n, Bluetooth, BLE, 32-bit, 2.7-3.6V, onboard antenna, SMD","",""
