@@ -10,7 +10,7 @@
 #include "esp32-ha-lib/ICAN.hpp"
 
 enum class rollershutter_state_t {
-    MOVING, STOP, BLOCKED
+    MOVING_UP, MOVING_DOWN, STOP, BLOCKED
 };
 struct rollershutter_action_t
 {

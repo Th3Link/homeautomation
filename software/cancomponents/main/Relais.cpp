@@ -54,7 +54,7 @@ void Relais::receive(message::Message<ICAN::RELAIS_MSG_t>& m)
             //requeue
             message::Message<ICAN::RELAIS_MSG_t>::send(m_queue, *this, 
                 message::Event::CAN_ROLLERSHUTTER_SET, 
-                std::move(m.data), REQUEUE_TIME);
+                std::move(m.data), REQUEUE_TIME, (m.data.number | m.data.bank << 4) + 1);
             return;
         }
         return;
@@ -75,14 +75,15 @@ void Relais::receive(message::Message<ICAN::RELAIS_MSG_t>& m)
         if (m.data.time > 0)
         {
             auto time = m.data.time;
-            ESP_LOGI(Relais::TAG, "Relais time: %lu\n", time);
+            ESP_LOGI(Relais::TAG, "Relais time: %lu", time);
             m.data.state = !m.data.state;
             m.data.time  = 0;
             
             // queue timeout message in
             message::Message<ICAN::RELAIS_MSG_t>::send(m_queue, *this, 
                 message::Event::CAN_RELAIS_SET, 
-                std::move(m.data), std::chrono::milliseconds(time));
+                std::move(m.data), std::chrono::milliseconds(time), 
+                m.data.number | m.data.bank << 4);
         }
     }
     
@@ -145,8 +146,12 @@ bool Relais::setRollershutter(uint8_t p_bank, uint8_t p_number, uint8_t p_state,
     }
     else if (p_state == 1 || p_state == 2)
     {
+        
+        bool same_dir = ((p_state == 1 && m_states[p_bank][p_number] == rollershutter_state_t::MOVING_UP) ||
+            (p_state == 2 && m_states[p_bank][p_number] == rollershutter_state_t::MOVING_DOWN));
+        
         // go up
-        if ((m_states[p_bank][p_number] == rollershutter_state_t::STOP) && hwoff)
+        if (((m_states[p_bank][p_number] == rollershutter_state_t::STOP) && hwoff) || same_dir)
         {
             if (m_rollershutter_mode == ICAN::ROLLERSHUTTER_MODE_t::HARDWARE)
             {
@@ -159,13 +164,20 @@ bool Relais::setRollershutter(uint8_t p_bank, uint8_t p_number, uint8_t p_state,
                 state(p_bank, p_number * 2 + 1, p_state - 1);
             }
             
-            m_states[p_bank][p_number] = rollershutter_state_t::MOVING;
-            m_actions[p_bank][p_number]++;
+            if (p_state == 1)
+            {
+                m_states[p_bank][p_number] = rollershutter_state_t::MOVING_UP;
+            }
+            else if (p_state == 2)
+            {
+                m_states[p_bank][p_number] = rollershutter_state_t::MOVING_DOWN;
+            }
+            
             if (p_time > 0)
             {
                 message::Message<rollershutter_action_t>::send(m_queue, *this, 
                     message::Event::STOP_TIME, {p_bank, p_number, m_actions[p_bank][p_number]}, 
-                    std::chrono::milliseconds(p_time));
+                    std::chrono::milliseconds(p_time), (p_number | p_bank << 4) + 1);
             }
             sendRollershutter(p_bank, p_number);
         }

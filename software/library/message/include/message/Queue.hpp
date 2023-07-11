@@ -64,7 +64,7 @@ namespace message
         }
         
         void* alloc(std::size_t size, std::chrono::milliseconds delay,
-            uint16_t** timeoutSize, uint16_t& length) override
+            uint16_t** timeoutSize, uint16_t& length, uint32_t id) override
         {
             for (auto& index : timeoutQueueIndex)
             {
@@ -75,6 +75,7 @@ namespace message
                     index.timeout = 
                         std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()) + delay;
+                    index.id = id;
                     auto address = &timeoutQueue[writeTimeout];
                     writeTimeout += size;
                     length = size;
@@ -184,11 +185,37 @@ namespace message
                 defragment();
             }
         }
-               
+        
+        void cancelTimeouts(uint32_t id) override
+        {
+            // id 0 cannot be canceled.
+            if (id == 0)
+            {
+                return;
+            }
+            
+            bool defragmentPossible = false;
+            for (auto& index : timeoutQueueIndex)
+            {
+                if ((index.size != 0) && (index.id == id))
+                {
+                    defragmentPossible = true;
+                    //disable entry
+                    index.size = 0;
+                    
+                }
+            }
+            if (defragmentPossible)
+            {
+                defragment();
+            }
+        }
+        
         struct timeoutQueueIndex_t
         {
             uint16_t address = 0;
             uint16_t size = 0;
+            uint32_t id = 0;
             std::chrono::milliseconds timeout;
         };
         std::array<uint8_t, QUEUE_SIZE> queue;
