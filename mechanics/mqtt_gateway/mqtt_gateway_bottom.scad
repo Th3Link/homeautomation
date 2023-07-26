@@ -71,7 +71,7 @@ for ( hole = holes ){
     translate([46,-t1,0]) cube([18, 23+t1,6]);
     
     //pins
-    translate([8,45,0]) cube([18.5,3.5,6]);
+    //translate([8,45,0]) cube([18.5,3.5,6]);
     
     //component hight
     translate([0,0,0]) cube([pcb[0], pcb[1],5]);
@@ -85,4 +85,5 @@ translate([hole[0], hole[1],0]) cylinder(r=7/2,h=6);
 }
 }
 }
-bottom();
+lid();
+//bottom();
