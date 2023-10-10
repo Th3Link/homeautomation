@@ -34,8 +34,8 @@ static void set_switch_config(PinConfig::board_config_t& bc, uint8_t rev, uint8_
             bc.ext_board_power.sensors_gnd = GPIO_NUM_2;
             if (legacy_sensors)
             {
-                bc.ext_board_power.sensors_vcc = GPIO_NUM_18;
-                bc.ext_board_power.sensors_gnd = GPIO_NUM_2;
+                bc.ext_board_power.sensors_vcc = GPIO_NUM_2;
+                bc.ext_board_power.sensors_gnd = GPIO_NUM_18;
             }
             
             bc.ext_board_i2c.sda = GPIO_NUM_5;
