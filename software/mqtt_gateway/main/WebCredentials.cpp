@@ -52,11 +52,9 @@ void WebCredentials::username(const char* c)
     size_t username_len = sizeof(m_username);
     
     nvs_handle_t nvs_handle;
-    nvs_open("storage", NVS_READONLY, &nvs_handle);
-    
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     nvs_set_str(nvs_handle, "web_username", c);
     nvs_get_str(nvs_handle, "web_username", &m_username[0], &username_len);
-    
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
 }
@@ -66,11 +64,9 @@ void WebCredentials::password(const char* c)
     size_t password_len = sizeof(m_password);
     
     nvs_handle_t nvs_handle;
-    nvs_open("storage", NVS_READONLY, &nvs_handle);
-    
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     nvs_set_str(nvs_handle, "web_password", c);
     nvs_get_str(nvs_handle, "web_password", &m_password[0], &password_len);
-    
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
 }
