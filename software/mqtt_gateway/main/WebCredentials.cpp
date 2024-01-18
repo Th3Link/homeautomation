@@ -7,7 +7,8 @@ const char* WebCredentials::TAG = "WebCredentials";
 
 WebCredentials::WebCredentials()
 {
-    
+    m_username[0] = 0;
+    m_password[0] = 0;
 }
 
 void WebCredentials::init()

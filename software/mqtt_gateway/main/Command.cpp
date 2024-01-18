@@ -8,8 +8,10 @@
 
 const char* Command::TAG = "Command";
 
-Command::Command(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging& l, WebCredentials& web) : m_current_update(nullptr), 
-    m_selfupdate(u), m_canupdate(cu), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l), m_web_credentials(web)
+Command::Command(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Network& n,
+    Logging& l, WebCredentials& web) : m_current_update(nullptr), 
+    m_selfupdate(u), m_canupdate(cu), m_mqtt(im), m_can(ic), m_wifi(w), m_network(n),
+    m_logging(l), m_web_credentials(web)
 {
     
 }
@@ -155,7 +157,7 @@ void Command::save_config(char* cmd, cJSON* root)
     cJSON* canbus = cJSON_GetObjectItem(root, "canbus");
     if (cJSON_IsObject(canbus))
     {
-        cJSON* bitrate = cJSON_GetObjectItem(mqtt, "baudrate");
+        cJSON* bitrate = cJSON_GetObjectItem(canbus, "baudrate");
         
         if (cJSON_IsString(bitrate))
         {

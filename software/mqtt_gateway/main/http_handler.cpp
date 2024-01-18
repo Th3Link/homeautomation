@@ -96,9 +96,12 @@ bool http_handler::httpAuthenticateRequest(httpd_req_t *req, const char *server_
 esp_err_t http_handler::index_html_get_handler(httpd_req_t *req)
 {
     Web* web = reinterpret_cast<Web*>(req->user_ctx);
-    if (http_handler::httpAuthenticateRequest(req, web->username(), web->password()) == false)
+    if (std::string(web->username()) != "")
     {
-        return http_handler::httpRequestAuthorization(req);
+        if (http_handler::httpAuthenticateRequest(req, web->username(), web->password()) == false)
+        {
+            return http_handler::httpRequestAuthorization(req);
+        }
     }
     extern const uint8_t _index_html_start[] asm("_binary_index_html_start");
     extern const uint8_t _index_html_end[]   asm("_binary_index_html_end");
