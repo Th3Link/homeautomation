@@ -223,13 +223,13 @@ void WiFi::read_nvs()
     {
         m_mode = Mode::Client;
     }
-    else if (strcmp(wifi_mode, "off") == 0)
+    else if (strcmp(wifi_mode, "ap") == 0)
     {
-        m_mode = Mode::Off;
+        m_mode = Mode::AccessPoint;
     }
     else
     {
-        m_mode = Mode::AccessPoint;
+        m_mode = Mode::Off;
     }
     
     if (nvs_get_str(nvs_handle, "wifi_ssid", &m_ssid[0], &ssid_len) != ESP_OK)
@@ -291,8 +291,11 @@ const char* WiFi::mode_str()
     {
         return "client";
     }
-    
-    return "ap";
+    else if (m_mode == Mode::AccessPoint)
+    {
+        return "ap";
+    }
+    return "off";
 }
 
 const char* WiFi::hostname()
