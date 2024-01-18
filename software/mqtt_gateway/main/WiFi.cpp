@@ -86,9 +86,6 @@ WiFi::WiFi() : m_mode(Mode::AccessPoint), m_ssid({0}), m_password({0}), m_hostna
 void WiFi::init()
 {
     read_nvs();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    
     // try to connect to configured access point but use own access point if this fails
     
     if (m_mode == Mode::Client)
@@ -101,7 +98,7 @@ void WiFi::init()
             m_mode = Mode::AccessPoint;
         }
     }
-    else
+    else if (m_mode == Mode::AccessPoint)
     {
         init_softap(10);
     }
@@ -212,7 +209,7 @@ void WiFi::read_nvs()
     size_t hostname_len = sizeof(m_hostname);
     
     nvs_handle_t nvs_handle;
-    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &nvs_handle));
     
     if (nvs_get_str(nvs_handle, "wifi_mode", &wifi_mode[0], &wifi_mode_len) != ESP_OK)
     {
@@ -225,6 +222,10 @@ void WiFi::read_nvs()
     if (strcmp(wifi_mode, "client") == 0)
     {
         m_mode = Mode::Client;
+    }
+    else if (strcmp(wifi_mode, "off") == 0)
+    {
+        m_mode = Mode::Off;
     }
     else
     {
@@ -257,14 +258,14 @@ void WiFi::read_nvs()
         strcpy(m_password, "Can2MqttPass");
         m_mode = Mode::AccessPoint;
     }
-    
+
     esp_err_t hostname_err = nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
     if (hostname_err != ESP_OK || (strcmp(&m_hostname[0], "") == 0))
     {
         nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
         nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
     }
-    
+
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
 }
@@ -284,11 +285,6 @@ const char* WiFi::password()
     return &m_password[0];
 }
 
-const char* WiFi::hostname()
-{
-    return &m_hostname[0];
-}
-
 const char* WiFi::mode_str()
 {
     if (m_mode == Mode::Client)
@@ -298,6 +294,12 @@ const char* WiFi::mode_str()
     
     return "ap";
 }
+
+const char* WiFi::hostname()
+{
+    return &m_hostname[0];
+}
+
 
 void WiFi::mode_str(const char* m)
 {

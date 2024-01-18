@@ -6,6 +6,7 @@
 #include "Command.hpp"
 #include "IMQTT.hpp"
 #include "WiFi.hpp"
+#include "Network.hpp"
 #include "Logging.hpp"
 #include "DeviceList.hpp"
 #include "WebCredentials.hpp"
@@ -15,7 +16,7 @@
 class Web
 {
 public:
-    Web(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Logging&, DeviceList&);
+    Web(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Network&, Logging&, DeviceList&);
     void init();
     const char* username();
     const char* password();
@@ -30,6 +31,7 @@ private:
     IMQTT& m_mqtt;
     ICAN& m_can;
     WiFi& m_wifi;
+    Network& m_network;
     Logging& m_logging;
     DeviceList& m_deviceList;
     WebCredentials m_web_credentials;

@@ -8,9 +8,10 @@ public:
     enum class Mode
     {
         Client,
-        AccessPoint
+        AccessPoint,
+        Off
     };
-    
+
     WiFi();
     void init();
     void read_nvs();
@@ -23,7 +24,7 @@ public:
     void ssid(const char*);
     void password(const char*);
     void hostname(const char*);
-    
+
 private:
     void init_softap(const unsigned char channel);
     bool init_client();

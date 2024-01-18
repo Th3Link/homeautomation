@@ -16,6 +16,7 @@
 #include "MQTT.hpp"
 #include "WiFi.hpp"
 #include "LAN.hpp"
+#include "Network.hpp"
 #include "DeviceList.hpp"
 #include "Web.hpp"
 #include "esp32-ha-lib/CAN.hpp"
@@ -45,9 +46,10 @@ static Logging can_logging(mqtt);
 static Update update;
 static CANUpdate can_update(can_logging);
 static DeviceList device_list(can_logging);
+static Network network;
 static WiFi wifi;
 static LAN lan;
-static Web web(update, can_update, mqtt, can_logging, wifi, can_logging, device_list);
+static Web web(update, can_update, mqtt, can_logging, wifi, network, can_logging, device_list);
 static BridgeDevice bridge_device(can_logging, mqtt, device_list);
 static BridgeRelais bridge_relais(can_logging, mqtt, device_list);
 static BridgeButton bridge_button(can_logging, mqtt, device_list);
@@ -62,13 +64,15 @@ void app_main()
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_LOGI(TAG, "NSS ERROR: Eraseing...");
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
     
-    //lan.init();
-    wifi.init();
+    //network.init will to lan.init and wifi.init
+    network.init(wifi, lan);
+    
     web.init();
     
     can_logging.init(pin_config.get_can_config(), false);
@@ -76,16 +80,13 @@ void app_main()
     //Create semaphores and tasks
     shutdown_sem  = xSemaphoreCreateBinary();
 
-    if (wifi.mode() == WiFi::Mode::Client)
-    {
-        mqtt.init();
-        bridge_device.init();
-        bridge_relais.init();
-        bridge_button.init();
-        bridge_lamps.init();
-        bridge_debug.init();
-    }
-    
+    mqtt.init();
+    bridge_device.init();
+    bridge_relais.init();
+    bridge_button.init();
+    bridge_lamps.init();
+    bridge_debug.init();
+
     update.verified();
     console.init();
     xSemaphoreTake(shutdown_sem, portMAX_DELAY);    //Wait for tasks to complete

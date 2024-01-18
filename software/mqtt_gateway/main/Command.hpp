@@ -5,6 +5,7 @@
 #include "IMQTT.hpp"
 #include "IUpdate.hpp"
 #include "WiFi.hpp"
+#include "Network.hpp"
 #include "Update.hpp"
 #include "CANUpdate.hpp"
 #include "WebCredentials.hpp"
@@ -13,7 +14,7 @@
 class Command
 {
 public:
-    Command(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Logging&, WebCredentials&);
+    Command(Update&, CANUpdate&, IMQTT&, ICAN&, WiFi&, Network&, Logging&, WebCredentials&);
     void command(char* cmd, cJSON* root);
     void send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* data,  size_t data_len, 
         bool request);
@@ -38,6 +39,7 @@ private:
     IMQTT& m_mqtt;
     ICAN& m_can;
     WiFi& m_wifi;
+    Network& m_network;
     Logging& m_logging;
     WebCredentials& m_web_credentials;
     static const char* TAG;

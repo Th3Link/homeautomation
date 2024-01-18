@@ -38,8 +38,10 @@ static bool header_complete(const char* input, const char* compare, size_t len)
     return true;
 }
 
-Web::Web(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Logging& l, DeviceList& d) : 
-    m_command(u,cu,im,ic,w,l,m_web_credentials), m_mqtt(im), m_can(ic), m_wifi(w), m_logging(l), m_deviceList(d)
+Web::Web(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Network& n, 
+    Logging& l, DeviceList& d) : 
+    m_command(u,cu,im,ic,w,n,l,m_web_credentials), m_mqtt(im), m_can(ic), m_wifi(w), 
+    m_network(n), m_logging(l), m_deviceList(d)
 {
 
 }
