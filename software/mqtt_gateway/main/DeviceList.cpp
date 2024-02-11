@@ -148,7 +148,7 @@ bool DeviceList::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_
         {
             m_deviceList[i].id = (identifier & 0xFFFFFF00);
             uint8_t data[1];
-            m_can.send((identifier & 0xFFFFFF00)+12, &data[0], 0, true);
+            //m_can.send((identifier & 0xFFFFFF00)+12, &data[0], 0, true);
             return false;
         }
     }
