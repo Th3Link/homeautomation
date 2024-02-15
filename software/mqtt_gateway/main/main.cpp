@@ -28,6 +28,7 @@
 #include "BridgeButton.hpp"
 #include "BridgeDebug.hpp"
 #include "ConsoleCommandDevice.hpp"
+#include "ConfigStorage.hpp"
 
 /* --------------------- Definitions and static variables ------------------ */
 //Example Configuration
@@ -57,6 +58,7 @@ static BridgeLamps bridge_lamps(can_logging, mqtt, device_list);
 static BridgeDebug bridge_debug(can_logging, mqtt, device_list);
 static Console console;
 static ConsoleCommandDevice console_command_device(console);
+static ConfigStorage config_storage;
 
 extern "C"
 void app_main()
@@ -64,11 +66,13 @@ void app_main()
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_LOGI(TAG, "NSS ERROR: Eraseing...");
+      ESP_LOGI(TAG, "NVS ERROR: Eraseing...");
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+    
+    config_storage.init();
     
     //network.init will to lan.init and wifi.init
     network.init(wifi, lan);

@@ -79,3 +79,48 @@ function update_click(uid) {
     };
     
 }
+
+function bridge_config_upload_click(uid) {
+    var bridge_config_file = document.getElementById(uid + "_bridge_congig_upload").files[0];
+    if ((typeof bridge_config_file == 'undefined') || bridge_config_file == null)
+    {
+        return;
+    }
+    var req = new XMLHttpRequest();
+    var formData = new FormData();
+
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.open("POST", "/control.json");
+    xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xmlhttp.send(JSON.stringify({command:"bridge_config_prepare","bridge_config_size":bridge_config_file.size}));
+    xmlhttp.onload = function(e) {
+        req.send(formData);
+    }
+    formData.append("bridge_congig_upload", bridge_config_file);
+    req.open("POST", '/bride_config');
+    
+    req.upload.onprogress = function(e) {
+        var p = Math.round(100 / e.total * e.loaded);
+        document.getElementById(uid + "_progress").innerHTML = p + "%";
+    };
+    
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "Upload complete";
+    }
+    
+    req.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "100%";
+        
+        xmlhttp.open("POST", "/control.json");
+        xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+     
+        document.getElementById(uid + "_progress").innerHTML = "Bridge config upload complete, appliing...";
+        setTimeout(function() {
+             location.reload();
+        }, 8000);
+        
+        xmlhttp.send(JSON.stringify({ command:"bridge_config_complete" }));
+    };
+    
+}

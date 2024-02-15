@@ -273,6 +273,42 @@ function createFirmwareSelector(uid) {
 
     return div;
 }
+
+function createBridgeSelector(uid) {
+    var div = document.createElement("div");
+    div.classList.add("bridge_config_selector")
+    var desc = document.createElement("label");
+    desc.for = "file";
+    desc.innerText = "Select bridge config from PC ";
+
+    var upload = document.createElement("input");
+    upload.id = uid + "_bridge_congig_upload";
+    upload.name = "file";
+    upload.type = "file";
+    upload.classList.add("upload");
+    upload.accept = ".yml,.yaml,.json";
+
+    var button = document.createElement("button");
+    button.id = uid + "_bridge_config_upload";
+    button.name = "bridge_config_upload";
+    button.innerText = "Upload Bridge Config";
+    button.addEventListener("click", function () {
+        bridge_config_upload_click(uid);
+    });
+
+    var label = document.createElement("label");
+    label.id = uid + "_progress";
+    label.name = "progress";
+    label.innerText = "";
+
+    div.appendChild(desc);
+    div.appendChild(upload);
+    div.appendChild(button);
+    div.appendChild(label);
+
+    return div;
+}
+
 function createControls(uid, cl) {
     var control = document.createElement("div");
     control.classList.add("control");
