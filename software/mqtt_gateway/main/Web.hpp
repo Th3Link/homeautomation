@@ -23,6 +23,8 @@ public:
     esp_err_t state_get_handler(httpd_req_t *req);
     esp_err_t control_post_handler(httpd_req_t *req);
     esp_err_t update_data_post_handler(httpd_req_t *req);
+    esp_err_t bridge_config_json_get_handler(httpd_req_t *req);
+    esp_err_t bridge_config_json_put_handler(httpd_req_t *req);
 private:
     static const char* TAG;
     static constexpr size_t SCRATCH_BUFSIZE = 10240;

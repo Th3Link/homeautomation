@@ -16,6 +16,16 @@ static esp_err_t update_data_post_handler(httpd_req_t *req)
     return reinterpret_cast<Web*>(req->user_ctx)->update_data_post_handler(req);
 }
 
+static esp_err_t bridge_config_json_get_handler(httpd_req_t *req)
+{
+    return reinterpret_cast<Web*>(req->user_ctx)->bridge_config_json_get_handler(req);
+}
+
+static esp_err_t bridge_config_json_put_handler(httpd_req_t *req)
+{
+    return reinterpret_cast<Web*>(req->user_ctx)->bridge_config_json_put_handler(req);
+}
+
 static esp_err_t state_json_get_handler(httpd_req_t *req)
 {
     return reinterpret_cast<Web*>(req->user_ctx)->state_get_handler(req);
@@ -113,6 +123,22 @@ void Web::init()
         .user_ctx = this
     };
     httpd_register_uri_handler(server, &control_json_post_uri);
+    
+    httpd_uri_t bridge_config_json_put_uri = {
+        .uri = "/bridge_config.json",
+        .method = HTTP_PUT,
+        .handler = ::bridge_config_json_put_handler,
+        .user_ctx = this
+    };
+    httpd_register_uri_handler(server, &bridge_config_json_put_uri);
+
+    httpd_uri_t bridge_config_json_get_uri = {
+        .uri = "/bridge_config.json",
+        .method = HTTP_GET,
+        .handler = ::bridge_config_json_get_handler,
+        .user_ctx = this
+    };
+    httpd_register_uri_handler(server, &bridge_config_json_get_uri);
 }
 
 esp_err_t Web::state_get_handler(httpd_req_t *req)
@@ -298,6 +324,131 @@ esp_err_t Web::update_data_post_handler(httpd_req_t *req)
     
     return ESP_OK;
 }
+
+
+esp_err_t Web::bridge_config_json_get_handler(httpd_req_t *req)
+{
+    if (std::string(username()) != "")
+    {
+        if (http_handler::httpAuthenticateRequest(req, username(), password()) == false)
+        {
+            return http_handler::httpRequestAuthorization(req);
+        }
+    }
+
+    FILE* f = fopen("/config/bridge_config.json", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    /* Retrieve the pointer to scratch buffer for temporary storage */
+    char *chunk = scratch;
+    size_t chunksize;
+    
+    do {
+        /* Read file in chunks into the scratch buffer */
+        chunksize = fread(chunk, 1, SCRATCH_BUFSIZE, f);
+
+        if (chunksize > 0) {
+            /* Send the buffer contents as HTTP response chunk */
+            if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) {
+                fclose(f);
+                ESP_LOGE(TAG, "File sending failed!");
+                /* Abort sending file */
+                httpd_resp_sendstr_chunk(req, NULL);
+                /* Respond with 500 Internal Server Error */
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
+               return ESP_FAIL;
+           }
+        }
+
+        /* Keep looping till the whole file is sent */
+    } while (chunksize != 0);
+
+    /* Close file after sending complete */
+    fclose(f);
+    ESP_LOGI(TAG, "File sending complete");
+
+    return ESP_OK;
+}
+
+esp_err_t Web::bridge_config_json_put_handler(httpd_req_t *req)
+{
+    if (std::string(username()) != "")
+    {
+        if (http_handler::httpAuthenticateRequest(req, username(), password()) == false)
+        {
+            return http_handler::httpRequestAuthorization(req);
+        }
+    }
+
+    char *header_buf = scratch;
+    char *buf = scratch;
+    const char* header_end = "\r\n\r\n";
+        
+    httpd_req_recv(req, header_buf, 4);
+    header_buf += 4;
+
+    while (!header_complete(header_buf-4, header_end, sizeof(header_end)))
+    {
+        httpd_req_recv(req, header_buf++, 1);
+    }
+    
+    *header_buf = '\0';
+    ESP_LOGI(TAG, "Header : %s", buf);
+    
+    size_t received;
+
+    /* Content length of the request gives
+     * the size of the file being uploaded */
+    size_t remaining = req->content_len - (header_buf - buf);
+
+    ESP_LOGI(TAG, "Opening file");
+    FILE* f = fopen("/config/bridge_config.json", "w");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for writing");
+        return ESP_FAIL;
+    }
+    
+    constexpr size_t RECEIVE_MAX = 400;
+    
+    while (remaining > 0) {
+
+        ESP_LOGI(TAG, "Remaining size : %d", remaining);
+        /* Receive the file part by part into a buffer */
+        if ((received = httpd_req_recv(req, buf, std::min(remaining, RECEIVE_MAX))) <= 0) {
+            
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                /* Retry if timeout occurred */
+                continue;
+            }
+
+            /* In case of unrecoverable error,
+             * close and delete the unfinished file*/
+            ESP_LOGE(TAG, "File reception failed!");
+            /* Respond with 500 Internal Server Error */
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive file");
+            fclose(f);
+            return ESP_FAIL;
+        }
+
+        /* Write buffer content to file on storage */
+        fwrite(buf, sizeof(char), received, f);
+
+        /* Keep track of remaining size of
+         * the file left to be uploaded */
+        remaining -= received;
+    }
+    
+    fclose(f);
+    httpd_resp_sendstr(req, "File uploaded successfully");
+    return ESP_OK;
+}
+
 
 const char* Web::username()
 {

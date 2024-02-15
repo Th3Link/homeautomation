@@ -1,6 +1,7 @@
 var content_update = document.getElementById("content_update");
 var content_can_device = document.getElementById("content_can_device");
 var content_can_device_console = document.getElementById("content_can_device_console");
+var content_bridge = document.getElementById("content_bridge");
 var content_state = document.getElementById("content_state");
 var content_restart = document.getElementById("content_restart");
 var content_logging = document.getElementById("content_logging");
@@ -9,6 +10,7 @@ var content_docs = document.getElementById("content_docs");
 var nav_save = document.getElementById("save");
 var nav_state = document.getElementById("nav_state");
 var nav_can_devices = document.getElementById("nav_can_devices");
+var nav_bridge = document.getElementById("nav_bridge");
 var nav_update = document.getElementById("nav_update");
 var nav_logging = document.getElementById("nav_logging");
 var nav_docs = document.getElementById("nav_docs");
@@ -41,6 +43,7 @@ var type_options = [];
 function clearPressed() {
     nav_state.classList.remove("pressed");
     nav_can_devices.classList.remove("pressed");
+    nav_bridge.classList.remove("pressed");
     nav_update.classList.remove("pressed");
     nav_logging.classList.remove("pressed");
     nav_docs.classList.remove("pressed");
@@ -51,6 +54,7 @@ function clearPressed() {
     content_restart.classList.add("hide-me");
     content_logging.classList.add("hide-me");
     content_docs.classList.add("hide-me");
+    content_bridge.classList.add("hide-me");
 }
 function init() {
     nav_can_devices.addEventListener("click", function () {
@@ -68,6 +72,14 @@ function init() {
         content_update.classList.remove("hide-me");
         content_update.innerHTML = "";
         content_update.appendChild(createFirmwareSelector("device_update"));
+    });
+
+    nav_bridge.addEventListener("click", function () {
+        clearPressed();
+        nav_bridge.classList.add("pressed");
+        content_bridge.classList.remove("hide-me");
+        content_bridge.innerHTML = "";
+        content_bridge.appendChild(createBridgeSelector("bridge_config"));
     });
 
     nav_logging.addEventListener("click", function () {
