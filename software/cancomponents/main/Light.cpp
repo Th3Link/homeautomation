@@ -86,6 +86,7 @@ void Light::init(PinConfig::pwm_config_t pwm, PinConfig::i2c_config_t i2c)
             m_pca9685[i].active = true;
             ESP_ERROR_CHECK(pca9685_init(dev));
             ESP_ERROR_CHECK(pca9685_restart(dev));
+            ESP_ERROR_CHECK(pca9685_set_output_open_drain(dev, true));
             ESP_ERROR_CHECK(pca9685_set_pwm_frequency(dev, LEDC_FREQUENCY));
             ESP_LOGI(Light::TAG, "Found PWM Expander %d\n",i);
             m_ext_active = true;
@@ -130,7 +131,7 @@ void Light::set_ext(ICAN::LAMP_MSG_t& lamps)
         }
         m_pca9685[num].value[i] = (4095 * lamps.value) / 255;
     }
-    pca9685_set_pwm_values(&m_pca9685[num].dev, 0, PWM_CHANNELS, m_pca9685[num].value);
+    ESP_ERROR_CHECK(pca9685_set_pwm_values(&m_pca9685[num].dev, 0, PWM_CHANNELS, m_pca9685[num].value));
 }
 
 bool Light::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
