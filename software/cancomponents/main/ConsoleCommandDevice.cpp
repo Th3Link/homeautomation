@@ -20,6 +20,7 @@
 #include <argtable3/argtable3.h>
 #include "ConsoleCommandDevice.hpp"
 #include "esp32-ha-lib/ICAN.hpp"
+#include <cstdlib>
 
 static const char *TAG = "ConsoleCommandDevice";
 
@@ -393,7 +394,7 @@ static int set_device_pwm(int argc, char **argv)
     else
     {
         std::string s(device_pwm_args.bitmask->sval[0]);
-        lamps.bitmask = stoi(s, NULL, 16);
+        lamps.bitmask = strtol(s.c_str(), nullptr, 16);
     }
     
     ConsoleCommandDevice::light_set(lamps);
