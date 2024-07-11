@@ -1,6 +1,7 @@
 #include "Relais.hpp"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <i2cdev.h>
 #include <pca9557.h>
 #include <cstring>
@@ -16,9 +17,28 @@
 const char* Relais::TAG = "Relais";
 constexpr uint8_t relais1_address = 0x26; //0b0010 0110
 constexpr uint8_t relais2_address = 0x27; //0b0010 0111
-void message::atomic(bool)
-{
-    
+
+// Define the static mutex handle
+SemaphoreHandle_t mutex = nullptr;
+
+void message::atomic(bool enable) {
+    if (enable) {
+        // Take the mutex
+        if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+            // Critical section starts
+        } else {
+            // Handle error if taking the mutex fails
+            ESP_LOGI(Relais::TAG, "Failed to take mutex\n");
+        }
+    } else {
+        // Give the mutex
+        if (xSemaphoreGive(mutex) == pdTRUE) {
+            // Critical section ends
+        } else {
+            // Handle error if giving the mutex fails
+            ESP_LOGI(Relais::TAG, "Failed to give mutex\n");
+        }
+    }
 }
 
 /*
@@ -241,6 +261,13 @@ Relais::Relais(ICAN& ic)
 void Relais::init(PinConfig::i2c_config_t onboard_i2c, 
         PinConfig::i2c_config_t ext_board_i2c)
 {
+    // Create the mutex
+    mutex = xSemaphoreCreateMutex();
+    if (mutex == nullptr) {
+        // Handle error if mutex creation fails
+        ESP_LOGE(Relais::TAG, "Failed to create mutex\n");
+    }
+    
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READONLY, &nvs_handle);
     uint8_t type = 0;
