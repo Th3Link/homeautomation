@@ -32,7 +32,7 @@ public:
     void receive(message::Message<rollershutter_action_t>&) override;
     bool ext_active();
     static const char* TAG;
-    message::Queue<512,512> m_queue;
+    message::Queue<256,256> m_queue;
     static constexpr uint8_t MAX_RELAIS_COUNT = 9;
     static constexpr uint8_t MAX_CHANNEL_COUNT = 16;
 private:
