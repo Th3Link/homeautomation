@@ -32,6 +32,7 @@ class CAN : public ICAN, public ICANDispatcher
     private:
         void read_nvs();
         bool m_enable_filter;
+        bool m_update_silence;
         ICAN::BITRATE_t m_bitrate;
         uint8_t m_id;
         uint8_t m_type;

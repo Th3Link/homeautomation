@@ -45,6 +45,7 @@ public:
         PWM_FREQUENCY = 11,
         REQUEST_PARAMETER = 12,
         APPLICATION_VERSION_STRING = 13,
+        UPDATE_SILENCE = 14,
         FLASH_SELECT = 16,
         FLASH_ERASE = 17,
         FLASH_READ = 18,
