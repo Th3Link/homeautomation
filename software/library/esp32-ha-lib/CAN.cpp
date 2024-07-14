@@ -48,7 +48,7 @@ static void can_receive_task(void *this_ptr)
 }
 
 CAN::CAN() : 
-    m_enable_filter(false), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
+    m_enable_filter(false), m_update_silence(false), m_bitrate(ICAN::BITRATE_t::BITRATE_50), m_id(0xFF), 
     m_type(0xFF), m_rx_pin(GPIO_NUM_NC), m_tx_pin(GPIO_NUM_NC), m_shutdown_request(false),
     m_received(0), m_transmitted(0)
 {
@@ -162,6 +162,12 @@ void CAN::add_dispatcher(ICANDispatcher* dispatcher)
 bool CAN::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
 {
     inc_received();
+    
+    if (GET_MSG(identifier) == MSG_ID_t::UPDATE_SILENCE)
+    {
+        m_update_silence = data[0];
+    }
+    
     for (auto* dispatcher : m_dispatcher)
     {
         if (dispatcher->dispatch(identifier, data, data_len, request))
@@ -174,6 +180,10 @@ bool CAN::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bo
 
 void CAN::send(MSG_ID_t messageId, uint8_t* data, unsigned int data_len, bool request)
 {
+    if (m_update_silence && messageId > MSG_ID_t::FLASH_VERIFY)
+    {
+        return;
+    }
     send(ICAN::ID_NG_MASK | m_id << 8 | m_type << 16 | static_cast<uint32_t>(messageId),
         data, data_len, request);
 }

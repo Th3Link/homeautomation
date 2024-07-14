@@ -67,6 +67,15 @@ static void state_save(void* context, const uint8_t *state_buffer, uint32_t leng
 
 static void output_ready(void* context, measured_values mv, bsec_library_return_t bsec_status)
 {
+    constexpr int SKIP_COUNT = 10;
+    static int send = 0;
+
+    if (--send > 0)
+    {
+        return;
+    }
+    send = SKIP_COUNT;
+        
     auto bme680 = reinterpret_cast<BME680*>(context);
     union
     {
