@@ -1,1 +1,1 @@
-{"command":"save","unit":"can_by_uid","commandId":"0x223456781234567812345678","baudrate":"","rollershutter_mode":"","hwrev":24,"legacy_sensor":1}
+{"command":"silence_on","unit":"can_all"}

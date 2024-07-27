@@ -33,6 +33,8 @@ var devices_refresh = document.getElementById("refresh_devices");
 var devices_broadcast_ping = document.getElementById("broadcast_ping");
 var devices_query_all = document.getElementById("query_all");
 var devices_restart_all = document.getElementById("restart_all");
+var devices_silence_on = document.getElementById("silence_on_all");
+var devices_silence_off = document.getElementById("silence_off_all");
 
 var state = null;
 var loaded_config = null;

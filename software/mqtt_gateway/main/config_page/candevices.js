@@ -806,6 +806,32 @@ function legacy_mode_click(uid) {
     xhr.send(JSON.stringify(legacy_mode_command));
 }
 
+function silence_on_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_on_command = { command: "silence_on" };
+    silence_on_command = add_unit(uid, silence_on_command);
+    xhr.send(JSON.stringify(silence_on_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_on_command));
+}
+
+function silence_off_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_off_command = { command: "silence_off" };
+    silence_off_command = add_unit(uid, silence_off_command);
+    xhr.send(JSON.stringify(silence_off_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_off_command));
+}
+
 devices_refresh.addEventListener("click", function () {
     updateDeviceList();
     updateTypeOptions();
@@ -820,6 +846,28 @@ devices_broadcast_ping.addEventListener("click", function () {
         updateDeviceList();
     }
     xhr.send(JSON.stringify(ping_command));
+});
+
+devices_silence_on.addEventListener("click", function () {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_on_command = { command: "silence_on", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_on_command));
+});
+
+devices_silence_off.addEventListener("click", function () {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_off_command = { command: "silence_off", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_off_command));
 });
 
 devices_query_all.addEventListener("click", function () {

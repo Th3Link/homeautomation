@@ -33,6 +33,8 @@ var devices_refresh = document.getElementById("refresh_devices");
 var devices_broadcast_ping = document.getElementById("broadcast_ping");
 var devices_query_all = document.getElementById("query_all");
 var devices_restart_all = document.getElementById("restart_all");
+var devices_silence_on = document.getElementById("silence_on_all");
+var devices_silence_off = document.getElementById("silence_off_all");
 
 var state = null;
 var loaded_config = null;
@@ -79,7 +81,7 @@ function init() {
         nav_bridge.classList.add("pressed");
         content_bridge.classList.remove("hide-me");
         content_bridge.innerHTML = "";
-        content_bridge.appendChild(createBridgeSelector("device_update"));
+        content_bridge.appendChild(createBridgeSelector("bridge_config"));
     });
 
     nav_logging.addEventListener("click", function () {
@@ -1167,6 +1169,32 @@ function legacy_mode_click(uid) {
     xhr.send(JSON.stringify(legacy_mode_command));
 }
 
+function silence_on_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_on_command = { command: "silence_on" };
+    silence_on_command = add_unit(uid, silence_on_command);
+    xhr.send(JSON.stringify(silence_on_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_on_command));
+}
+
+function silence_off_click(uid) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_off_command = { command: "silence_off" };
+    silence_off_command = add_unit(uid, silence_off_command);
+    xhr.send(JSON.stringify(silence_off_command));
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_off_command));
+}
+
 devices_refresh.addEventListener("click", function () {
     updateDeviceList();
     updateTypeOptions();
@@ -1181,6 +1209,28 @@ devices_broadcast_ping.addEventListener("click", function () {
         updateDeviceList();
     }
     xhr.send(JSON.stringify(ping_command));
+});
+
+devices_silence_on.addEventListener("click", function () {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_on_command = { command: "silence_on", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_on_command));
+});
+
+devices_silence_off.addEventListener("click", function () {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/control.json', true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    var silence_off_command = { command: "silence_off", unit: "can_all"};
+    xhr.onload = function(e) {
+        updateDeviceList();
+    }
+    xhr.send(JSON.stringify(silence_off_command));
 });
 
 devices_query_all.addEventListener("click", function () {
@@ -1501,7 +1551,7 @@ function createBridgeSelector(uid) {
     button.name = "bridge_config_upload";
     button.innerText = "Upload Bridge Config";
     button.addEventListener("click", function () {
-        update_click(uid);
+        bridge_config_upload_click(uid);
     });
 
     var label = document.createElement("label");
@@ -1555,10 +1605,28 @@ function createControls(uid, cl) {
         legacy_mode_click(uid);
     });
 
+    var silence_on = document.createElement("button");
+    silence_on.id = uid + "_silence_on";
+    silence_on.name = "silence_on";
+    silence_on.innerText = "Silence On";
+    silence_on.addEventListener("click", function () {
+        silence_on_click(uid);
+    });
+
+    var silence_off = document.createElement("button");
+    silence_off.id = uid + "_silence_off";
+    silence_off.name = "silence_off";
+    silence_off.innerText = "Silence Off";
+    silence_off.addEventListener("click", function () {
+        silence_off_click(uid);
+    });
+
     control.appendChild(refresh);
     control.appendChild(restart);
     control.appendChild(ping);
     control.appendChild(legacy_mode);
+    control.appendChild(silence_on);
+    control.appendChild(silence_off);
 
     return control;
 }
@@ -1640,6 +1708,51 @@ function update_click(uid) {
             }, 8000);
         }
         xmlhttp.send(JSON.stringify({ command:"update_complete" }));
+    };
+    
+}
+
+function bridge_config_upload_click(uid) {
+    var bridge_config_file = document.getElementById(uid + "_bridge_congig_upload").files[0];
+    if ((typeof bridge_config_file == 'undefined') || bridge_config_file == null)
+    {
+        return;
+    }
+    var req = new XMLHttpRequest();
+    var formData = new FormData();
+
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.open("POST", "/control.json");
+    xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xmlhttp.send(JSON.stringify({command:"bridge_config_prepare","bridge_config_size":bridge_config_file.size}));
+    xmlhttp.onload = function(e) {
+        req.send(formData);
+    }
+    formData.append("bridge_congig_upload", bridge_config_file);
+    req.open("POST", '/bride_config');
+    
+    req.upload.onprogress = function(e) {
+        var p = Math.round(100 / e.total * e.loaded);
+        document.getElementById(uid + "_progress").innerHTML = p + "%";
+    };
+    
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "Upload complete";
+    }
+    
+    req.onload = function(e) {
+        document.getElementById(uid + "_progress").innerHTML = "100%";
+        
+        xmlhttp.open("POST", "/control.json");
+        xmlhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+     
+        document.getElementById(uid + "_progress").innerHTML = "Bridge config upload complete, appliing...";
+        setTimeout(function() {
+             location.reload();
+        }, 8000);
+        
+        xmlhttp.send(JSON.stringify({ command:"bridge_config_complete" }));
     };
     
 }

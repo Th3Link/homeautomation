@@ -347,10 +347,28 @@ function createControls(uid, cl) {
         legacy_mode_click(uid);
     });
 
+    var silence_on = document.createElement("button");
+    silence_on.id = uid + "_silence_on";
+    silence_on.name = "silence_on";
+    silence_on.innerText = "Silence On";
+    silence_on.addEventListener("click", function () {
+        silence_on_click(uid);
+    });
+
+    var silence_off = document.createElement("button");
+    silence_off.id = uid + "_silence_off";
+    silence_off.name = "silence_off";
+    silence_off.innerText = "Silence Off";
+    silence_off.addEventListener("click", function () {
+        silence_off_click(uid);
+    });
+
     control.appendChild(refresh);
     control.appendChild(restart);
     control.appendChild(ping);
     control.appendChild(legacy_mode);
+    control.appendChild(silence_on);
+    control.appendChild(silence_off);
 
     return control;
 }
