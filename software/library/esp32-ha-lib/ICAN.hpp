@@ -85,6 +85,12 @@ public:
         UPDATE_MODE = 2
     };
 
+    enum class SILENCE_t : uint8_t
+    {
+        SILENCE_OFF = 0,
+        SILENCE_ON = 1
+    };
+
     enum class BUTTON_EVENT_t : uint8_t
     {
         RELEASED = 0,

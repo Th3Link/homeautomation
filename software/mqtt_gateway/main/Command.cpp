@@ -29,6 +29,8 @@ void Command::command(char* cmd, cJSON* root)
     prepare_update(cmd, root);
     complete_update(cmd, root);
     legacy_mode(cmd, root);
+    silence_on(cmd, root);
+    silence_off(cmd, root);
 }
 
 void Command::send_can_command(cJSON* root, ICAN::MSG_ID_t messageId, uint8_t* data, size_t data_len, bool request)
@@ -340,6 +342,24 @@ void Command::legacy_mode(char* cmd, cJSON* root)
     {
         uint8_t update_mode = static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE);
         send_can_command(root, ICAN::MSG_ID_t::RESTART, &update_mode, 1, false);
+    }
+}
+
+void Command::silence_on(char* cmd, cJSON* root)
+{
+    if (strcmp (cmd, "silence_on") == 0)
+    {
+        uint8_t silence = static_cast<uint8_t>(ICAN::SILENCE_t::SILENCE_ON);
+        send_can_command(root, ICAN::MSG_ID_t::UPDATE_SILENCE, &silence, 1, false);
+    }
+}
+
+void Command::silence_off(char* cmd, cJSON* root)
+{
+    if (strcmp (cmd, "silence_off") == 0)
+    {
+        uint8_t silence = static_cast<uint8_t>(ICAN::SILENCE_t::SILENCE_OFF);
+        send_can_command(root, ICAN::MSG_ID_t::UPDATE_SILENCE, &silence, 1, false);
     }
 }
 
