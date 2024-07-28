@@ -308,9 +308,9 @@ public:
         return id & ~ID_MSG_MASK;
     }
 
-    static constexpr bool TYPE_COMPARE(uint32_t id, DEVICE_t type)
+    static constexpr bool TYPE_COMPARE(uint32_t id, uint8_t type)
     {
-        return ((id & ID_NG_MASK) && (static_cast<DEVICE_t>(GET_TYPE(id)) == type));
+        return ((id & ID_NG_MASK) && (GET_TYPE(id) == type));
     }
 
     static constexpr bool ID_COMPARE(uint32_t id, uint8_t device_id)

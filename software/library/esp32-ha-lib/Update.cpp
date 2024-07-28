@@ -25,13 +25,7 @@ void Update::init(const uint8_t const_type)
     }
 
     nvs_close(nvs_handle);
-    esp_ota_img_states_t ota_state = ESP_OTA_IMG_VALID;
-    esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota_state);
-    
-    if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
-    {
-        esp_ota_mark_app_valid_cancel_rollback();
-    }
+    esp_ota_mark_app_valid_cancel_rollback();
 }
 
 bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len, bool request)
@@ -70,13 +64,13 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 update_mode = true;
                 partition = esp_ota_get_next_update_partition(NULL);
                 esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
-                ESP_LOGI(TAG, "change to update mode\n");
+                ESP_LOGI(TAG, "change to update mode");
             }
             else
             {
                 if (update_mode)
                 {
-                    ESP_LOGI(TAG, "update complete, restarting\n");
+                    ESP_LOGI(TAG, "update complete, restarting");
                     esp_ota_end(ota_handle);
                     esp_ota_set_boot_partition(partition);
                     esp_restart();
@@ -98,7 +92,7 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
                 uint8_t checksum[8] {0};
                 esp_ota_get_app_elf_sha256(reinterpret_cast<char*>(checksum), sizeof(checksum));
                 m_can.send(ICAN::MSG_ID_t::FLASH_VERIFY, checksum, sizeof(checksum), false);
-                ESP_LOGI(TAG, "verify checksum 0x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                ESP_LOGI(TAG, "verify checksum 0x%02x%02x%02x%02x%02x%02x%02x%02x",
                     checksum[0], checksum[1], checksum[2], checksum[3],
                     checksum[4], checksum[5], checksum[6], checksum[7]);
             }

@@ -82,27 +82,21 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
     uint32_t remaining = data_len;
     size_t addr = 0;
     static uint8_t buffer[can_max];
-    static uint8_t buffer_len = 0;
     while ((remaining > 0) && (m_filesize > 0))
     {
         // slow down transmission. slaves are too slow to compete
-        if ((addr % 8) == 0)
-        {
-            vTaskDelay(pdMS_TO_TICKS(40));
-        }
+        //if ((addr % 16) == 0)
+        //{
+            vTaskDelay(pdMS_TO_TICKS(5));
+        //}
         uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);       
         for (unsigned int i = 0; i < to_send; i++)
         {
-            buffer[buffer_len] = p_data[addr+i];
-            buffer_len++;
-            if (buffer_len == to_send)
-            {
-                m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
-                &buffer[0], to_send, false);
-                buffer_len = 0;
-            }
+            buffer[i] = p_data[addr+i];
         }
-                    
+        m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
+            &buffer[0], to_send, false);
+        
         remaining -= to_send;
         m_filesize -= to_send;
         addr += to_send;

@@ -20,5 +20,6 @@ void I2C::init()
     if (!is_initialized)
     {
         i2cdev_init();
+        is_initialized = true;
     }
 }
