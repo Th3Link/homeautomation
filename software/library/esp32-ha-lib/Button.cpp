@@ -105,6 +105,6 @@ void Button::init(gpio_num_t gpio, button_id_t id)
     timer_args.callback = button_multi_click;
     
     ESP_ERROR_CHECK(button_init(&button));
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
+    (esp_timer_create(&timer_args, &timer));
     esp_timer_stop(timer);
 }
