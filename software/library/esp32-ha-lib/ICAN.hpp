@@ -23,10 +23,17 @@ public:
 
     enum class ERROR_t : uint8_t
     {
-        FLASH_OVERRUN = 0x1,
-        NO_CONFIG = 0x2,
-        DEVICE_ID_TYPE_ERROR = 0x3,
-        FIRMWARE_CORRUPT = 0x4
+        FLASH_OVERRUN = 0x01,
+        NO_CONFIG = 0x02,
+        DEVICE_ID_TYPE_ERROR = 0x03,
+        FIRMWARE_CORRUPT = 0x04,
+        COMPONENT_CAN = 0x05,
+        COMPONENT_LIGHT = 0x06,
+        COMPONENT_RELAIS = 0x07,
+        COMPONENT_MAIN = 0x08,
+        COMPONENT_UPDATE = 0x09,
+        COMPONENT_NIGHTLIGHT = 0x0A,
+        COMPONENT_AMBIENT = 0x0B,
     };
 
     enum class MSG_ID_t : uint8_t
@@ -70,12 +77,7 @@ public:
         CO2_EQUIVALENT = 152,
         VOC_BREATH = 153,
         AIR_QUALITY = 154,
-        //30      button reading
-        //31      temperature reading
-        //32...56 get lamp state
-        //58      gat lamp group state
-        //64...88 set lamp command
-        //90      set lamp group command
+        LOG_DOWNLOAD = 155,
     };
 
     enum class AVAILABLE_t : uint8_t
