@@ -96,6 +96,11 @@ void Command::save_config(char* cmd, cJSON* root)
     {
         m_web_credentials.password(cJSON_GetStringValue(password));
     }
+    cJSON* update_delay_str = cJSON_GetObjectItem(root, "update_delay");
+    if (cJSON_IsString(update_delay_str))
+    {
+        m_canupdate.update_delay(cJSON_GetStringValue(update_delay_str));
+    }
     
     cJSON* wifi = cJSON_GetObjectItem(root, "wifi");
     if (cJSON_IsObject(wifi))

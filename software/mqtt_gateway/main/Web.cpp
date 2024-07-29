@@ -50,8 +50,8 @@ static bool header_complete(const char* input, const char* compare, size_t len)
 
 Web::Web(Update& u, CANUpdate& cu, IMQTT& im, ICAN& ic, WiFi& w, Network& n, 
     Logging& l, DeviceList& d) : 
-    m_command(u,cu,im,ic,w,n,l,m_web_credentials), m_mqtt(im), m_can(ic), m_wifi(w), 
-    m_network(n), m_logging(l), m_deviceList(d)
+    m_command(u,cu,im,ic,w,n,l,m_web_credentials), m_canupdate(cu), m_mqtt(im), 
+    m_can(ic), m_wifi(w), m_network(n), m_logging(l), m_deviceList(d)
 {
 
 }
@@ -149,6 +149,7 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "hostname", m_wifi.hostname());
     cJSON_AddStringToObject(root, "username", username());
     cJSON_AddStringToObject(root, "password", password());
+    cJSON_AddStringToObject(root, "update_delay", m_canupdate.update_delay());
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
     cJSON_AddStringToObject(wifi, "mode", m_wifi.mode_str());
     cJSON_AddStringToObject(wifi, "ssid", m_wifi.ssid());

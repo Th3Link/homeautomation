@@ -30,6 +30,7 @@ private:
     static constexpr size_t SCRATCH_BUFSIZE = 10240;
     char scratch[SCRATCH_BUFSIZE];
     Command m_command;
+    CANUpdate& m_canupdate;
     IMQTT& m_mqtt;
     ICAN& m_can;
     WiFi& m_wifi;

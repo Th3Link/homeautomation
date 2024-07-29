@@ -17,7 +17,7 @@ void WebCredentials::init()
     size_t password_len = sizeof(m_password);
     
     nvs_handle_t nvs_handle;
-    nvs_open("storage", NVS_READONLY, &nvs_handle);
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     
     if (nvs_get_str(nvs_handle, "web_username", &m_username[0], &username_len) != ESP_OK)
     {
