@@ -3,15 +3,64 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
+#include <nvs_flash.h>
 
 #include <algorithm>
 #include <string>
+#include <cstdio>   // For snprintf
+#include <cstdlib>  // For std::strtol
+#include <cerrno>   // For errno
+#include <climits>  // For INT_MAX, INT_MIN
 
 const char* CANUpdate::TAG = "CANUpdate";
 
-CANUpdate::CANUpdate(ICAN& ic) : m_can(ic)
+static uint32_t charArrayToInt(const char* str, uint32_t defaultValue) {
+    if (str == nullptr) {
+        return defaultValue;
+    }
+
+    // Ensure the input string length does not exceed 7 characters
+    constexpr size_t maxLen = 7;
+    size_t len = strnlen(str, maxLen + 1);
+    if (len > maxLen) {
+        return defaultValue;
+    }
+
+    char* end;
+    errno = 0;  // Reset errno before the conversion
+
+    long result = std::strtol(str, &end, 10);
+
+    // Check for conversion errors
+    if (end == str || *end != '\0' || errno == ERANGE || result < INT_MIN || result > INT_MAX) {
+        // Conversion failed, return the default value
+        return defaultValue;
+    }
+
+    return static_cast<uint32_t>(result);
+}
+
+
+CANUpdate::CANUpdate(ICAN& ic) : m_can(ic), m_update_delay(UPDATE_DELAY_DEFAULT)
 {
+
+}
+
+void CANUpdate::init()
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
     
+    if (nvs_get_u32(nvs_handle, "update_delay", &m_update_delay) != ESP_OK)
+    {
+        nvs_set_u32(nvs_handle, "update_delay", UPDATE_DELAY_DEFAULT);
+        nvs_get_u32(nvs_handle, "update_delay", &m_update_delay);
+    }
+    
+    ESP_LOGI(TAG, "Update delay: %lu ms", m_update_delay);
+    
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
 }
 
 void CANUpdate::by_type_start(char* type, uint32_t filesize)
@@ -85,10 +134,7 @@ bool CANUpdate::data(char* p_data, uint32_t data_len)
     while ((remaining > 0) && (m_filesize > 0))
     {
         // slow down transmission. slaves are too slow to compete
-        //if ((addr % 16) == 0)
-        //{
-            vTaskDelay(pdMS_TO_TICKS(5));
-        //}
+        vTaskDelay(pdMS_TO_TICKS(m_update_delay));
         uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);       
         for (unsigned int i = 0; i < to_send; i++)
         {
@@ -120,3 +166,20 @@ void CANUpdate::complete()
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), &data[0], 1, false);
 }
 
+const char* CANUpdate::update_delay()
+{
+    static char update_delay[8] {0};
+    std::snprintf(update_delay, sizeof(update_delay), "%lu", m_update_delay);
+    return &update_delay[0];
+}
+
+void CANUpdate::update_delay(const char* c)
+{
+    uint32_t update_delay = charArrayToInt(c, UPDATE_DELAY_DEFAULT);
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_u32(nvs_handle, "update_delay", update_delay);
+    nvs_get_u32(nvs_handle, "update_delay", &m_update_delay);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+}

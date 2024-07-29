@@ -76,7 +76,7 @@ void app_main()
     
     //network.init will to lan.init and wifi.init
     network.init(wifi, lan);
-    
+    can_update.init();
     web.init();
     
     can_logging.init(pin_config.get_can_config(), false);

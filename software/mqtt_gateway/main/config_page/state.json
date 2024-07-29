@@ -2,6 +2,7 @@
   "firmware_version": "0.0",
   "uptime": "TIME",
   "hostname": "HOSTNAME",
+  "update_delay": 10,
   "wifi": {
     "mode": "client",
     "ssid": "SSID",

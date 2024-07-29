@@ -18,6 +18,7 @@ var nav_docs = document.getElementById("nav_docs");
 var setup_general_hostname = document.getElementById("general_hostname");
 var setup_general_username = document.getElementById("web_username");
 var setup_general_password = document.getElementById("web_password");
+var setup_general_update_delay = document.getElementById("update_delay");
 var setup_wifi_mode = document.getElementById("wifi_mode");
 var setup_wifi_ssid = document.getElementById("wifi_ssid");
 var setup_wifi_password = document.getElementById("wifi_password");
@@ -101,6 +102,7 @@ function init() {
     setup_general_hostname.addEventListener("input", checkConfig)
     setup_general_username.addEventListener("input", checkConfig)
     setup_general_password.addEventListener("input", checkConfig)
+    setup_general_update_delay.addEventListener("input", checkConfig)
     setup_wifi_mode.addEventListener("input", checkConfig)
     setup_wifi_ssid.addEventListener("input", checkConfig)
     setup_wifi_password.addEventListener("input", checkConfig)
@@ -195,8 +197,9 @@ function get_config(onload = null) {
 
             loaded_config = JSON.parse(configRequest.responseText);
             setup_general_hostname.value = loaded_config.hostname;
+            setup_general_update_delay.value = loaded_config.update_delay;
             setup_wifi_mode.value = loaded_config.wifi.mode;
-
+            
             setup_wifi_ssid.value = loaded_config.wifi.ssid;
             setup_wifi_password.value = loaded_config.wifi.password;
 
@@ -245,6 +248,13 @@ function checkConfig() {
     }
     else {
         document.getElementById("general_hostname_label").classList.remove("changed");
+    }
+    if (loaded_config.update_delay != setup_general_update_delay.value) {
+        document.getElementById("update_delay_label").classList.add("changed");
+        current_config.update_delay = setup_general_update_delay.value;
+    }
+    else {
+        document.getElementById("update_delay_label").classList.remove("changed");
     }
     if (loaded_config.wifi.mode != setup_wifi_mode.value) {
         if (!('wifi' in current_config)) current_config.wifi = {};
