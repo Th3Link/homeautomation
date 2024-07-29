@@ -41,6 +41,14 @@ static void can_receive_task(void *this_ptr)
         uint32_t alerts;
         twai_read_alerts(&alerts, 0);
         if (alerts) {
+            uint8_t data[8] {0};
+            data[0] = static_cast<uint8_t>(ICAN::ERROR_t::COMPONENT_CAN);
+            data[1] = 0;
+            data[4] = alerts & 0xFF;
+            data[5] = alerts >> 8 & 0xFF;
+            data[6] = alerts >> 16 & 0xFF;
+            data[7] = alerts >> 24 & 0xFF;
+            can->send(ICAN::MSG_ID_t::DEVICE_ERROR, data, sizeof(data), false);
             ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
         }
     }

@@ -391,13 +391,28 @@ void Relais::state(uint8_t p_bank, uint8_t p_num, bool p_state)
     }
     
     m_state[p_bank] = (m_state[p_bank] & ~(1 << p_num)) | (p_state << p_num);
+    
+    esp_err_t ret = ESP_OK;
+    
     if ((p_num < 8) && m_active[p_bank][0])
     {
-        ESP_ERROR_CHECK(pca9557_port_write(&m_device[p_bank][0], m_state[p_bank] & 0xFF));
+        ret = pca9557_port_write(&m_device[p_bank][0], m_state[p_bank] & 0xFF);
     }
     else if (m_active[p_bank][1])
     {
-        ESP_ERROR_CHECK(pca9557_port_write(&m_device[p_bank][1], (m_state[p_bank] >> 8)));
+        ret = pca9557_port_write(&m_device[p_bank][1], (m_state[p_bank] >> 8));
+    }
+    
+    if (ret != ESP_OK)
+    {
+            /*uint8_t data[8] {0};
+            data[0] = static_cast<uint8_t>(ICAN::ERROR_t::COMPONENT_RELAIS);
+            data[1] = 0;
+            data[4] = ret & 0xFF;
+            data[5] = ret >> 8 & 0xFF;
+            data[6] = ret >> 16 & 0xFF;
+            data[7] = ret >> 24 & 0xFF;
+            can->send(ICAN::MSG_ID_t::DEVICE_ERROR, data, sizeof(data), false);*/
     }
 }
 
