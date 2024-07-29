@@ -71,6 +71,7 @@ LAN::LAN()
 
 void LAN::init()
 {   
+    read_nvs();
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();      // apply default MAC configuration
 
     eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
@@ -94,6 +95,9 @@ void LAN::init()
     // default esp-netif configuration parameters.
     esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *eth_netif = esp_netif_new(&cfg);
+    
+    esp_netif_set_hostname(eth_netif, m_hostname);
+    
     // Attach Ethernet driver to TCP/IP stack
     ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
     
@@ -101,4 +105,38 @@ void LAN::init()
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
     
     esp_eth_start(eth_handle);
+}
+
+
+void LAN::read_nvs()
+{
+    size_t hostname_len = sizeof(m_hostname);
+    
+    nvs_handle_t nvs_handle;
+    ESP_ERROR_CHECK(nvs_open("storage", NVS_READWRITE, &nvs_handle));
+
+    esp_err_t hostname_err = nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
+    if (hostname_err != ESP_OK || (strcmp(&m_hostname[0], "") == 0))
+    {
+        nvs_set_str(nvs_handle, "hostname", "CAN2MQTTBridge");
+        nvs_get_str(nvs_handle, "hostname", &m_hostname[0], &hostname_len);
+    }
+
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+}
+
+const char* LAN::hostname()
+{
+    return &m_hostname[0];
+}
+
+void LAN::hostname(const char* h)
+{
+    nvs_handle_t nvs_handle;
+    nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    nvs_set_str(nvs_handle, "hostname", h);
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    read_nvs();
 }
