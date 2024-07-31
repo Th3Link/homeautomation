@@ -32,7 +32,10 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
 {
     static bool update_mode = false;
     static esp_ota_handle_t ota_handle;
-    static const esp_partition_t* partition = NULL;
+    static const esp_partition_t* partition = esp_ota_get_next_update_partition(NULL);
+    //constexpr size_t BUFFER_SIZE = 256;
+    //static uint8_t buffer[2][BUFFER_SIZE];
+    //static uint32_t buffer_idx[2] {0};
     switch (static_cast<ICAN::MSG_ID_t>(identifier & 0xFF))
     {
         case ICAN::MSG_ID_t::FLASH_WRITE:
@@ -62,8 +65,7 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
             if (data[0] == static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE))
             {
                 update_mode = true;
-                partition = esp_ota_get_next_update_partition(NULL);
-                esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+                esp_ota_begin(partition, OTA_SIZE_UNKNOWN, &ota_handle);
                 ESP_LOGI(TAG, "change to update mode");
             }
             else
@@ -89,9 +91,9 @@ bool Update::dispatch(uint32_t identifier, uint8_t* data, unsigned int data_len,
         {
             if (request)
             {
-                uint8_t checksum[8] {0};
-                esp_ota_get_app_elf_sha256(reinterpret_cast<char*>(checksum), sizeof(checksum));
-                m_can.send(ICAN::MSG_ID_t::FLASH_VERIFY, checksum, sizeof(checksum), false);
+                uint8_t checksum[CONFIG_APP_RETRIEVE_LEN_ELF_SHA] {0};
+                esp_partition_get_sha256(partition, checksum);
+                m_can.send(ICAN::MSG_ID_t::FLASH_VERIFY, checksum, std::min(CONFIG_APP_RETRIEVE_LEN_ELF_SHA, 8), false);
                 ESP_LOGI(TAG, "verify checksum 0x%02x%02x%02x%02x%02x%02x%02x%02x",
                     checksum[0], checksum[1], checksum[2], checksum[3],
                     checksum[4], checksum[5], checksum[6], checksum[7]);
