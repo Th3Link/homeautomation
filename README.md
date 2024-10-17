@@ -157,15 +157,19 @@ Have a look into the getting started page in the documentation.
 
 Quick steps:
 
+For Arch Linux:
 `sudo pacman -S --needed gcc git make flex bison gperf python cmake ninja ccache dfu-util libusb`
 
-`git clone --recursive https://github.com/espressif/esp-idf.git`
+For Ubuntu (24.04)
+`sudo sudo apt update && sudo apt upgrade -y && git build-essential`
 
-`cd esp-idf`
+`git clone -b v5.0 --recursive https://github.com/espressif/esp-idf.git $HOME/esp`
+
+`cd $HOME/esp`
 
 `./install.sh esp32`
 
-`. ./export.sh # note the dot at the beginning: source the file, otherwise you dont get the environment varibles set`
+`. $HOME/esp/export.sh # note the dot at the beginning: source the file, otherwise you dont get the environment varibles set`
 
 Than you can change to your project dir (i.e. homeautomation/software/mqtt_gateway) and
 compile.
@@ -175,6 +179,18 @@ compile.
 Programming can be done by
 
 `idf.py flash -p /dev/ttyUSB0`
+
+You can open the debug terminal and see the logging output by
+
+`idf.py monitor -p /dev/ttyUSB0`
+
+Or in one step
+
+`idf.py build flash monitor -p /dev/ttyUSB0`
+
+Full flash erase can be done by
+
+`idf.py flash-erase flash -p /dev/ttyUSB0`
 
 ## Debugging
 Sadly, the ESP32 has to few pins to support a JTAG debugger. So we are going with printf
