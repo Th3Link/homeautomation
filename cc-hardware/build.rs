@@ -1,7 +1,17 @@
 fn main() {
+    vergen().unwrap();
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
+}
+
+fn vergen() -> Result<(), Box<dyn std::error::Error>> {
+    let git2 = vergen_git2::Git2Builder::all_git()?;
+    vergen_git2::Emitter::default()
+        .add_instructions(&git2)?
+        .emit()?;
+
+    Ok(())
 }
 
 fn linker_be_nice() {

@@ -1,0 +1,11 @@
+[package]
+edition = "2021"
+name    = "cancomponents-core"
+version = "0.1.0"
+
+[dependencies]
+embedded-can     = { version = "0.4.1"}
+embassy-time     = { version = "0.4.0"}
+embassy-sync     = { version = "0.6.2"}
+heapless         = { version = "0.8.0"}
+async-trait      = { version = "0.1"}
