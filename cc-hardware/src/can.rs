@@ -96,7 +96,7 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         }
     };
     // type can be filtered, id is incomplete. also allow broadcast (== 0)
-    if id.device_id != *DEVICE_TYPE.lock().await && id.device_id != 0 {
+    if id.device_id != *DEVICE_ID.lock().await && id.device_id != 0 {
         return;
     }
 
@@ -260,7 +260,7 @@ async fn unknown_handler(frame: &EspTwaiFrame) {
 pub async fn send_can_message(msg_id: CanMessageType, data: &[u8], rtr: bool) {
     let device_type = *DEVICE_TYPE.lock().await;
     let device_id = *DEVICE_ID.lock().await;
-    let id: embedded_can::ExtendedId = CanId::new(device_id, device_type, msg_id).into();
+    let id: embedded_can::ExtendedId = CanId::new(device_type, device_id, msg_id).into();
     let id: esp_hal::twai::ExtendedId = id.into();
     let frame = if rtr {
         EspTwaiFrame::new_remote(id, data.len() as usize).unwrap()

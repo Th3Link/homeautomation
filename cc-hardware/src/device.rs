@@ -88,6 +88,7 @@ impl Device {
         config.set_u8(config::Key::DeviceType, dtype).await.ok()?;
         *DEVICE_ID.lock().await = id;
         *DEVICE_TYPE.lock().await = dtype;
+        esp_hal::system::software_reset();
         //}
         Some(())
     }
