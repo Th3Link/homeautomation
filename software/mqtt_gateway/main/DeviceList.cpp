@@ -9,7 +9,8 @@
 #include <esp_log.h>
 
 const char* DeviceList::TAG = "DeviceList";
-
+static esp_timer_handle_t ping_timer;
+static esp_timer_handle_t broadcast_timer;
 DeviceList::DeviceList(ICAN& ic) : m_can(ic)
 {
     for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++)
@@ -19,9 +20,47 @@ DeviceList::DeviceList(ICAN& ic) : m_can(ic)
     m_can.add_dispatcher(this);
 }
 
+static void ping_timer_callback(void* arg)
+{
+    #pragma pack(push,1)
+    static union {
+        uint8_t data[4];
+        uint32_t data32;
+    } data_union {0};
+    #pragma pack(pop)
+    ICAN* can = reinterpret_cast<ICAN*>(arg);
+    can->send(ICAN::MSG_ID_t::PING, data_union.data, sizeof(data_union.data), false);
+    data_union.data32++;
+}
+
+static void broadcast_timer_callback(void* arg)
+{
+    ICAN* can = reinterpret_cast<ICAN*>(arg);
+    can->send(0x10000000 + static_cast<uint32_t>(ICAN::MSG_ID_t::AVAILABLE), NULL, 0, true);
+}
+
 void DeviceList::init()
 {
+    const esp_timer_create_args_t ping_timer_args = {
+            .callback = &ping_timer_callback,
+            .arg = &m_can,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "ping",
+            .skip_unhandled_events = true
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&ping_timer_args, &ping_timer));
+    
+    const esp_timer_create_args_t broadcast_timer_args = {
+            .callback = &broadcast_timer_callback,
+            .arg = &m_can,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "broadcast",
+            .skip_unhandled_events = true
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&broadcast_timer_args, &broadcast_timer));
 
+    ESP_ERROR_CHECK(esp_timer_start_periodic(ping_timer, 2000000));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(broadcast_timer, 10000000));
 }
 
 static void update_device(DeviceList::DeviceListEntry& device, uint32_t identifier, 

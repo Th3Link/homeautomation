@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <string>
+#include <cstdint>
 
 class ICANDispatcher
 {
@@ -78,6 +79,8 @@ public:
         VOC_BREATH = 153,
         AIR_QUALITY = 154,
         LOG_DOWNLOAD = 155,
+        PING = 156,
+        PING_DISABLE = 157,
     };
 
     enum class AVAILABLE_t : uint8_t

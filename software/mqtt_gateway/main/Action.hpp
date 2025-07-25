@@ -21,8 +21,8 @@ public:
         m_action.trigger(m_trigger_id, value);
     }
 private:
-    uint8_t m_trigger_id
-    Action& m_action
+    uint8_t m_trigger_id;
+    Action& m_action;
 };
 
 class Actions : public ICANDispatcher

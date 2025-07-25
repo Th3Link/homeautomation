@@ -161,7 +161,7 @@ esp_err_t Web::state_get_handler(httpd_req_t *req)
     cJSON *canbus = cJSON_AddObjectToObject(root, "canbus");
     cJSON_AddStringToObject(canbus, "baudrate", ICAN::bitrate_string(m_can.bitrate()));
 
-    const esp_app_desc_t* desc = esp_ota_get_app_description();
+    const esp_app_desc_t* desc = esp_app_get_description();
     const char release_prefix[] = "release/";
     const size_t rpl = sizeof(release_prefix)-1;
     char version[10] {0};

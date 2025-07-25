@@ -171,7 +171,10 @@ For Ubuntu (24.04)
 
 `. $HOME/esp/export.sh # note the dot at the beginning: source the file, otherwise you dont get the environment varibles set`
 
-Than you can change to your project dir (i.e. homeautomation/software/mqtt_gateway) and
+Clone the homeautomation repository:
+`git clone --recursive https://gitlab.com/Th3Link/homeautomation $HOME/homeautomation`
+
+Than change to your project dir (i.e. homeautomation/software/mqtt_gateway) and
 compile.
 
 `idf.py build`

@@ -1,2 +1,0 @@
-cat main.js candevices.js creation.js update.js > complete.js
-uglifyjs complete.js -c -m -o minimal.js

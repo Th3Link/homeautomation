@@ -251,7 +251,7 @@ void WiFi::read_nvs()
     ESP_LOGI(WiFi::TAG, "\t PW: %s",m_password);
     ESP_LOGI(WiFi::TAG, "\t Mode: %s",wifi_mode);
     
-    if (strlen(m_password) < 8)
+    if (strlen(m_password) < 8 && m_mode != Mode::Off)
     {
         ESP_LOGI(WiFi::TAG, "WIFI Password too short");
         strcpy(m_ssid, "CAN2MQTTSETUP");
