@@ -49,7 +49,7 @@ static void can_receive_task(void *this_ptr)
             data[6] = alerts >> 16 & 0xFF;
             data[7] = alerts >> 24 & 0xFF;
             can->send(ICAN::MSG_ID_t::DEVICE_ERROR, data, sizeof(data), false);
-            ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
+            //ESP_LOGI(CAN::TAG, "TWAI ALERT %lu", alerts);
         }
     }
     can->shutdown();
@@ -186,7 +186,7 @@ void CAN::send(uint32_t id, uint8_t* data, unsigned int data_len, bool request)
     esp_err_t err = twai_transmit(&tx_msg, portMAX_DELAY);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Transmit error %lx", static_cast<uint32_t>(err));
+        //ESP_LOGE(TAG, "Transmit error %lx", static_cast<uint32_t>(err));
     }
 }
 

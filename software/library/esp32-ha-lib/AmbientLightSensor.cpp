@@ -79,6 +79,7 @@ void AmbientLightSensor::read()
     m_device.addr = VEML7700_I2C_ADDR;
     
     veml7700_get_ambient_light(&m_device, &m_config, &als);   
+    //ESP_LOGI(TAG, "Brighness: %lu", als);
     m_can.send(ICAN::MSG_ID_t::AMBIENT_LIGHT_SENSOR, als_8, 4, false);
 }
 

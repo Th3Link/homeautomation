@@ -1,25 +1,20 @@
+#include <driver/gpio.h>
 #include <esp_err.h>
 #include <esp_log.h>
-#include <driver/gpio.h>
 
 #include "ExtensionBoard.hpp"
 
-const char* ExtensionBoard::TAG = "ExtensionBoard";
+const char *ExtensionBoard::TAG = "ExtensionBoard";
 
-ExtensionBoard::ExtensionBoard()
-{
-    
-}
+ExtensionBoard::ExtensionBoard() {}
 
-void ExtensionBoard::sensor_board_setup(PinConfig::ext_board_t power_config)
-{
-    if (power_config.sensors_vcc == GPIO_NUM_NC || power_config.sensors_gnd == GPIO_NUM_NC)
-    {
+void ExtensionBoard::sensor_board_setup(PinConfig::ext_board_t power_config) {
+    if (power_config.sensors_vcc == GPIO_NUM_NC || power_config.sensors_gnd == GPIO_NUM_NC) {
         return;
     }
 
     ESP_LOGI(TAG, "Setup for extension sensor board");
-    #define PIN_BIT(x) (1ULL<<x)
+#define PIN_BIT(x) (1ULL << x)
     gpio_config_t io_conf;
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -32,15 +27,13 @@ void ExtensionBoard::sensor_board_setup(PinConfig::ext_board_t power_config)
     gpio_set_level(power_config.sensors_gnd, 0);
 }
 
-void ExtensionBoard::button_board_setup(PinConfig::ext_board_t power_config)
-{
-    if (power_config.button_vcc == GPIO_NUM_NC || power_config.button_gnd == GPIO_NUM_NC)
-    {
+void ExtensionBoard::button_board_setup(PinConfig::ext_board_t power_config) {
+    if (power_config.button_vcc == GPIO_NUM_NC || power_config.button_gnd == GPIO_NUM_NC) {
         return;
     }
 
     ESP_LOGI(TAG, "Setup for extension button board");
-    #define PIN_BIT(x) (1ULL<<x)
+#define PIN_BIT(x) (1ULL << x)
     gpio_config_t io_conf;
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -51,5 +44,4 @@ void ExtensionBoard::button_board_setup(PinConfig::ext_board_t power_config)
 
     gpio_set_level(power_config.button_vcc, 1);
     gpio_set_level(power_config.button_gnd, 0);
-
 }

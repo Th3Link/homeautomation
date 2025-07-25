@@ -195,7 +195,7 @@ void THSensor::init(gpio_num_t p_onewire_pin)
 
 void THSensor::init(gpio_num_t onewire_pin, PinConfig::i2c_config_t i2c)
 {
-    init(onewire_pin);
+    //init(onewire_pin);
     m_bme680.init(i2c);
     if (m_bme680.active())
     {

@@ -83,29 +83,29 @@ void app_main()
     light.init(pin_config.get_onboard_pwm_config(), pin_config.get_ext_board_config());
     relais.init(pin_config.get_onboard_relais_config(), pin_config.get_ext_board_config());
     ext_thsensor.init(pin_config.get_ext_board_onewire(), pin_config.get_ext_board_config());
-    thsensor.init(pin_config.get_onboard_onewire());
+    //thsensor.init(pin_config.get_onboard_onewire());
     
-    nightlight.init(pin_config.get_ext_board_config());
+    //nightlight.init(pin_config.get_ext_board_config());
 
-    ambient_light_sensor.init(pin_config.get_ext_board_config());
+    //ambient_light_sensor.init(pin_config.get_ext_board_config());
     
     sw1.init(onboard_switch.sw1, Button::button_id_t::SW1);
     sw2.init(onboard_switch.sw2, Button::button_id_t::SW2);
     sw3.init(onboard_switch.sw3, Button::button_id_t::SW3);
     sw4.init(onboard_switch.sw4, Button::button_id_t::SW4);
     
-    if (ext_thsensor.active || ambient_light_sensor.active() || light.ext_active() || relais.ext_active())
-    {
+//if (ext_thsensor.active || ambient_light_sensor.active() || light.ext_active() || relais.ext_active())
+//    {
         presence_sensor.init(pin_config.get_ext_board_pir());
-    }
-    else
-    {
-        extension_board.button_board_setup(pin_config.get_ext_board_power());
-        ext_sw1.init(ext_board_switch.sw1, Button::button_id_t::EXT_SW1);
-        ext_sw2.init(ext_board_switch.sw2, Button::button_id_t::EXT_SW2);
-        ext_sw3.init(ext_board_switch.sw3, Button::button_id_t::EXT_SW3);
-        ext_sw4.init(ext_board_switch.sw4, Button::button_id_t::EXT_SW4);
-    }
+//    }
+//    else
+//    {
+        //extension_board.button_board_setup(pin_config.get_ext_board_power());
+        //ext_sw1.init(ext_board_switch.sw1, Button::button_id_t::EXT_SW1);
+        //ext_sw2.init(ext_board_switch.sw2, Button::button_id_t::EXT_SW2);
+        //ext_sw3.init(ext_board_switch.sw3, Button::button_id_t::EXT_SW3);
+        //ext_sw4.init(ext_board_switch.sw4, Button::button_id_t::EXT_SW4);
+//    }
     
     // init update at last; rollback will be disabled on init
     update.init(static_cast<uint8_t>(ICAN::DEVICE_t::Button));
