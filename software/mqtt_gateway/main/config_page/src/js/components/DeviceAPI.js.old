@@ -1,0 +1,91 @@
+  const loadDevices = async () => {
+    const data = await apiRequest('state.json');
+    if (data?.devices) setDevices(data.devices);
+  };
+
+  // Lampen-Befehl ausführen
+  const executeLampsCommand = async (uid) => {
+    const value = document.getElementById(`${uid}_input_lamps_value`).value;
+    const bank = document.getElementById(`${uid}_lamps_bank`).value;
+    const instant = document.getElementById(`${uid}_input_lamps_instant`).checked;
+    
+    let bitmask = 0;
+    for (let i = 0; i < 24; i++) {
+      const checkbox = document.getElementById(`${uid}_input_lamps_bitmask_${i}`);
+      if (checkbox?.checked) {
+        bitmask |= (1 << (23 - i));
+      }
+    }
+
+    await apiRequest('/control.json', 'POST', {
+      command: "lamps",
+      unit: "can_by_uid",
+      commandId: uid,
+      value: parseInt(value),
+      bitmask,
+      bank: parseInt(bank),
+      instant
+    });
+  };
+
+  const [devices, setDevices] = useState([]);
+  const [pendingChanges, setPendingChanges] = useState({});
+  
+  const updateDeviceConfig = (uid, field, value) => {
+    setPendingChanges(prev => ({
+      ...prev,
+      [uid]: {
+        ...prev[uid],
+        [field]: field === 'hwrev' || field === 'legacy_sensor' 
+          ? parseInt(value) || 0 
+          : value
+      }
+    }));
+  };
+
+  const saveDeviceConfig = async (uid) => {
+    if (!pendingChanges[uid]) return;
+    
+    await apiRequest('/control.json', 'POST', {
+      command: "save",
+      unit: "can_by_uid",
+      commandId: uid,
+      ...pendingChanges[uid]
+    });
+    
+    // State zurücksetzen und neu laden
+    setPendingChanges(prev => {
+      const newState = {...prev};
+      delete newState[uid];
+      return newState;
+    });
+    loadDevices();
+  };
+
+  // Batch-Befehle
+  const sendBatchCommand = async (command) => {
+    await apiRequest('/control.json', 'POST', {
+      command,
+      unit: "can_selected",
+      devices: selected
+    });
+    loadDevices();
+  };
+
+  // Gerätedetails anzeigen
+  const toggleDetails = (uid) => {
+    setExpanded(expanded === uid ? null : uid);
+  };
+
+  // Alle auswählen
+  const toggleAll = (e) => {
+    setSelected(e.target.checked ? devices.map(d => d.uid) : []);
+  };
+
+  // Einzelnes Gerät auswählen
+  const toggleDevice = (uid) => {
+    setSelected(prev => prev.includes(uid) 
+      ? prev.filter(id => id !== uid)
+      : [...prev, uid]
+    );
+  };

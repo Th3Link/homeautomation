@@ -5,4 +5,4 @@ idf_component_register(SRCS "main.cpp" "esp32-ha-lib/CAN.cpp" "helper.cpp" "PinC
     "BridgeButton.cpp" "BridgeDevice.cpp" "BridgeLamps.cpp" "BridgeRelais.cpp" "BridgeDebug.cpp"
     "esp32-ha-lib/Console.cpp" "esp32-ha-lib/cmd_nvs.c" "esp32-ha-lib/cmd_system.c" "ConsoleCommandDevice.cpp" 
     INCLUDE_DIRS ""
-    EMBED_FILES "config_page/index.html" "config_page/minimal.js" "config_page/favicon.png" "config_page/style.css")
+    EMBED_FILES "config_page/src/index.html" "config_page/src/bundle.js" "config_page/src/favicon.png" "config_page/src/style.css")

@@ -1,0 +1,16 @@
+{
+  "factory_reset": false,
+  "reboot": false,
+  "hostname": "HOSTNAME",
+  "wifi": {
+    "mode": "client",
+    "ssid": "SSID",
+    "password": "PASSWORD"
+  },
+  "mqtt": {
+    "uri": "mqtt://IP:PORT"
+  },
+  "canbus": {
+    "baudrate": "b100"
+  }
+}

@@ -1,20 +1,23 @@
 #include "CANUpdate.hpp"
 
+#include <cstdint>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <esp_log.h>
 #include <nvs_flash.h>
 
 #include <algorithm>
+#include <cerrno>  // For errno
+#include <climits> // For INT_MAX, INT_MIN
+#include <cstdio>  // For snprintf
+#include <cstdlib> // For std::strtol
 #include <string>
-#include <cstdio>   // For snprintf
-#include <cstdlib>  // For std::strtol
-#include <cerrno>   // For errno
-#include <climits>  // For INT_MAX, INT_MIN
 
-const char* CANUpdate::TAG = "CANUpdate";
+const char *CANUpdate::TAG = "CANUpdate";
 
-static uint32_t charArrayToInt(const char* str, uint32_t defaultValue) {
+static uint32_t can_byte_count = 0;
+
+static uint32_t charArrayToInt(const char *str, uint32_t defaultValue) {
     if (str == nullptr) {
         return defaultValue;
     }
@@ -26,8 +29,8 @@ static uint32_t charArrayToInt(const char* str, uint32_t defaultValue) {
         return defaultValue;
     }
 
-    char* end;
-    errno = 0;  // Reset errno before the conversion
+    char *end;
+    errno = 0; // Reset errno before the conversion
 
     long result = std::strtol(str, &end, 10);
 
@@ -40,54 +43,43 @@ static uint32_t charArrayToInt(const char* str, uint32_t defaultValue) {
     return static_cast<uint32_t>(result);
 }
 
+CANUpdate::CANUpdate(ICAN &ic) : m_can(ic), m_update_delay(UPDATE_DELAY_DEFAULT) {}
 
-CANUpdate::CANUpdate(ICAN& ic) : m_can(ic), m_update_delay(UPDATE_DELAY_DEFAULT)
-{
-
-}
-
-void CANUpdate::init()
-{
+void CANUpdate::init() {
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
-    
-    if (nvs_get_u32(nvs_handle, "update_delay", &m_update_delay) != ESP_OK)
-    {
+
+    if (nvs_get_u32(nvs_handle, "update_delay", &m_update_delay) != ESP_OK) {
         nvs_set_u32(nvs_handle, "update_delay", UPDATE_DELAY_DEFAULT);
         nvs_get_u32(nvs_handle, "update_delay", &m_update_delay);
     }
-    
+
     ESP_LOGI(TAG, "Update delay: %lu ms", m_update_delay);
-    
+
     nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
 }
 
-void CANUpdate::by_type_start(char* type, uint32_t filesize)
-{
+void CANUpdate::by_type_start(char *type, uint32_t filesize, uint32_t crc) {
     m_update_id = 0x10000000 + ((std::stoul(std::string(type), nullptr, 16) & 0xFF) << 16);
-    start(filesize);
+    start(filesize, crc);
 }
 
-void CANUpdate::by_uid_start(char* uid, uint32_t filesize)
-{
+void CANUpdate::by_uid_start(char *uid, uint32_t filesize, uint32_t crc) {
     m_update_id = std::stoul(std::string(uid), nullptr, 16);
-    start(filesize);
+    start(filesize, crc);
 }
 
-void CANUpdate::start(uint32_t filesize)
-{
+void CANUpdate::start(uint32_t filesize, uint32_t crc) {
     m_filesize = filesize;
-    filesize = 0xC400;
-    //switch to update mode
-    uint8_t data[8] {0};
+    // switch to update mode
+    uint8_t data[8]{0};
     data[0] = static_cast<uint8_t>(ICAN::AVAILABLE_t::UPDATE_MODE);
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), 
-        &data[0], 1, false);
-    
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), &data[0], 1, false);
+
     // legacy devices need to restart...
     vTaskDelay(pdMS_TO_TICKS(2000));
-    
+    can_byte_count = 0;
     // select flash area
     data[0] = 0;
     data[1] = 0;
@@ -97,68 +89,78 @@ void CANUpdate::start(uint32_t filesize)
     data[5] = (filesize >> 16) & 0xFF;
     data[6] = (filesize >> 8) & 0xFF;
     data[7] = filesize & 0xFF;
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_SELECT),
-        &data[0], 8, false);
-    
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
-        &data[0], 0, true);
-    
+
+    uint8_t start_data[8]{0};
+    start_data[0] = (crc >> 24) & 0xFF;
+    start_data[1] = (crc >> 16) & 0xFF;
+    start_data[2] = (crc >> 8) & 0xFF;
+    start_data[3] = crc & 0xFF;
+    start_data[4] = (filesize >> 24) & 0xFF;
+    start_data[5] = (filesize >> 16) & 0xFF;
+    start_data[6] = (filesize >> 8) & 0xFF;
+    start_data[7] = filesize & 0xFF;
+
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_SELECT), &data[0], 8,
+               false);
+
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_START), &start_data[0], 8,
+               false);
+
     vTaskDelay(pdMS_TO_TICKS(500));
-    
+
     // erase flash
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_ERASE), 
-        &data[0], 0, false);
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_ERASE), &data[0], 0,
+               false);
     vTaskDelay(pdMS_TO_TICKS(5000));
-    
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
-        &data[0], 0, true);
-        vTaskDelay(pdMS_TO_TICKS(500));
+
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY), &data[0], 0,
+               true);
+    vTaskDelay(pdMS_TO_TICKS(500));
 }
 
-void CANUpdate::selected_start(char** uids, uint8_t device_count, uint32_t filesize)
-{
+void CANUpdate::selected_start(char **uids, uint8_t device_count, uint32_t filesize) {}
 
-}
-
-void CANUpdate::abort()
-{
+void CANUpdate::abort() {
     complete();
 }
 
-bool CANUpdate::data(char* p_data, uint32_t data_len)
-{
+bool CANUpdate::data(char *p_data, uint32_t data_len) {
     constexpr uint32_t can_max = 8;
     uint32_t remaining = data_len;
     size_t addr = 0;
     static uint8_t buffer[can_max];
-    while ((remaining > 0) && (m_filesize > 0))
-    {
+    while ((remaining > 0) && (m_filesize > 0)) {
         // slow down transmission. slaves are too slow to compete
         vTaskDelay(pdMS_TO_TICKS(m_update_delay));
-        uint32_t to_send = std::min(std::min(remaining, can_max),m_filesize);       
-        for (unsigned int i = 0; i < to_send; i++)
-        {
-            buffer[i] = p_data[addr+i];
+        uint32_t to_send = std::min(std::min(remaining, can_max), m_filesize);
+        for (unsigned int i = 0; i < to_send; i++) {
+            buffer[i] = p_data[addr + i];
         }
-        m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), 
-            &buffer[0], to_send, false);
-        
+        m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_WRITE), &buffer[0],
+                   to_send, false);
+
         remaining -= to_send;
         m_filesize -= to_send;
         addr += to_send;
+        can_byte_count += to_send;
+        if ((can_byte_count % 4096) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
     return true;
 }
 
-void CANUpdate::complete()
-{
-   
-    uint8_t data[8] {0};
-    
+void CANUpdate::complete() {
+
+    uint8_t data[8]{0};
+
     vTaskDelay(pdMS_TO_TICKS(1000));
-    
-    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY),
-        &data[0], 0, true);
+
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_COMPLETE), &data[0], 0,
+               false);
+
+    m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::FLASH_VERIFY), &data[0], 0,
+               true);
 
     vTaskDelay(pdMS_TO_TICKS(2000));
 
@@ -166,15 +168,13 @@ void CANUpdate::complete()
     m_can.send(m_update_id + static_cast<uint32_t>(ICAN::MSG_ID_t::RESTART), &data[0], 1, false);
 }
 
-const char* CANUpdate::update_delay()
-{
-    static char update_delay[8] {0};
+const char *CANUpdate::update_delay() {
+    static char update_delay[8]{0};
     std::snprintf(update_delay, sizeof(update_delay), "%lu", m_update_delay);
     return &update_delay[0];
 }
 
-void CANUpdate::update_delay(const char* c)
-{
+void CANUpdate::update_delay(const char *c) {
     uint32_t update_delay = charArrayToInt(c, UPDATE_DELAY_DEFAULT);
     nvs_handle_t nvs_handle;
     nvs_open("storage", NVS_READWRITE, &nvs_handle);
