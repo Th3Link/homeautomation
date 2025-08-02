@@ -1,0 +1,14 @@
+{
+    "name": "can2mqtt-gui",
+    "version": "1.0.0",
+    "dependencies": {
+        "preact": "10.26",
+        "htm": "3.1",
+        "crc-32": "1.2",
+        "esbuild": "^0.25.8"
+    },
+    "scripts": {
+        "build": "node build.js",
+        "check-updates": "npm outdated"
+    }
+}
