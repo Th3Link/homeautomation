@@ -79,6 +79,7 @@ class ICAN {
         LOG_DOWNLOAD = 155,
         PING = 156,
         PING_DISABLE = 157,
+        ECHO = 158,
     };
 
     enum class AVAILABLE_t : uint8_t { NOT_READY = 0, APPLICATION = 1, UPDATE_MODE = 2 };
