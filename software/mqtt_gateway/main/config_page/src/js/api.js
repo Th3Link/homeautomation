@@ -26,8 +26,8 @@ export const sendDeviceCommand = async (command, deviceIds = [], params = {}) =>
   const payload = {
     command,
     ...params,
-    unit: deviceIds.length ? 'can_selected' : 'can_all',
-    ...(deviceIds.length && { devices: deviceIds })
+    unit: deviceIds.length ? 'can_by_uid' : 'can_all',
+    ...(deviceIds.length && { commandId: deviceIds })
   };
 
   const response = await fetch('/control.json', {
