@@ -1,4 +1,5 @@
 #include "Command.hpp"
+#include "lwip/arch.h"
 
 #include <algorithm>
 
@@ -220,46 +221,61 @@ void Command::save_device(char *cmd, cJSON *root) {
         return;
     }
 
-    cJSON *type_json = cJSON_GetObjectItem(root, "type");
-    cJSON *id_json = cJSON_GetObjectItem(root, "id");
-    if (cJSON_IsString(type_json)) {
+    cJSON *type_json = cJSON_GetObjectItem(root, "device_type");
+    cJSON *id_json = cJSON_GetObjectItem(root, "device_id");
+    cJSON *uid0_json = cJSON_GetObjectItem(root, "uid0");
+    cJSON *uid1_json = cJSON_GetObjectItem(root, "uid1");
+    union {
+        uint64_t uid0;
+        uint8_t uid0_data[8];
+    };
+    union {
+        uint64_t uid1;
+        uint8_t uid1_data[8];
+    };
+
+    if ((uid0_json != nullptr) && (uid1_json != nullptr) && (cJSON_IsString(uid0_json)) &&
+        (cJSON_IsString(uid1_json))) {
+        char *uid0_string = cJSON_GetStringValue(uid0_json);
+        uid0 = std::stoull(uid0_string, nullptr, 16);
+        char *uid1_string = cJSON_GetStringValue(uid1_json);
+        uid1 = std::stoull(uid1_string, nullptr, 16);
+    }
+
+    if (type_json != nullptr && id_json != nullptr && cJSON_IsString(type_json) &&
+        cJSON_IsString(id_json)) {
         uint8_t data[2]{0};
-        if (cJSON_IsString(id_json)) {
-            char *id_string = cJSON_GetStringValue(id_json);
-            data[0] = std::stoul(std::string(id_string), nullptr, 16) & 0xFF;
-        }
+        char *id_string = cJSON_GetStringValue(id_json);
+        data[0] = std::stoul(id_string, nullptr, 16) & 0xFF;
 
         char *type_string = cJSON_GetStringValue(type_json);
-        data[1] = std::stoul(std::string(type_string), nullptr, 16) & 0xFF;
+        data[1] = std::stoul(type_string, nullptr, 16) & 0xFF;
 
         // send select uid0 first. there is a bypass by sending all 8 bytes zero.
         // we just do this for now.
-        uint8_t uid0_data[8]{0};
         send_can_command(root, ICAN::MSG_ID_t::DEVICE_UID0, &uid0_data[0], sizeof(uid0_data),
                          false);
+        send_can_command(root, ICAN::MSG_ID_t::DEVICE_UID1, &uid1_data[0], sizeof(uid1_data),
+                         false);
         send_can_command(root, ICAN::MSG_ID_t::DEVICE_ID_TYPE, &data[0], 2, false);
-        send_can_command(root, ICAN::MSG_ID_t::DEVICE_ID_TYPE, NULL, 0, true);
     }
 
     cJSON *baudrate_json = cJSON_GetObjectItem(root, "baudrate");
     if (cJSON_IsString(baudrate_json)) {
         uint8_t bitrate = static_cast<uint8_t>(ICAN::bitrate(cJSON_GetStringValue(baudrate_json)));
         send_can_command(root, ICAN::MSG_ID_t::BAUDRATE, &bitrate, 1, false);
-        send_can_command(root, ICAN::MSG_ID_t::BAUDRATE, NULL, 0, true);
     }
 
     cJSON *hwrev_json = cJSON_GetObjectItem(root, "hwrev");
     if (cJSON_IsNumber(hwrev_json)) {
         uint8_t hwrev = static_cast<uint8_t>(cJSON_GetNumberValue(hwrev_json));
         send_can_command(root, ICAN::MSG_ID_t::HW_REV, &hwrev, 1, false);
-        send_can_command(root, ICAN::MSG_ID_t::HW_REV, NULL, 0, true);
     }
 
     cJSON *legacy_sensor_json = cJSON_GetObjectItem(root, "legacy_sensor");
     if (cJSON_IsNumber(legacy_sensor_json)) {
         uint8_t legacy_sensor = static_cast<uint8_t>(cJSON_GetNumberValue(legacy_sensor_json));
         send_can_command(root, ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, &legacy_sensor, 1, false);
-        send_can_command(root, ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, NULL, 0, true);
     }
 
     cJSON *custom_string_json = cJSON_GetObjectItem(root, "custom_string");
@@ -272,7 +288,6 @@ void Command::save_device(char *cmd, cJSON *root) {
             custom_string[i] = custom_string_string[i];
         }
         send_can_command(root, ICAN::MSG_ID_t::CUSTOM_STRING, &custom_string[0], min_len, false);
-        send_can_command(root, ICAN::MSG_ID_t::CUSTOM_STRING, NULL, 0, true);
     }
     cJSON *rollershutter_mode_json = cJSON_GetObjectItem(root, "rollershutter_mode");
     if (cJSON_IsString(rollershutter_mode_json)) {
@@ -283,7 +298,6 @@ void Command::save_device(char *cmd, cJSON *root) {
         }
 
         send_can_command(root, ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, &rollershutter_mode, 1, false);
-        send_can_command(root, ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, NULL, 0, true);
     }
 }
 

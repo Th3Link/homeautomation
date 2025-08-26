@@ -34,7 +34,7 @@ export default function DeviceDetails({ device }) {
   };
   const handleSaveConfig = async (uid, config) => {
     try {
-      await sendDeviceCommand('save_config', [uid], config);
+      await sendDeviceCommand('save', uid, config);
       refreshDevices();
     } catch (error) {
       alert('Save failed: ' + error.message);
@@ -68,28 +68,28 @@ export default function DeviceDetails({ device }) {
               <h5>Basic Settings</h5>
               <div class="config-row">
                 <label>Device ID</label>
-                <input type="text" value=${device.device_id} 
+                <input type="text" value=${config.device_id} 
                   onChange=${e => handleChange('device_id', e.target.value)}
                   class="config-input small" />
               </div>
               
               <div class="config-row">
                 <label>Device Type</label>
-                <input type="text" value=${device.device_type} 
+                <input type="text" value=${config.device_type} 
                   onChange=${e => handleChange('device_type', e.target.value)}
                   class="config-input small" />
               </div>
               
               <div class="config-row">
                 <label>HW Rev</label>
-                <input type="text" value=${device.hwrev} 
+                <input type="text" value=${config.hwrev} 
                   onChange=${e => handleChange('hwrev', e.target.value)}
                   class="config-input small" />
               </div>
               
               <div class="config-row">
                 <label>Custom String</label>
-                <input type="text" value=${device.custom_string} 
+                <input type="text" value=${config.custom_string} 
                   onChange=${e => handleChange('custom_string', e.target.value)}
                   maxlength="8" class="config-input" />
               </div>
