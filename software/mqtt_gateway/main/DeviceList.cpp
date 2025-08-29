@@ -125,14 +125,14 @@ static void update_device(DeviceList::DeviceListEntry &device, uint32_t identifi
         }
         break;
     }
-    case ICAN::MSG_ID_t::ROLLERSHUTTER_MODE:
-        device.rollershutter_mode = data[0];
+    case ICAN::MSG_ID_t::RELAIS_MODE:
+        device.relais_mode = data[0];
         break;
     case ICAN::MSG_ID_t::HW_REV:
         device.hwrev = data[0];
         break;
-    case ICAN::MSG_ID_t::SENSOR_LEGACY_MODE:
-        device.legacy_sensor = data[0];
+    case ICAN::MSG_ID_t::EXTENSION_MODE:
+        device.extension_mode = data[0];
         break;
     default:
         break;
@@ -145,7 +145,7 @@ bool DeviceList::dispatch(uint32_t identifier, uint8_t *data, unsigned int data_
         return false;
     }
 
-    for (unsigned int i = 0; i < 50; i++) {
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++) {
         if (m_deviceList[i].id == (identifier & 0xFFFFFF00)) {
             update_device(m_deviceList[i], identifier, data, data_len);
             return false;
@@ -153,7 +153,7 @@ bool DeviceList::dispatch(uint32_t identifier, uint8_t *data, unsigned int data_
     }
 
     // create new entry
-    for (unsigned int i = 0; i < 50; i++) {
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++) {
         if (m_deviceList[i].id == 0) {
             m_deviceList[i].id = (identifier & 0xFFFFFF00);
             uint8_t data[1];
@@ -192,7 +192,7 @@ uint32_t DeviceList::resolve(std::string device_string) {
 
 void DeviceList::output(cJSON *object) {
     cJSON *devices = cJSON_AddArrayToObject(object, "devices");
-    for (unsigned int i = 0; i < 50; i++) {
+    for (unsigned int i = 0; i < DEVICE_LIST_SIZE; i++) {
         if (m_deviceList[i].id != 0) {
             char uid[30]{0};
             char device_id[5]{0};
@@ -203,7 +203,8 @@ void DeviceList::output(cJSON *object) {
             char uid0[22]{0};
             char uid1[22]{0};
             char version[9]{0};
-            char rollershutter_mode[9]{0};
+            char relais_mode[16]{0};
+            char extension_mode[16]{0};
 
             sprintf(&uid[0], "0x%08lx", m_deviceList[i].id);
             uint8_t deviceid = static_cast<uint8_t>((m_deviceList[i].id & 0xFF00) >> 8);
@@ -230,10 +231,36 @@ void DeviceList::output(cJSON *object) {
                 version[j] = m_deviceList[i].version[j];
             }
 
-            if (m_deviceList[i].rollershutter_mode == 2) {
-                sprintf(&rollershutter_mode[0], "HARDWARE");
+            if (m_deviceList[i].relais_mode == 0) {
+                sprintf(&relais_mode[0], "OFF");
+            } else if (m_deviceList[i].relais_mode == 1) {
+                sprintf(&relais_mode[0], "RELAIS");
+            } else if (m_deviceList[i].relais_mode == 2) {
+                sprintf(&relais_mode[0], "SWROLLERSHUTTER");
+            } else if (m_deviceList[i].relais_mode == 3) {
+                sprintf(&relais_mode[0], "HWROLLERSHUTTER");
             } else {
-                sprintf(&rollershutter_mode[0], "SOFTWARE");
+                sprintf(&relais_mode[0], "OFF");
+            }
+
+            if (m_deviceList[i].extension_mode == 0) {
+                sprintf(&extension_mode[0], "OFF");
+            } else if (m_deviceList[i].extension_mode == 1) {
+                sprintf(&extension_mode[0], "BUTTONS");
+            } else if (m_deviceList[i].extension_mode == 2) {
+                sprintf(&extension_mode[0], "SENSORS");
+            } else if (m_deviceList[i].extension_mode == 3) {
+                sprintf(&extension_mode[0], "PWM");
+            } else if (m_deviceList[i].extension_mode == 4) {
+                sprintf(&extension_mode[0], "RELAIS");
+            } else if (m_deviceList[i].extension_mode == 5) {
+                sprintf(&extension_mode[0], "LEGACY_SENSORS");
+            } else if (m_deviceList[i].extension_mode == 6) {
+                sprintf(&extension_mode[0], "SWROLLERSHUTTER");
+            } else if (m_deviceList[i].extension_mode == 7) {
+                sprintf(&extension_mode[0], "HWROLLERSHUTTER");
+            } else {
+                sprintf(&extension_mode[0], "UNKNOWN");
             }
 
             sprintf(&state[0], "0x%02x", m_deviceList[i].state);
@@ -259,10 +286,10 @@ void DeviceList::output(cJSON *object) {
             cJSON_AddStringToObject(
                 device, "baudrate",
                 ICAN::bitrate_string(static_cast<ICAN::BITRATE_t>(m_deviceList[i].baudrate)));
-            cJSON_AddStringToObject(device, "rollershutter_mode", &rollershutter_mode[0]);
+            cJSON_AddStringToObject(device, "relais_mode", &relais_mode[0]);
             cJSON_AddNumberToObject(device, "last_seen", ls);
             cJSON_AddNumberToObject(device, "hwrev", m_deviceList[i].hwrev);
-            cJSON_AddNumberToObject(device, "legacy_sensor", m_deviceList[i].hwrev);
+            cJSON_AddStringToObject(device, "extension_mode", &extension_mode[0]);
             cJSON_AddStringToObject(device, "state", &state[0]);
             cJSON_AddStringToObject(device, "last_error", &error[0]);
             cJSON_AddItemToArray(devices, device);

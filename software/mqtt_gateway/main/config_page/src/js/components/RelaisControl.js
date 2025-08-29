@@ -16,7 +16,8 @@ export default function RelaisControl({ deviceUid }) {
   const getHexCommand = () => {
     const typeHex = type === 'rollershutter' ? '83' : '82'; // 131 vs 130
     let stateHex = '00';
-    if (state === 'on' || state === 'up') stateHex = '01';
+    if (state === 'on') stateHex = '03';
+    if (state === 'up') stateHex = '01';
     if (state === 'down') stateHex = '02';
     
     const timeHex = decimalToHex(time, 6).match(/.{2}/g).reverse().join('');
