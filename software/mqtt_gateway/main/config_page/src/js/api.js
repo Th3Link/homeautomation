@@ -23,11 +23,21 @@ export const loadDevices = async () => {
  * @returns {Promise<void>}
  */
 export const sendDeviceCommand = async (command, deviceIds = [], params = {}) => {
+  let unit = "can_all";
+  let commandId;
+
+  if (deviceIds.length === 1) {
+    unit = "can_by_uid";
+    commandId = deviceIds[0];
+  } else if (deviceIds.length > 1) {
+    unit = "can_selected";
+    commandId = deviceIds;
+  }
   const payload = {
     command,
     ...params,
-    unit: deviceIds.length ? 'can_by_uid' : 'can_all',
-    ...(deviceIds.length && { commandId: deviceIds })
+    unit,
+    ...(commandId !== undefined && { commandId })
   };
 
   const response = await fetch('/control.json', {

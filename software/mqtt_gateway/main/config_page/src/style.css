@@ -510,6 +510,10 @@ p {
     color: #555;
 }
 
+.batch-controls .config-input {
+    margin-right: 10px;
+}
+
 .config-input {
     flex: 1;
     padding: 8px 10px;

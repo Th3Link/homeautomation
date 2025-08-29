@@ -502,11 +502,20 @@ var loadDevices = /* @__PURE__ */ __name(async () => {
   return await response.json();
 }, "loadDevices");
 var sendDeviceCommand = /* @__PURE__ */ __name(async (command, deviceIds = [], params = {}) => {
+  let unit = "can_all";
+  let commandId;
+  if (deviceIds.length === 1) {
+    unit = "can_by_uid";
+    commandId = deviceIds[0];
+  } else if (deviceIds.length > 1) {
+    unit = "can_selected";
+    commandId = deviceIds;
+  }
   const payload = __spreadValues(__spreadProps(__spreadValues({
     command
   }, params), {
-    unit: deviceIds.length ? "can_by_uid" : "can_all"
-  }), deviceIds.length && { commandId: deviceIds });
+    unit
+  }), commandId !== void 0 && { commandId });
   const response = await fetch("/control.json", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -873,7 +882,8 @@ function RelaisControl({ deviceUid }) {
   const getHexCommand = /* @__PURE__ */ __name(() => {
     const typeHex = type === "rollershutter" ? "83" : "82";
     let stateHex = "00";
-    if (state === "on" || state === "up") stateHex = "01";
+    if (state === "on") stateHex = "03";
+    if (state === "up") stateHex = "01";
     if (state === "down") stateHex = "02";
     const timeHex = decimalToHex(time, 6).match(/.{2}/g).reverse().join("");
     return {
@@ -1089,12 +1099,14 @@ __name(FirmwareUpload, "FirmwareUpload");
 var html7 = htm_module_default.bind(_);
 var _a7;
 function DeviceDetails({ device }) {
+  var _a14, _b7;
   const [config, setConfig] = d2({
     rollershutter_mode: device.rollershutter_mode,
     device_id: device.device_id,
     device_type: device.device_type,
     hwrev: device.hwrev,
-    legacy_sensor: device.legacy_sensor,
+    relais_mode: device.relais_mode,
+    extension_mode: device.extension_mode,
     custom_string: device.custom_string,
     baudrate: device.baudrate,
     uid0: device.uid0,
@@ -1111,7 +1123,14 @@ function DeviceDetails({ device }) {
   }, "handleCommand");
   const handleSaveConfig = /* @__PURE__ */ __name(async (uid, config2) => {
     try {
-      await sendDeviceCommand("save", uid, config2);
+      const diff = Object.fromEntries(
+        Object.entries(config2).filter(([key, value]) => device[key] !== value)
+      );
+      if (Object.keys(diff).length === 0) {
+        alert("Keine \xC4nderungen zu speichern.");
+        return;
+      }
+      await sendDeviceCommand("save", [uid], diff);
       refreshDevices();
     } catch (error) {
       alert("Save failed: " + error.message);
@@ -1122,7 +1141,7 @@ function DeviceDetails({ device }) {
       [field]: field === "hwrev" ? parseInt(value) || 0 : value
     }));
   }, "handleChange");
-  return html7(_a7 || (_a7 = __template(['\n    <div class="device-details">\n      <div class="detail-section">\n        <div class="device-config">\n          <div class="config-grid">\n            <div class="config-group">\n              <h5>Status</h5>\n              <div class="status-item"><span class="status-label">Firmware Version:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">HW Revision:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Device UID0:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Device UID1:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Baudrate:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Uptime:</span> <span class="status-value">', '</span></div>\n            </div>\n    \n            <div class="config-group">\n              <h5>Basic Settings</h5>\n              <div class="config-row">\n                <label>Device ID</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>Device Type</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>HW Rev</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>Custom String</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  maxlength="8" class="config-input" />\n              </div>\n      \n              <div class="config-row">\n                <label>Baudrate</label>\n                <select\n                  value=', "\n                  onChange=", '\n                  class="config-input"\n                >\n                  <option value="b50">50 KBit/s</option>\n                  <option value="b22_222">22.222 KBit/s</option>\n                  <option value="b25">25 KBit/s</option>\n                  <option value="b100">100 KBit/s</option>\n                </select>\n              </div>\n            </div>\n      \n            <div class="config-group">\n              <h5>Device Behavior</h5>\n              <div class="config-row">\n                <label>Relais Mode</label>\n                <select \n                  value=', " \n                  onChange=", '\n                  class="config-input"\n                >\n                  <option value="OFF" selected=', '>Off</option>\n                  <option value="RELAIS" selected=', '>Relais</option>\n                  <option value="SWROLLERSHUTTER" selected=', '>Software Rollershutter</option>\n                  <option value="HWROLLERSHUTTER" selected=', '>Hardware Rollershutter</option>\n                </select>\n              </div>\n      \n              <div class="config-row">\n                <label>Extension Mode</label>\n                <select \n                  value=', " \n                  onChange=", '\n                  class="config-input"\n                >\n                  <option value="OFF" selected=', '>Off</option>\n                  <option value="BUTTONS" selected=', '>Buttons</option>\n                  <option value="RELAIS" selected=', '>Relais</option>\n                  <option value="SWROLLERSHUTTER" selected=', '>Software Rollershutter</option>\n                  <option value="HWROLLERSHUTTER" selected=', '>Hardware Rollershutter</option>\n                  <option value="PWM" selected=', '>PWM</option>\n                  <option value="SENSORS" selected=', '>Sensors</option>\n                  <option value="LEGACY_SENSORS" selected=', '>Legacy Sensors</option>\n                </select>\n              </div>\n            </div>\n          </div>\n          <div class="save-button">\n            <button class="primary" onClick=', ">Save All Changes</button>\n            <button onClick=", ">Refresh</button>\n            <button onClick=", ">Ping</button>\n            <button onClick=", ">Restart</button>\n            <button onClick=", ">Silence On</button>\n            <button onClick=", ">Silence Off</button>\n            <button onClick=", '>Legacy Mode</button>\n          </div>\n        </div>\n      </div>\n      <div class="detail-section">\n        <div class="device-config">\n          <div class="config-grid">\n            <div class="config-group">\n              <h5>Firmware Update</h5>\n              <', " deviceUid=", ' />\n            </div>\n            <div class="config-group">\n              <h5>Relais Control</h5>\n              <', " deviceUid=", ' />\n            </div>\n            <div class="config-group">\n              <h5>PWM Control</h5>\n              <', " deviceUid=", " />\n            </div>\n          </div>\n        </div>\n      </div>\n\n    </div>\n  "])), device.version, device.hwrev, device.uid0, device.uid1, device.baudrate, device.uptime, config.device_id, (e3) => handleChange("device_id", e3.target.value), config.device_type, (e3) => handleChange("device_type", e3.target.value), config.hwrev, (e3) => handleChange("hwrev", e3.target.value), config.custom_string, (e3) => handleChange("custom_string", e3.target.value), config.baudrate, (e3) => handleChange("baudrate", e3.target.value), device.relais_mode, (e3) => handleChange("relais_mode", e3.target.value), device.relais_mode === "OFF", device.relais_mode === "RELAIS", device.relais_mode === "SWROLLERSHUTTER", device.relais_mode === "HWROLLERSHUTTER", device.extension_mode, (e3) => handleChange("extension_mode", e3.target.value), device.extension_mode === "OFF", device.extension_mode === "BUTTONS", device.extension_mode === "RELAIS", device.extension_mode === "SWROLLERSHUTTER", device.extension_mode === "HWROLLERSHUTTER", device.extension_mode === "PWM", device.extension_mode === "SENSORS", device.extension_mode === "LEGACY_SENSORS", () => handleSaveConfig(device.uid, config), () => handleCommand("refresh"), () => handleCommand("ping"), () => handleCommand("restart"), () => handleCommand("silence_on"), () => handleCommand("silence_off"), () => handleCommand("legacy_mode"), FirmwareUpload, device.uid, RelaisControl, device.uid, PwmControl, device.uid);
+  return html7(_a7 || (_a7 = __template(['\n    <div class="device-details">\n      <div class="detail-section">\n        <div class="device-config">\n          <div class="config-grid">\n            <div class="config-group">\n              <h5>Status</h5>\n              <div class="status-item"><span class="status-label">Firmware Version:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">HW Revision:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Device UID0:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Device UID1:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Baudrate:</span> <span class="status-value">', '</span></div>\n              <div class="status-item"><span class="status-label">Uptime:</span> <span class="status-value">', '</span></div>\n            </div>\n    \n            <div class="config-group">\n              <h5>Basic Settings</h5>\n              <div class="config-row">\n                <label>Device ID</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>Device Type</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>HW Rev</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  class="config-input small" />\n              </div>\n              \n              <div class="config-row">\n                <label>Custom String</label>\n                <input type="text" value=', " \n                  onChange=", '\n                  maxlength="8" class="config-input" />\n              </div>\n      \n              <div class="config-row">\n                <label>Baudrate</label>\n                <select\n                  value=', "\n                  onChange=", '\n                  class="config-input"\n                >\n                  <option value="b50">50 KBit/s</option>\n                  <option value="b22_222">22.222 KBit/s</option>\n                  <option value="b25">25 KBit/s</option>\n                  <option value="b100">100 KBit/s</option>\n                </select>\n              </div>\n            </div>\n      \n            <div class="config-group">\n              <h5>Device Behavior</h5>\n              <div class="config-row">\n                <label>Relais Mode</label>\n                <select \n                  value=', " \n                  onInput=", '\n                  class="config-input"\n                >\n                  <option value="OFF">Off</option>\n                  <option value="RELAIS">Relais</option>\n                  <option value="SWROLLERSHUTTER">Software Rollershutter</option>\n                  <option value="HWROLLERSHUTTER">Hardware Rollershutter</option>\n                </select>\n              </div>\n      \n              <div class="config-row">\n                <label>Extension Mode</label>\n                <select \n                  value=', " \n                  onInput=", '\n                  class="config-input"\n                >\n                  <option value="OFF">Off</option>\n                  <option value="BUTTONS">Buttons</option>\n                  <option value="RELAIS">Relais</option>\n                  <option value="SWROLLERSHUTTER">Software Rollershutter</option>\n                  <option value="HWROLLERSHUTTER">Hardware Rollershutter</option>\n                  <option value="PWM">PWM</option>\n                  <option value="SENSORS">Sensors</option>\n                  <option value="LEGACY_SENSORS">Legacy Sensors</option>\n                </select>\n              </div>\n            </div>\n          </div>\n          <div class="save-button">\n            <button class="primary" onClick=', ">Save All Changes</button>\n            <button onClick=", ">Refresh</button>\n            <button onClick=", ">Ping</button>\n            <button onClick=", ">Restart</button>\n            <button onClick=", ">Silence On</button>\n            <button onClick=", '>Silence Off</button>\n          </div>\n        </div>\n      </div>\n      <div class="detail-section">\n        <div class="device-config">\n          <div class="config-grid">\n            <div class="config-group">\n              <h5>Firmware Update</h5>\n              <', " deviceUid=", ' />\n            </div>\n            <div class="config-group">\n              <h5>Relais Control</h5>\n              <', " deviceUid=", ' />\n            </div>\n            <div class="config-group">\n              <h5>PWM Control</h5>\n              <', " deviceUid=", " />\n            </div>\n          </div>\n        </div>\n      </div>\n\n    </div>\n  "])), device.version, device.hwrev, device.uid0, device.uid1, device.baudrate, device.uptime, config.device_id, (e3) => handleChange("device_id", e3.target.value), config.device_type, (e3) => handleChange("device_type", e3.target.value), config.hwrev, (e3) => handleChange("hwrev", e3.target.value), config.custom_string, (e3) => handleChange("custom_string", e3.target.value), config.baudrate, (e3) => handleChange("baudrate", e3.target.value), (_a14 = config.relais_mode) != null ? _a14 : "OFF", (e3) => handleChange("relais_mode", e3.target.value), (_b7 = config.extension_mode) != null ? _b7 : "OFF", (e3) => handleChange("extension_mode", e3.target.value), () => handleSaveConfig(device.uid, config), () => handleCommand("refresh"), () => handleCommand("ping"), () => handleCommand("restart"), () => handleCommand("silence_on"), () => handleCommand("silence_off"), FirmwareUpload, device.uid, RelaisControl, device.uid, PwmControl, device.uid);
 }
 __name(DeviceDetails, "DeviceDetails");
 
@@ -1154,6 +1173,7 @@ var html10 = htm_module_default.bind(_);
 var _a10;
 function BatchControls() {
   const { devices, selected, refreshDevices } = useDeviceStore();
+  const [pingUid, setPingUid] = d2("");
   const handleCommand = /* @__PURE__ */ __name(async (command) => {
     try {
       await sendDeviceCommand(command, selected);
@@ -1162,7 +1182,15 @@ function BatchControls() {
       alert("Error: ".concat(error.message));
     }
   }, "handleCommand");
-  return html10(_a10 || (_a10 = __template(['\n    <div class="batch-controls">\n      <button onClick=', ">Refresh All</button>\n      <button onClick=", ">\n        ", "\n      </button>\n      <button onClick=", ">Silence On</button>\n      <button onClick=", ">Silence Off</button>\n      <button onClick=", ">\n        ", "\n      </button>\n    </div>\n  "])), refreshDevices, () => handleCommand("ping"), selected.length ? "Ping Selected" : "Broadcast Ping", () => handleCommand("silence_on"), () => handleCommand("silence_off"), () => handleCommand("restart"), selected.length ? "Restart Selected" : "Restart All");
+  const handlePingUid = /* @__PURE__ */ __name(() => {
+    if (!pingUid.trim()) {
+      alert("Bitte UID eingeben!");
+      return;
+    }
+    console.log("pingUid", [pingUid.trim()]);
+    sendDeviceCommand("ping", [pingUid.trim()]);
+  }, "handlePingUid");
+  return html10(_a10 || (_a10 = __template(['\n    <div class="batch-controls">\n      <button onClick=', ">Refresh All</button>\n      <button onClick=", ">\n        ", "\n      </button>\n      <button onClick=", ">Silence On</button>\n      <button onClick=", ">Silence Off</button>\n      <button onClick=", ">\n        ", '\n      </button>\n      <input\n        type="text"\n        value=', "\n        onInput=", '\n        placeholder="Device UID eingeben"\n        class="config-input"\n      />\n      <button onClick=', ">Ping UID</button>\n      <button onClick=", ">Scan</button>\n    </div>\n  "])), refreshDevices, () => handleCommand("ping"), selected.length ? "Ping Selected" : "Broadcast Ping", () => handleCommand("silence_on"), () => handleCommand("silence_off"), () => handleCommand("restart"), selected.length ? "Restart Selected" : "Restart All", pingUid, (e3) => setPingUid(e3.target.value), handlePingUid, () => handleCommand("scan"));
 }
 __name(BatchControls, "BatchControls");
 

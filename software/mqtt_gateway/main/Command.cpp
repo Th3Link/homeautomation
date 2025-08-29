@@ -42,7 +42,7 @@ void Command::send_can_command(cJSON *root, ICAN::MSG_ID_t messageId, uint8_t *d
                    request);
     } else if (strcmp(unit, "can_selected") == 0) {
         cJSON *commandId = cJSON_GetObjectItem(root, "commandId");
-        if (cJSON_IsArray(commandId)) {
+        if (commandId != nullptr && cJSON_IsArray(commandId)) {
             int size = cJSON_GetArraySize(commandId);
             for (unsigned int i = 0; i < size; i++) {
                 char *cid = cJSON_GetStringValue(cJSON_GetArrayItem(commandId, i));
@@ -51,9 +51,12 @@ void Command::send_can_command(cJSON *root, ICAN::MSG_ID_t messageId, uint8_t *d
             }
         }
     } else if (strcmp(unit, "can_by_uid") == 0) {
-        char *cid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "commandId"));
-        uint32_t uid = std::stoul(std::string(cid), nullptr, 16);
-        m_can.send(uid + static_cast<uint32_t>(messageId), data, data_len, request);
+        cJSON *commandId = cJSON_GetObjectItem(root, "commandId");
+        if (commandId != nullptr && cJSON_IsString(commandId)) {
+            char *cid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "commandId"));
+            uint32_t uid = std::stoul(std::string(cid), nullptr, 16);
+            m_can.send(uid + static_cast<uint32_t>(messageId), data, data_len, request);
+        }
     }
 }
 
@@ -272,10 +275,29 @@ void Command::save_device(char *cmd, cJSON *root) {
         send_can_command(root, ICAN::MSG_ID_t::HW_REV, &hwrev, 1, false);
     }
 
-    cJSON *legacy_sensor_json = cJSON_GetObjectItem(root, "legacy_sensor");
-    if (cJSON_IsNumber(legacy_sensor_json)) {
-        uint8_t legacy_sensor = static_cast<uint8_t>(cJSON_GetNumberValue(legacy_sensor_json));
-        send_can_command(root, ICAN::MSG_ID_t::SENSOR_LEGACY_MODE, &legacy_sensor, 1, false);
+    cJSON *extension_mode_json = cJSON_GetObjectItem(root, "extension_mode");
+    if (cJSON_IsString(extension_mode_json)) {
+        char *extension_mode_string = cJSON_GetStringValue(extension_mode_json);
+        uint8_t extension_mode = 0;
+        if (strcmp(extension_mode_string, "OFF") == 0) {
+            extension_mode = 0;
+        } else if (strcmp(extension_mode_string, "BUTTONS") == 0) {
+            extension_mode = 1;
+        } else if (strcmp(extension_mode_string, "RELAIS") == 0) {
+            extension_mode = 4;
+        } else if (strcmp(extension_mode_string, "SWROLLERSHUTTER") == 0) {
+            extension_mode = 6;
+        } else if (strcmp(extension_mode_string, "HWROLLERSHUTTER") == 0) {
+            extension_mode = 7;
+        } else if (strcmp(extension_mode_string, "PWM") == 0) {
+            extension_mode = 3;
+        } else if (strcmp(extension_mode_string, "SENSORS") == 0) {
+            extension_mode = 2;
+        } else if (strcmp(extension_mode_string, "LEGACY_SENSORS") == 0) {
+            extension_mode = 5;
+        }
+
+        send_can_command(root, ICAN::MSG_ID_t::EXTENSION_MODE, &extension_mode, 1, false);
     }
 
     cJSON *custom_string_json = cJSON_GetObjectItem(root, "custom_string");
@@ -289,15 +311,19 @@ void Command::save_device(char *cmd, cJSON *root) {
         }
         send_can_command(root, ICAN::MSG_ID_t::CUSTOM_STRING, &custom_string[0], min_len, false);
     }
-    cJSON *rollershutter_mode_json = cJSON_GetObjectItem(root, "rollershutter_mode");
-    if (cJSON_IsString(rollershutter_mode_json)) {
-        char *rollershutter_mode_string = cJSON_GetStringValue(rollershutter_mode_json);
-        uint8_t rollershutter_mode = 1;
-        if (strcmp(rollershutter_mode_string, "HARDWARE") == 0) {
-            rollershutter_mode = 2;
+    cJSON *relais_mode_json = cJSON_GetObjectItem(root, "relais_mode");
+    if (cJSON_IsString(relais_mode_json)) {
+        char *relais_mode_string = cJSON_GetStringValue(relais_mode_json);
+        uint8_t relais_mode = 0;
+        if (strcmp(relais_mode_string, "RELAIS") == 0) {
+            relais_mode = 1;
+        } else if (strcmp(relais_mode_string, "SWROLLERSHUTTER") == 0) {
+            relais_mode = 2;
+        } else if (strcmp(relais_mode_string, "HWROLLERSHUTTER") == 0) {
+            relais_mode = 3;
         }
 
-        send_can_command(root, ICAN::MSG_ID_t::ROLLERSHUTTER_MODE, &rollershutter_mode, 1, false);
+        send_can_command(root, ICAN::MSG_ID_t::RELAIS_MODE, &relais_mode, 1, false);
     }
 }
 
