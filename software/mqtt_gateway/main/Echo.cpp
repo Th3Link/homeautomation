@@ -11,7 +11,7 @@ void Echo::init() {}
 
 bool Echo::dispatch(uint32_t identifier, uint8_t *data, unsigned int data_len, bool request) {
     if (ICAN::MSG_COMPARE(identifier, ICAN::MSG_ID_t::ECHO)) {
-        m_can.send(identifier, data, data_len, request);
+        m_can.send(identifier, data, data_len, false);
         return true;
     }
 

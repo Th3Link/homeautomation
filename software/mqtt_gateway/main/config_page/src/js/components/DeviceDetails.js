@@ -27,7 +27,7 @@ export default function DeviceDetails({ device }) {
 
   const handleCommand = async (command) => {
     try {
-      await sendDeviceCommand(command, device.uid);
+      await sendDeviceCommand(command, [device.uid]);
         refreshDevices();
     } catch (error) {
       alert(`Error: ${command} failed - ${error.message}`);
@@ -128,10 +128,11 @@ export default function DeviceDetails({ device }) {
                   onInput=${e => handleChange('relais_mode', e.target.value)}
                   class="config-input"
                 >
-                  <option value="OFF">Off</option>
-                  <option value="RELAIS">Relais</option>
-                  <option value="SWROLLERSHUTTER">Software Rollershutter</option>
-                  <option value="HWROLLERSHUTTER">Hardware Rollershutter</option>
+
+                  <option value="OFF" selected=${device.relais_mode === 'OFF'}>Off</option>
+                  <option value="RELAIS" selected=${device.relais_mode === 'RELAIS'}>Relais</option>
+                  <option value="SWROLLERSHUTTER" selected=${device.relais_mode === 'SWROLLERSHUTTER'}>Software Rollershutter</option>
+                  <option value="HWROLLERSHUTTER" selected=${device.relais_mode === 'HWROLLERSHUTTER'}>Hardware Rollershutter</option>
                 </select>
               </div>
       
@@ -142,14 +143,14 @@ export default function DeviceDetails({ device }) {
                   onInput=${e => handleChange('extension_mode', e.target.value)}
                   class="config-input"
                 >
-                  <option value="OFF">Off</option>
-                  <option value="BUTTONS">Buttons</option>
-                  <option value="RELAIS">Relais</option>
-                  <option value="SWROLLERSHUTTER">Software Rollershutter</option>
-                  <option value="HWROLLERSHUTTER">Hardware Rollershutter</option>
-                  <option value="PWM">PWM</option>
-                  <option value="SENSORS">Sensors</option>
-                  <option value="LEGACY_SENSORS">Legacy Sensors</option>
+                  <option value="OFF" selected=${device.extension_mode === 'OFF'}>Off</option>
+                  <option value="BUTTONS" selected=${device.extension_mode === 'BUTTONS'}>Buttons</option>
+                  <option value="RELAIS" selected=${device.extension_mode === 'RELAIS'}>Relais</option>
+                  <option value="SWROLLERSHUTTER" selected=${device.extension_mode === 'SWROLLERSHUTTER'}>Software Rollershutter</option>
+                  <option value="HWROLLERSHUTTER" selected=${device.extension_mode === 'HWROLLERSHUTTER'}>Hardware Rollershutter</option>
+                  <option value="PWM" selected=${device.extension_mode === 'PWM'}>PWM</option>
+                  <option value="SENSORS" selected=${device.extension_mode === 'SENSORS'}>Sensors</option>
+                  <option value="LEGACY_SENSORS" selected=${device.extension_mode === 'LEGACY_SENSORS'}>Legacy Sensors</option>
                 </select>
               </div>
             </div>
