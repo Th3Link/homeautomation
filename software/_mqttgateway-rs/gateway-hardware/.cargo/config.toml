@@ -1,0 +1,17 @@
+[target.xtensa-esp32-none-elf]
+runner = "espflash flash --partition-table ./partitions.csv --monitor --chip esp32 --erase-parts otadata"
+
+[env]
+
+[build]
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+]
+
+target = "xtensa-esp32-none-elf"
+
+[unstable]
+# "alloc" is needed once esp-radio (WiFi) is in the dependency graph — it
+# (and its esp-alloc-backed global allocator) needs a real heap, unlike
+# everything else in this crate which stays on heapless/static allocation.
+build-std = ["core", "alloc"]
