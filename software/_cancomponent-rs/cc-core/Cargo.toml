@@ -1,0 +1,14 @@
+[package]
+edition      = "2021"
+name         = "cancomponents-core"
+version      = "0.3.0"
+rust-version = "1.97"
+license      = "GPL-3.0-or-later"
+
+[dependencies]
+embedded-can     = { version = "0.4.1"}
+embassy-time     = { version = "0.5"}
+embassy-sync     = { version = "0.8"}
+heapless         = { version = "0.8.0"}
+async-trait      = { version = "0.1"}
+num_enum         = { version = "0.7", default-features = false }
