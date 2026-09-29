@@ -10,6 +10,7 @@ pub mod config;
 pub mod console;
 pub mod device_list;
 pub mod echo;
+pub mod ethernet;
 pub mod flash;
 pub mod logging;
 pub mod mqtt;

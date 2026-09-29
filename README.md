@@ -50,8 +50,15 @@ reproduced as-is.
 
 The gateway sits on a CAN (TWAI) bus shared with relay/rollershutter/
 button nodes (see [`cancomponent-rs`](https://github.com/mier88/cancomponent-rs)
-for one such node firmware, speaking the same CAN wire format), and on
-WiFi for MQTT/the web UI.
+for one such node firmware, speaking the same CAN wire format), and reaches
+MQTT/the web UI over the network — normally wired Ethernet (the ESP32's
+built-in EMAC, over RMII to an external PHY), since these gateways are
+typically installed hardwired next to the CAN bus wiring. WiFi is a
+fallback for installs without a wired drop, automatically used only when
+no Ethernet link comes up — the two can't safely run at once on this board
+(its RMII reference clock is APLL-derived, which esp-hal's own docs warn
+is unstable while WiFi is active), so the gateway never brings both up
+together.
 
 ## Building & flashing
 
