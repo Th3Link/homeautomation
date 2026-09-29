@@ -1,0 +1,119 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; a newer push wins over one still in
+# flight rather than queuing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  # gateway-core carries the project documentation itself (requirements,
+  # ADRs, the CAN/MQTT protocol specs, technical debt — see
+  # gateway-core/src/docs.rs) alongside its own API docs, and builds on
+  # plain stable Rust.
+  docs-core:
+    name: docs / gateway-core
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-core
+          path: target/doc
+
+  # gateway-hardware only has its own API docs (no project documentation
+  # of its own) but is published alongside gateway-core's for completeness
+  # — it needs the pinned "esp" toolchain channel, same as building it.
+  docs-hardware:
+    name: docs / gateway-hardware
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway-hardware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: esp32
+          version: "1.97.0"
+      - run: cargo doc --no-deps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-hardware
+          path: target/xtensa-esp32-none-elf/doc
+
+  # Combines both crates' doc output into one site with a landing page,
+  # since they're built by different jobs (different toolchains) and
+  # can't share a `target/doc` directory.
+  build-site:
+    name: docs / assemble site
+    needs: [docs-core, docs-hardware]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-core
+          path: site/gateway-core
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-hardware
+          path: site/gateway-hardware
+      - name: Write landing page
+        run: |
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>mqttgateway-rs docs</title>
+          </head>
+          <body>
+            <h1>mqttgateway-rs</h1>
+            <ul>
+              <li>
+                <a href="gateway-core/gateway_core/index.html">gateway-core</a>
+                &mdash; requirements, ADRs, CAN/MQTT protocol specs, technical
+                debt, and the crate's own API reference
+              </li>
+              <li>
+                <a href="gateway-hardware/gateway_hardware/index.html">gateway-hardware</a>
+                &mdash; firmware API reference
+              </li>
+            </ul>
+          </body>
+          </html>
+          HTML
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: docs / deploy
+    needs: build-site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

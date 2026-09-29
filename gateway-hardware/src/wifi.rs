@@ -41,7 +41,7 @@ const AP_SUFFIX: &str = "_ap";
 
 static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
 
-/// What WiFi bring-up actually settled on — the caller ([`crate::net`])
+/// What WiFi bring-up actually settled on — the caller ([`init_stack`])
 /// needs this to pick a static (AP) vs. DHCP (station) network config.
 pub enum Outcome {
     Station(Interface),
@@ -50,7 +50,7 @@ pub enum Outcome {
 
 /// Brings up WiFi per `mode`/`ssid`/`password` (already resolved through
 /// [`gateway_core::config::resolve_wifi_credentials`] by the caller): tries
-/// station mode with up to [`MAX_STA_RETRIES`] connection attempts, falling
+/// station mode with up to `MAX_STA_RETRIES` connection attempts, falling
 /// back to a `<ssid>_ap` access point (matching `WiFi::init_client`'s
 /// `strcat(m_ssid, "_ap")`) if every attempt fails. `mode ==
 /// `[`WifiMode::AccessPoint`] skips straight to the access point;

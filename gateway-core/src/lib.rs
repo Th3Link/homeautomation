@@ -40,6 +40,7 @@ pub mod config;
 pub mod device_list;
 pub mod device_message;
 pub mod device_type;
+pub mod docs;
 pub mod error;
 pub mod helper;
 pub mod lamp;

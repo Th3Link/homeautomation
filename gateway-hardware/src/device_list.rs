@@ -1,5 +1,6 @@
 //! Async singleton wrapper around [`gateway_core::device_list::DeviceTable`],
-//! fed by [`crate::can`]'s receive task and read by [`crate::web`] for
+//! fed by [`crate::can`]'s receive task and (once implemented — see
+//! `docs/technical-debt.md`) meant to be read by the web config server for
 //! `/state.json`.
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;

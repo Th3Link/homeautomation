@@ -6,7 +6,7 @@
 //! runs with `enable_filter=false` (it needs to see every device's
 //! traffic to bridge it to MQTT, unlike a single-purpose node), so the
 //! hardware acceptance filter here is wired wide open
-//! ([`ACCEPT_ALL_ID`]/[`ACCEPT_ALL_RTR`]) rather than narrowed to one
+//! (`ACCEPT_ALL_ID`/`ACCEPT_ALL_RTR`) rather than narrowed to one
 //! device's own id/type. There's also no single "this device" dispatch
 //! table walk — [`dispatch`] calls each interested handler directly,
 //! which is behaviorally the same as the original's
@@ -29,7 +29,7 @@ use crate::console_log;
 use crate::device_list::{now_minutes, DEVICE_LIST};
 
 /// Outgoing frames queued by [`send_can_message`]/[`send_raw`], drained by
-/// [`can_send_task`].
+/// `can_send_task`.
 pub static CAN_CHANNEL: Channel<CriticalSectionRawMutex, EspTwaiFrame, 32> = Channel::new();
 
 /// Mirrors `config::Key::CanId`; seeded at boot, updated live if the

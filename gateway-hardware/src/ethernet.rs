@@ -27,7 +27,7 @@
 //! brought up at the same time (silent corruption otherwise, not just a
 //! conflict error). [`bring_up`] enforces this: it tries Ethernet first
 //! and only initializes WiFi at all if no link comes up within
-//! [`LINK_TIMEOUT`].
+//! `LINK_TIMEOUT`.
 
 use crate::console_log;
 use embassy_executor::Spawner;
@@ -80,7 +80,7 @@ pub struct EthernetPins {
 }
 
 /// Pulses the PHY's reset line, brings up the EMAC over RMII, and waits up
-/// to [`LINK_TIMEOUT`] for a link. Returns `None` if no link came up (the
+/// to `LINK_TIMEOUT` for a link. Returns `None` if no link came up (the
 /// caller should fall back to WiFi).
 pub async fn bring_up(pins: EthernetPins) -> Option<EthDriver> {
     // Active-low reset: hold low, then release and let the PHY's internal

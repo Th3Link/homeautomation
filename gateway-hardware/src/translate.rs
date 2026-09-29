@@ -214,7 +214,8 @@ async fn send_command(target_key: u32, msg_type: CanMessageType, data: &[u8]) {
 }
 
 /// `Command::save_device`'s `DeviceIdType`/`DeviceUid0`/`DeviceUid1` triple
-/// — exposed for [`crate::web`]'s `/control.json` handler.
+/// — exposed for the web config server's (not yet implemented — see
+/// `docs/technical-debt.md`) `/control.json` handler.
 pub async fn send_device_id_type(target_key: u32, device_id: u8, device_type: u8) {
     send_command(
         target_key,

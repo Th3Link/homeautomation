@@ -2,8 +2,9 @@
 //! ([`crate::console`]).
 //!
 //! Plain `esp_println::println!` output racing with the console's line
-//! editor corrupts the prompt/cursor position on screen. [`console_log!`]
-//! is a drop-in replacement that silently drops its output while
+//! editor corrupts the prompt/cursor position on screen.
+//! [`console_log!`](crate::console_log) is a drop-in replacement that
+//! silently drops its output while
 //! [`CLI_ACTIVE`] is set, i.e. whenever a technician has actually dropped
 //! into the console. It has no effect otherwise. Mirrors
 //! `cancomponent-rs/cc-hardware`'s `logging.rs`.
