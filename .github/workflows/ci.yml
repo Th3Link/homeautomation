@@ -63,7 +63,7 @@ jobs:
             cargo llvm-cov report --summary-only
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.crate }}-coverage
           path: software/${{ matrix.crate }}/lcov.info
@@ -159,7 +159,7 @@ jobs:
           mkdir -p dist
           cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}" dist/firmware.elf
           cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}.bin" dist/firmware.bin
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.crate }}-${{ matrix.profile }}
           path: software/${{ matrix.crate }}/dist/
@@ -194,7 +194,7 @@ jobs:
       # scopes `cargo-sbom` to the one crate without needing to cd.
       - name: Generate SPDX SBOM
         run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package ${{ matrix.pkg }} > ${{ matrix.crate }}.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.crate }}-sbom
           path: ${{ matrix.crate }}.spdx.json
