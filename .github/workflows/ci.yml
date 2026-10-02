@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The *-core crates (common-core, gateway-core, cancomponents-core) are
+  # plain #![no_std]-but-host-testable Rust: fmt, clippy, and the test
+  # suite all run on a normal stable toolchain, no ESP toolchain needed.
+  core-fmt-clippy:
+    name: ${{ matrix.crate }} / fmt & clippy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [common-core, gateway-core, cancomponents-core]
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+
+  core-coverage:
+    name: ${{ matrix.crate }} / nextest & coverage
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [common-core, gateway-core, cancomponents-core]
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+      - name: Run tests under coverage
+        run: cargo llvm-cov nextest --no-report
+      - name: Generate lcov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Write coverage summary
+        run: |
+          {
+            echo "### ${{ matrix.crate }} coverage"
+            echo '```'
+            cargo llvm-cov report --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.crate }}-coverage
+          path: software/${{ matrix.crate }}/lcov.info
+
+  core-msrv:
+    name: ${{ matrix.crate }} / MSRV
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [common-core, gateway-core, cancomponents-core]
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+      - name: Verify declared rust-version actually builds
+        run: cargo msrv verify
+
+  # The *-hardware crates (common-hardware, gateway-hardware,
+  # cancomponents-hardware) only ever build with the custom "esp" toolchain
+  # channel each pins in its own rust-toolchain.toml, so they can't run
+  # `cargo test`/`cargo msrv` (no native target, no rustup release matching
+  # that channel). fmt + clippy still apply directly.
+  hardware-fmt-clippy:
+    name: ${{ matrix.crate }} / fmt & clippy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [common-hardware, gateway-hardware, cancomponents-hardware]
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: esp32
+          version: "1.97.0"
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+
+  # common-hardware has no [[bin]] (it's a library only) so it's skipped
+  # here and in the SBOM job below — nothing flashable to build or archive.
+  #
+  # Builds both profiles and archives the flashable firmware as workflow
+  # artifacts. Every push/PR/tag gets a downloadable build; pushing a `v*`
+  # tag additionally publishes the release build as a GitHub Release, see
+  # release.yml.
+  firmware-build:
+    name: ${{ matrix.crate }} / build (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [gateway-hardware, cancomponents-hardware]
+        profile: [debug, release]
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: esp32
+          version: "1.97.0"
+      - name: Install espflash
+        # Needed by build.rs, which shells out to `espflash save-image` to
+        # turn the linked ELF into a flashable raw image.
+        run: |
+          curl -sSL -o /tmp/espflash.zip "https://github.com/esp-rs/espflash/releases/latest/download/espflash-x86_64-unknown-linux-gnu.zip"
+          mkdir -p "$HOME/.local/bin"
+          unzip -o /tmp/espflash.zip -d "$HOME/.local/bin"
+          chmod +x "$HOME/.local/bin/espflash"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: cargo build ${{ matrix.profile == 'release' && '--release' || '' }}
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp "target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.crate == 'gateway-hardware' && 'gateway-hardware' || 'cancomponents' }}" dist/firmware.elf
+          cp "target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.crate == 'gateway-hardware' && 'gateway-hardware' || 'cancomponents' }}.bin" dist/firmware.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.crate }}-${{ matrix.profile }}
+          path: software/${{ matrix.crate }}/dist/
+
+  firmware-sbom:
+    name: ${{ matrix.crate }} / SBOM
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        crate: [gateway-hardware, cancomponents-hardware]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-sbom
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL -o "$HOME/.local/bin/cargo-sbom" "https://github.com/psastras/sbom-rs/releases/download/cargo-sbom-latest/cargo-sbom-x86_64-unknown-linux-gnu"
+          chmod +x "$HOME/.local/bin/cargo-sbom"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Diagnose firmware project
+        run: |
+          echo "=== project ==="
+          ls -la "software/${{ matrix.crate }}"
+          echo "=== toolchains ==="
+          rustup toolchain list
+          echo "=== cargo metadata ==="
+          cd "software/${{ matrix.crate }}"
+          cargo metadata --format-version 1 --no-deps
+      - name: Generate SPDX SBOM
+        run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package software/${{ matrix.crate }} > ${{ matrix.crate }}.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.crate }}-sbom
+          path: ${{ matrix.crate }}.spdx.json

@@ -1,8 +1,0 @@
-# Build output
-/target/
-
-# Reference-only directories, not part of this project (see README.md) —
-# left in place on disk but out of scope for this repository.
-/mqtt_gateway/
-/library/
-/cancomponent-rs/
