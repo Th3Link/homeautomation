@@ -157,7 +157,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [gateway-hardware, cancomponents-hardware]
+        include:
+          # `--cargo-package` takes the Cargo *package* name, not a path —
+          # cancomponents-hardware's package is still named "cancomponents"
+          # (see its Cargo.toml). Passing the directory path there doesn't
+          # error, it silently produces an SBOM with zero packages in it.
+          - crate: gateway-hardware
+            pkg: gateway-hardware
+          - crate: cancomponents-hardware
+            pkg: cancomponents
     steps:
       - uses: actions/checkout@v5
       - name: Install cargo-sbom
@@ -166,17 +174,14 @@ jobs:
           curl -sSL -o "$HOME/.local/bin/cargo-sbom" "https://github.com/psastras/sbom-rs/releases/download/cargo-sbom-latest/cargo-sbom-x86_64-unknown-linux-gnu"
           chmod +x "$HOME/.local/bin/cargo-sbom"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Diagnose firmware project
-        run: |
-          echo "=== project ==="
-          ls -la "software/${{ matrix.crate }}"
-          echo "=== toolchains ==="
-          rustup toolchain list
-          echo "=== cargo metadata ==="
-          cd "software/${{ matrix.crate }}"
-          cargo metadata --format-version 1 --no-deps
+      # Run from the repo root (not cd'd into the crate dir): this job
+      # never installs the esp toolchain, and `software/${{ matrix.crate
+      # }}/rust-toolchain.toml` pins it — a stray `cd` in there before any
+      # cargo invocation trips rustup's directory-based override and fails
+      # outright, even for a metadata-only command. `--cargo-package`
+      # scopes `cargo-sbom` to the one crate without needing to cd.
       - name: Generate SPDX SBOM
-        run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package software/${{ matrix.crate }} > ${{ matrix.crate }}.spdx.json
+        run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package ${{ matrix.pkg }} > ${{ matrix.crate }}.spdx.json
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.crate }}-sbom

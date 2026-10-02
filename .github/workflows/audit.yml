@@ -5,12 +5,12 @@ on:
     branches: [main]
     paths:
       - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - "Cargo.lock"
       - .github/workflows/audit.yml
   pull_request:
     paths:
       - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - "Cargo.lock"
       - .github/workflows/audit.yml
   schedule:
     # Catch newly published advisories against dependencies that haven't
@@ -23,48 +23,42 @@ permissions:
   contents: read
 
 jobs:
+  # One shared Cargo.lock for all six crates, so one audit of it covers
+  # the whole workspace — running this matrixed per crate (as it used to
+  # be, back when each crate had its own lockfile) just re-audited the
+  # same resolved graph six times, and rustsec/audit-check actually
+  # expects a per-directory Cargo.lock to exist (it runs
+  # `cargo audit --file <working-directory>/Cargo.lock`), which broke
+  # outright once only the workspace root had one.
   advisories:
-    name: ${{ matrix.crate }} / advisories
+    name: workspace / advisories
     runs-on: ubuntu-latest
     permissions:
       checks: write
       issues: write
-    strategy:
-      matrix:
-        crate:
-          - common-core
-          - common-hardware
-          - gateway-core
-          - gateway-hardware
-          - cancomponents-core
-          - cancomponents-hardware
     steps:
       - uses: actions/checkout@v5
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: software/${{ matrix.crate }}
 
   # License compliance: this project is GPL-3.0-or-later, so every
   # dependency's license needs to actually be compatible with that. See
-  # each crate's own deny.toml for the allow-list — a new dependency with
-  # an unreviewed license fails this instead of silently being distributed
+  # the root deny.toml for the allow-list — a new dependency with an
+  # unreviewed license fails this instead of silently being distributed
   # under it.
+  #
+  # Also workspace-wide, for the same Cargo.lock reason as above — and
+  # per-crate didn't just duplicate work here, it was broken for every
+  # *-hardware crate specifically: cargo-deny's own `cargo metadata` call
+  # picks up whichever crate's rust-toolchain.toml is under its working
+  # directory, and the "esp" channel those pin isn't installed in
+  # cargo-deny-action's container.
   licenses:
-    name: ${{ matrix.crate }} / licenses
+    name: workspace / licenses
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        crate:
-          - common-core
-          - common-hardware
-          - gateway-core
-          - gateway-hardware
-          - cancomponents-core
-          - cancomponents-hardware
     steps:
       - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          manifest-path: software/${{ matrix.crate }}/Cargo.toml
           command-arguments: licenses
