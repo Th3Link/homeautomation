@@ -5,7 +5,7 @@
         "preact": "10.26",
         "htm": "3.1",
         "crc-32": "1.2",
-        "esbuild": "^0.25.8"
+        "esbuild": "^0.28.0"
     },
     "scripts": {
         "build": "node build.js",
