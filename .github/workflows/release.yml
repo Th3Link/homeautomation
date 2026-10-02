@@ -1,0 +1,63 @@
+name: Release
+
+# Any `v*` tag builds and releases *both* firmwares together, as separate
+# assets on one GitHub Release — this repo doesn't (yet) tag the gateway
+# and the CAN nodes independently. If that's ever needed, split this into
+# tag-prefix-gated jobs (e.g. `gateway-v*` / `cancomponents-v*`) instead.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: ${{ matrix.crate }} / release
+    runs-on: ubuntu-latest
+    strategy:
+      # Serialized: both jobs create-or-update the same GitHub Release for
+      # this tag, which races if they run concurrently.
+      max-parallel: 1
+      matrix:
+        include:
+          - crate: gateway-hardware
+            bin: gateway-hardware
+          - crate: cancomponents-hardware
+            bin: cancomponents
+    defaults:
+      run:
+        working-directory: software/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: esp32
+          version: "1.97.0"
+      - name: Install espflash
+        # Needed by build.rs, which shells out to `espflash save-image` to
+        # turn the linked ELF into a flashable raw image.
+        run: |
+          curl -sSL -o /tmp/espflash.zip "https://github.com/esp-rs/espflash/releases/latest/download/espflash-x86_64-unknown-linux-gnu.zip"
+          unzip -o /tmp/espflash.zip -d "$HOME/.local/bin"
+          chmod +x "$HOME/.local/bin/espflash"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install cargo-sbom
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL -o "$HOME/.local/bin/cargo-sbom" "https://github.com/psastras/sbom-rs/releases/download/cargo-sbom-latest/cargo-sbom-x86_64-unknown-linux-gnu"
+          chmod +x "$HOME/.local/bin/cargo-sbom"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: cargo build --release
+      - name: Generate SPDX SBOM
+        run: cargo-sbom --output-format=spdx_json_2_3 --project-directory . > ${{ matrix.crate }}.spdx.json
+      - name: Stage release assets
+        run: |
+          mkdir -p dist
+          cp "target/xtensa-esp32-none-elf/release/${{ matrix.bin }}" "dist/${{ matrix.crate }}-${{ github.ref_name }}.elf"
+          cp "target/xtensa-esp32-none-elf/release/${{ matrix.bin }}.bin" "dist/${{ matrix.crate }}-${{ github.ref_name }}.bin"
+          cp ${{ matrix.crate }}.spdx.json "dist/${{ matrix.crate }}-${{ github.ref_name }}.spdx.json"
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: software/${{ matrix.crate }}/dist/*
+          generate_release_notes: true

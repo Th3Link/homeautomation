@@ -1,0 +1,55 @@
+[package]
+name = "gateway-hardware"
+description = "ESP32 mqtt-gateway firmware (esp-hal + embassy)"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+build = "build.rs"
+# Informational only: gateway-hardware builds with the pinned "esp" rustup
+# channel (see rust-toolchain.toml), a custom Xtensa fork of nightly, not a
+# stable release. `cargo-msrv` cannot verify this value against that
+# toolchain, so it's kept in sync with gateway-core's MSRV by hand.
+rust-version.workspace = true
+
+[[bin]]
+name = "gateway-hardware"
+path = "./src/bin/main.rs"
+
+[dependencies]
+critical-section = { version = "1.2" }
+esp-hal = { version = "1.2.2", features = ["esp32", "unstable"] }
+esp-println = { version = "0.18", features = ["esp32"] }
+esp-backtrace = { version = "0.20", features = ["esp32", "println", "panic-handler"] }
+esp-hal-ota = { version = "0.6", features = ["esp32"] }
+esp-storage = { version = "0.10", features = ["esp32", "embedded-storage"] }
+nb = { version = "1.1" }
+embassy-executor = { version = "0.10" }
+embassy-sync = { version = "0.8" }
+embassy-time = { version = "0.5" }
+embassy-futures = { version = "0.1" }
+embassy-embedded-hal = { version = "0.6" }
+esp-rtos = { version = "0.4", features = ["esp32", "embassy", "esp-radio"] }
+embedded-can = { version = "0.4" }
+embedded-io-async = { version = "0.7" }
+embedded-storage = { version = "0.3" }
+static_cell = { version = "2.1", features = ["nightly"] }
+heapless = { version = "0.9" }
+async-trait = { version = "0.1" }
+sequential-storage = { version = "8.0" }
+bareminal_cli = { version = "0.3", default-features = false, features = ["async-no-std"] }
+bareminal_macros = { version = "0.3" }
+num_enum = { version = "0.7", default-features = false }
+thiserror = { version = "2", default-features = false }
+gateway-core = { path = "../gateway-core/" }
+common-hardware = { path = "../common-hardware/" }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32", "wifi", "unstable"] }
+embassy-net = { version = "0.9.1", features = ["proto-ipv4", "dhcpv4", "tcp", "dns", "medium-ethernet"] }
+esp-alloc = "0.11.0"
+rust-mqtt = { version = "0.6.0", default-features = false, features = ["bump", "v3", "v5"] }
+picoserve = { version = "0.20.1", features = ["embassy", "json"] }
+
+[build-dependencies]
+vergen-git2 = { version = "10", features = ["build", "cargo", "rustc", "si"] }
+
+# [profile.*] must live in the workspace root manifest (../Cargo.toml) —
+# Cargo ignores profile sections in member manifests.

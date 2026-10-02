@@ -1,3 +1,9 @@
+# Rust build output (the workspace at the repo root, plus any stray
+# per-crate target/ from building a *-hardware crate standalone).
+/target/
+software/*/target/
+
+# Legacy C++/ESP-IDF build output (software/legacy/).
 **/build/*
 software/**/*.bin
 software/**/*.hexdump

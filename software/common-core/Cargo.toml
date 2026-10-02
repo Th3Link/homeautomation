@@ -1,0 +1,11 @@
+[package]
+name = "common-core"
+description = "Hardware-independent CAN wire-format types shared by gateway-core and cancomponents-core"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+embedded-can = { version = "0.4.1" }
+num_enum = { version = "0.7", default-features = false }
