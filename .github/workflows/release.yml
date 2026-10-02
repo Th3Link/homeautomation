@@ -62,10 +62,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package ${{ matrix.bin }} > software/${{ matrix.crate }}/${{ matrix.crate }}.spdx.json
       - name: Stage release assets
+        # Build output lands in the *workspace* root's target/ (one
+        # Cargo.lock for all six crates), not software/${{ matrix.crate
+        # }}/target/ — cwd here is the latter, so reach it via
+        # github.workspace rather than a bare relative "target/...".
         run: |
           mkdir -p dist
-          cp "target/xtensa-esp32-none-elf/release/${{ matrix.bin }}" "dist/${{ matrix.crate }}-${{ github.ref_name }}.elf"
-          cp "target/xtensa-esp32-none-elf/release/${{ matrix.bin }}.bin" "dist/${{ matrix.crate }}-${{ github.ref_name }}.bin"
+          cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/release/${{ matrix.bin }}" "dist/${{ matrix.crate }}-${{ github.ref_name }}.elf"
+          cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/release/${{ matrix.bin }}.bin" "dist/${{ matrix.crate }}-${{ github.ref_name }}.bin"
           cp ${{ matrix.crate }}.spdx.json "dist/${{ matrix.crate }}-${{ github.ref_name }}.spdx.json"
       - uses: softprops/action-gh-release@v3
         with:
