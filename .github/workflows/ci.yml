@@ -121,8 +121,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [gateway-hardware, cancomponents-hardware]
         profile: [debug, release]
+        include:
+          # matrix.bin is the Cargo *package*/binary name, which isn't
+          # always the same as the crate directory — cancomponents-
+          # hardware's package is still called "cancomponents".
+          - crate: gateway-hardware
+            bin: gateway-hardware
+          - crate: cancomponents-hardware
+            bin: cancomponents
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}
@@ -143,10 +150,15 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: cargo build ${{ matrix.profile == 'release' && '--release' || '' }}
       - name: Stage artifacts
+        # The build output lands in the *workspace* root's target/ (one
+        # Cargo.lock for all six crates), not software/${{ matrix.crate
+        # }}/target/ — cwd here is the latter (this job's default
+        # working-directory), so reach it via github.workspace rather
+        # than a bare relative "target/...".
         run: |
           mkdir -p dist
-          cp "target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.crate == 'gateway-hardware' && 'gateway-hardware' || 'cancomponents' }}" dist/firmware.elf
-          cp "target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.crate == 'gateway-hardware' && 'gateway-hardware' || 'cancomponents' }}.bin" dist/firmware.bin
+          cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}" dist/firmware.elf
+          cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}.bin" dist/firmware.bin
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.crate }}-${{ matrix.profile }}
