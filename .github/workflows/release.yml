@@ -49,8 +49,18 @@ jobs:
           chmod +x "$HOME/.local/bin/cargo-sbom"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: cargo build --release
+      # Must run from the workspace root, not this job's default
+      # (software/${{ matrix.crate }}): cargo-sbom's SPDX output embeds
+      # license-file paths it resolves relative to wherever it thinks the
+      # project root is, and pointing --project-directory at a workspace
+      # *member* directory makes it guess wrong and panic trying to read
+      # another member's license file. --cargo-package scopes the SBOM to
+      # just this one crate's dependency tree while running from the real
+      # root. (matrix.bin is also the Cargo *package* name here —
+      # cancomponents-hardware's package is still called "cancomponents".)
       - name: Generate SPDX SBOM
-        run: cargo-sbom --output-format=spdx_json_2_3 --project-directory . > ${{ matrix.crate }}.spdx.json
+        working-directory: ${{ github.workspace }}
+        run: cargo-sbom --output-format=spdx_json_2_3 --cargo-package ${{ matrix.bin }} > software/${{ matrix.crate }}/${{ matrix.crate }}.spdx.json
       - name: Stage release assets
         run: |
           mkdir -p dist

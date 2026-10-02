@@ -1,0 +1,29 @@
+# cargo-deny config — see https://embarkstudios.github.io/cargo-deny/
+#
+# One workspace-wide config: there's a single Cargo.lock for all six
+# crates, so checking licenses per-crate was redundant (same resolved
+# graph every time) and, for the *-hardware crates specifically, broken —
+# cargo-deny's own `cargo metadata` call picks up whichever crate's
+# rust-toolchain.toml happens to be under its working directory, and the
+# "esp" channel it pins isn't installed in cargo-deny-action's container.
+# Running this once, from the repo root, against the workspace manifest
+# avoids both problems.
+#
+# Only the license check is used here (`cargo deny check licenses`).
+# Vulnerability advisories are already covered by the separate cargo-audit
+# based "Security audit" workflow, so `[advisories]`/`[bans]`/`[sources]`
+# are left at their defaults and unused.
+
+[licenses]
+# Every license actually present anywhere in the workspace's dependency
+# tree, plus our own GPL-3.0-or-later. A new dependency pulling in
+# something else fails CI until it's reviewed and added here deliberately.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+    "GPL-3.0-or-later",
+    "ISC",
+    "0BSD",
+]
+confidence-threshold = 0.8
