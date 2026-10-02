@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --no-deps
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docs-${{ matrix.crate }}
           path: target/doc
@@ -63,7 +63,7 @@ jobs:
           buildtargets: esp32
           version: "1.97.0"
       - run: cargo doc --no-deps
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docs-${{ matrix.crate }}
           path: target/xtensa-esp32-none-elf/doc
@@ -76,27 +76,27 @@ jobs:
     needs: [docs-core, docs-hardware]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-common-core
           path: site/common-core
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-common-hardware
           path: site/common-hardware
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-gateway-core
           path: site/gateway-core
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-gateway-hardware
           path: site/gateway-hardware
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-cancomponents-core
           path: site/cancomponents-core
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: docs-cancomponents-hardware
           path: site/cancomponents-hardware
@@ -154,7 +154,7 @@ jobs:
           </html>
           HTML
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
