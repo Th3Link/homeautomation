@@ -1,0 +1,17 @@
+[package]
+name = "common-hardware"
+description = "Shared ESP32 hardware-support helpers for gateway-hardware and cancomponents-hardware"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+esp-hal = { version = "1.2.2", features = ["esp32", "unstable"] }
+esp-storage = { version = "0.10", features = ["esp32", "embedded-storage"] }
+esp-println = { version = "0.18", features = ["esp32"] }
+embassy-sync = { version = "0.8" }
+embassy-embedded-hal = { version = "0.6" }
+embedded-storage = { version = "0.3" }
+heapless = { version = "0.9" }
+sequential-storage = { version = "8.0" }
