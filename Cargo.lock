@@ -1343,6 +1343,7 @@ dependencies = [
  "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
+ "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-hal-ota",
  "esp-println",

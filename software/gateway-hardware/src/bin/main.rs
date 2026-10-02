@@ -11,6 +11,8 @@ use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
 use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update, wifi};
 
+esp_bootloader_esp_idf::esp_app_desc!();
+
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz));
