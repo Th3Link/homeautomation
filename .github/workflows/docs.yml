@@ -76,6 +76,7 @@ jobs:
     needs: [docs-core, docs-hardware]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v8
         with:
           name: docs-common-core
@@ -153,6 +154,30 @@ jobs:
           </body>
           </html>
           HTML
+      # Firmware memory history, one point per main commit — written by
+      # ci.yml's firmware-history job onto the `metrics` branch. Absent until
+      # the first main push after that landed; the page is just skipped then.
+      - uses: actions/checkout@v5
+        id: metrics
+        continue-on-error: true
+        with:
+          ref: metrics
+          path: metrics-branch
+      - name: Render firmware memory history
+        if: steps.metrics.outcome == 'success'
+        run: |
+          python3 .github/scripts/memory_report.py chart \
+            --history metrics-branch/history.json \
+            --out site/firmware-memory/index.html
+          python3 - <<'PY'
+          p = "site/index.html"
+          s = open(p).read()
+          s = s.replace("</body>", """<h2>Firmware memory</h2>
+            <ul><li><a href="firmware-memory/index.html">History</a>
+            &mdash; flash image, static DRAM and stack budget per commit on main</li></ul>
+          </body>""")
+          open(p, "w").write(s)
+          PY
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v5
         with:

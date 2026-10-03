@@ -316,6 +316,127 @@ def report(args):
     print("\n".join(out))
 
 
+# --------------------------------------------------------------- history
+
+HISTORY_KEYS = ("flash_image", "iram", "dram_static", "stack_budget",
+                "app_partition", "dram_total")
+HISTORY_LIMIT = 500  # entries kept; a commit per entry
+
+
+def history(args):
+    """Append this run's metrics to a history.json (one entry per commit)."""
+    entries = []
+    if os.path.exists(args.history):
+        with open(args.history) as f:
+            entries = json.load(f)
+    entries = [e for e in entries if e["sha"] != args.sha]  # re-run: replace
+    entries.append(dict(
+        sha=args.sha, date=args.date, subject=args.subject,
+        firmware={f"{n}/{p}": {k: m[k] for k in HISTORY_KEYS}
+                  for (n, p), m in sorted(load(args.metrics).items())}))
+    entries.sort(key=lambda e: e["date"])
+    with open(args.history, "w") as f:
+        json.dump(entries[-HISTORY_LIMIT:], f, indent=1)
+    print(f"history: {len(entries[-HISTORY_LIMIT:])} entries")
+
+
+CHARTS = [
+    ("flash_image", "Flash image", "app_partition",
+     "of the app partition"),
+    ("dram_static", "Static DRAM (.data + .bss)", "dram_total",
+     "of data RAM"),
+    ("stack_budget", "Stack budget (DRAM left over)", "dram_total",
+     "of data RAM"),
+    ("iram", "IRAM", None, ""),
+]
+PALETTE = ["#2a6fdb", "#e0792a", "#2f9e6e", "#a14fc9"]
+
+
+def svg_chart(entries, firmware, key, title, cap_key, cap_note):
+    series = {}
+    for i, e in enumerate(entries):
+        for fw, m in e["firmware"].items():
+            if fw == f"{firmware}/release":
+                series.setdefault(firmware, []).append((i, m))
+    if not series:
+        return ""
+    W, H, L, R, T, B = 760, 220, 62, 20, 34, 34
+    vals = [m[key] for pts in series.values() for _, m in pts]
+    lo, hi = min(vals), max(vals)
+    pad = max((hi - lo) * 0.15, hi * 0.01, 1)
+    lo, hi = max(0, lo - pad), hi + pad
+    n = max(len(entries) - 1, 1)
+    x = lambda i: L + (W - L - R) * i / n
+    y = lambda v: T + (H - T - B) * (1 - (v - lo) / (hi - lo))
+    o = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{title}">',
+         f'<text x="{L}" y="20" class="t">{title} (KiB, release)</text>']
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        o.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" '
+                 f'class="g"/><text x="{L - 6}" y="{y(v) + 4:.1f}" class="a" '
+                 f'text-anchor="end">{v / 1024:.1f}</text>')
+    step = max(1, len(entries) // 6)
+    for i, e in enumerate(entries):
+        if i % step == 0 or i == len(entries) - 1:
+            o.append(f'<text x="{x(i):.1f}" y="{H - 12}" class="a" '
+                     f'text-anchor="middle">{e["date"][5:10]}</text>')
+    for ci, (name, pts) in enumerate(sorted(series.items())):
+        col = PALETTE[ci % len(PALETTE)]
+        path = " ".join(f"{x(i):.1f},{y(m[key]):.1f}" for i, m in pts)
+        o.append(f'<polyline points="{path}" fill="none" stroke="{col}" '
+                 f'stroke-width="2"/>')
+        for i, m in pts:
+            share = f" — {100 * m[key] / m[cap_key]:.1f} % {cap_note}" if cap_key else ""
+            o.append(
+                f'<circle cx="{x(i):.1f}" cy="{y(m[key]):.1f}" r="3.5" fill="{col}">'
+                f'<title>{name}: {m[key]:,} B ({m[key] / 1024:.1f} KiB){share}\n'
+                f'{entries[i]["sha"][:7]} {entries[i]["subject"]}</title></circle>')
+    o.append("</svg>")
+    return "\n".join(o)
+
+
+def chart(args):
+    with open(args.history) as f:
+        entries = json.load(f)
+    latest = entries[-1]
+    rows = "".join(
+        f"<tr><td><code>{fw}</code></td>"
+        + "".join(f"<td>{m[k] / 1024:.1f}</td>" for k in
+                  ("flash_image", "iram", "dram_static", "stack_budget"))
+        + "</tr>" for fw, m in sorted(latest["firmware"].items()))
+    names = sorted({fw.split("/")[0] for e in entries for fw in e["firmware"]})
+    charts = "\n".join(
+        f"<h2><code>{n}</code></h2>\n"
+        + "\n".join(svg_chart(entries, n, *c) for c in CHARTS)
+        for n in names)
+    html = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Firmware memory history</title>
+<style>
+:root {{ color-scheme: light dark; --fg:#1d2330; --bg:#fff; --mut:#6b7385; --grid:#e3e6ee; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --fg:#e6e9f0; --bg:#14171f; --mut:#9aa2b5; --grid:#2a2f3c; }} }}
+body {{ font:15px/1.5 system-ui,sans-serif; color:var(--fg); background:var(--bg);
+       max-width:820px; margin:0 auto; padding:24px 16px; }}
+svg {{ width:100%; height:auto; margin:8px 0 20px; }}
+.t {{ fill:var(--fg); font-weight:600; font-size:14px; }}
+.a {{ fill:var(--mut); font-size:11px; }} .g {{ stroke:var(--grid); }}
+table {{ border-collapse:collapse; }} td,th {{ padding:4px 12px; text-align:right; }}
+th:first-child,td:first-child {{ text-align:left; }}
+</style></head><body>
+<h1>Firmware memory history</h1>
+<p>One point per commit on <code>main</code> (hover for details). Static DRAM +
+stack budget always add up to the whole data-RAM region; the stack budget is
+what esp-hal's linker script leaves over, not measured stack usage.</p>
+<h2>Latest ({latest["sha"][:7]}, KiB)</h2>
+<table><tr><th>firmware</th><th>flash</th><th>IRAM</th><th>static DRAM</th><th>stack budget</th></tr>{rows}</table>
+{charts}
+</body></html>"""
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w") as f:
+        f.write(html)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -332,6 +453,19 @@ def main():
     r.add_argument("--metrics", required=True)
     r.add_argument("--baseline")
     r.set_defaults(fn=report)
+
+    h = sub.add_parser("history")
+    h.add_argument("--history", required=True)
+    h.add_argument("--metrics", required=True)
+    h.add_argument("--sha", required=True)
+    h.add_argument("--date", required=True)
+    h.add_argument("--subject", default="")
+    h.set_defaults(fn=history)
+
+    c = sub.add_parser("chart")
+    c.add_argument("--history", required=True)
+    c.add_argument("--out", required=True)
+    c.set_defaults(fn=chart)
 
     args = ap.parse_args()
     args.fn(args)
