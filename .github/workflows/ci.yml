@@ -218,6 +218,51 @@ jobs:
           name: firmware-metrics
           path: metrics/
 
+  # On pushes to main only: appends this commit's metrics to history.json on
+  # the `metrics` branch (created on first run), then re-runs docs.yml so
+  # the Pages site's firmware-memory page picks up the new point. The
+  # branch holds nothing but that file, so it never touches main's history.
+  firmware-history:
+    name: firmware / metrics history
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: firmware-report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push to the metrics branch
+      actions: write # dispatch docs.yml
+    concurrency:
+      group: metrics-history
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-metrics
+          path: metrics
+      - name: Append to metrics branch
+        run: |
+          url="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if ! git clone --branch metrics --depth 1 "$url" hist 2>/dev/null; then
+            git init -q hist
+            git -C hist checkout -q --orphan metrics
+            git -C hist remote add origin "$url"
+          fi
+          python3 .github/scripts/memory_report.py history \
+            --history hist/history.json --metrics metrics \
+            --sha "${{ github.sha }}" \
+            --date "$(git log -1 --format=%cI)" \
+            --subject "$(git log -1 --format=%s)"
+          cd hist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          git commit -q -m "metrics: ${{ github.sha }}"
+          git push -q origin metrics
+      - name: Refresh docs site
+        run: gh workflow run docs.yml --ref main
+
   firmware-sbom:
     name: ${{ matrix.crate }} / SBOM
     runs-on: ubuntu-latest
