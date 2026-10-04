@@ -28,7 +28,7 @@ Split this port the same way, as two crates in one Cargo workspace:
   callers pass in `now`/state explicitly, nothing reads a clock or touches
   a peripheral. Builds and tests with a plain `cargo test` on any machine.
 - **`gateway-hardware`** — the ESP32 firmware binary. Owns every actual
-  peripheral (CAN/TWAI, Ethernet/WiFi, MQTT/HTTP sockets, flash-backed
+  peripheral (CAN/TWAI, Ethernet, MQTT/HTTP sockets, flash-backed
   config storage, OTA, the serial console) and calls into `gateway-core`
   for all translation/encoding decisions.
 

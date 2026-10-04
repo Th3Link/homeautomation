@@ -11,7 +11,7 @@
 //! `now`/state explicitly rather than this crate reading a clock or doing
 //! I/O), and fully host-testable with `cargo test` — no hardware needed.
 //!
-//! Actual peripheral access (CAN/TWAI, WiFi, MQTT sockets, flash storage,
+//! Actual peripheral access (CAN/TWAI, Ethernet, MQTT sockets, flash storage,
 //! the HTTP config server) lives in the sibling `gateway-hardware` crate,
 //! which drives the types and pure functions defined here.
 
