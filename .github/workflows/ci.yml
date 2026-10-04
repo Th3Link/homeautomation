@@ -163,6 +163,105 @@ jobs:
         with:
           name: ${{ matrix.crate }}-${{ matrix.profile }}
           path: software/${{ matrix.crate }}/dist/
+      # Flash image / IRAM / static DRAM / stack budget, parsed from the
+      # linked ELF — see .github/scripts/memory_report.py for exactly what
+      # each number means. Rendered by the firmware-report job below.
+      - name: Measure memory footprint
+        run: |
+          mkdir -p metrics
+          python3 "${{ github.workspace }}/.github/scripts/memory_report.py" measure dist/firmware.elf \
+            --name ${{ matrix.crate }} --profile ${{ matrix.profile }} \
+            --partitions partitions.csv \
+            --out metrics/${{ matrix.crate }}-${{ matrix.profile }}.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: metrics-${{ matrix.crate }}-${{ matrix.profile }}
+          path: software/${{ matrix.crate }}/metrics/
+
+  # Collects every firmware-build job's metrics into one job summary
+  # (table, bar charts, largest static RAM objects), with a Δ against the
+  # latest successful run on the base branch when there is one. Also
+  # published as a single `firmware-metrics` artifact — that JSON is what a
+  # history/trend graph would be built from.
+  firmware-report:
+    name: firmware / memory report
+    needs: firmware-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # to fetch the base branch's metrics artifact
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: metrics-*
+          merge-multiple: true
+          path: metrics
+      - name: Fetch baseline from base branch
+        # Best effort: no earlier run on the base branch (or no metrics
+        # artifact in it yet) just means no Δ column, never a failure.
+        continue-on-error: true
+        run: |
+          base="${{ github.base_ref || github.ref_name }}"
+          run_id=$(gh run list --workflow ci.yml --branch "$base" --event push \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [ -n "$run_id" ] && gh run download "$run_id" --name firmware-metrics --dir baseline
+      - name: Write report
+        run: |
+          python3 .github/scripts/memory_report.py report --metrics metrics \
+            ${{ github.event_name == 'pull_request' && '--baseline baseline' || '' }} \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-metrics
+          path: metrics/
+
+  # On pushes to main only: appends this commit's metrics to history.json on
+  # the `metrics` branch (created on first run), then re-runs docs.yml so
+  # the Pages site's firmware-memory page picks up the new point. The
+  # branch holds nothing but that file, so it never touches main's history.
+  firmware-history:
+    name: firmware / metrics history
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: firmware-report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push to the metrics branch
+      actions: write # dispatch docs.yml
+    concurrency:
+      group: metrics-history
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware-metrics
+          path: metrics
+      - name: Append to metrics branch
+        run: |
+          url="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if ! git clone --branch metrics --depth 1 "$url" hist 2>/dev/null; then
+            git init -q hist
+            git -C hist checkout -q --orphan metrics
+            git -C hist remote add origin "$url"
+          fi
+          python3 .github/scripts/memory_report.py history \
+            --history hist/history.json --metrics metrics \
+            --sha "${{ github.sha }}" \
+            --date "$(git log -1 --format=%cI)" \
+            --subject "$(git log -1 --format=%s)"
+          cd hist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          git commit -q -m "metrics: ${{ github.sha }}"
+          git push -q origin metrics
+      - name: Refresh docs site
+        run: gh workflow run docs.yml --ref main
 
   firmware-sbom:
     name: ${{ matrix.crate }} / SBOM
