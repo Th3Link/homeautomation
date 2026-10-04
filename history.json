@@ -1,0 +1,25 @@
+[
+ {
+  "sha": "6f3dfed7aed2ef835e9280f3404142ff62593044",
+  "date": "2026-10-04T10:17:27+02:00",
+  "subject": "Merge pull request #4 from Th3Link/reintegrate-rust",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 316564,
+    "iram": 18964,
+    "dram_static": 24008,
+    "stack_budget": 172596,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 301131,
+    "iram": 16036,
+    "dram_static": 23844,
+    "stack_budget": 172760,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
+ }
+]
