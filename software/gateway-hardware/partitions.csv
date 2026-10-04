@@ -1,8 +1,16 @@
 # Espressif ESP32 Partition Table
+#
+# Identical layout to the original C++ gateway (software/legacy/mqtt_gateway),
+# on purpose: no factory app, just two big OTA slots, and — since OTA never
+# rewrites the partition table — a deployed C++ gateway can be updated to
+# this firmware in place. `storage` (SPIFFS) is unused by the Rust firmware
+# but kept so every other offset stays where the old table put it.
+# Keep CONFIG_PARTITION in src/config.rs in sync with `nvs`.
+#
 # Name,     Type,   SubType,    Offset,     Size, Flags
-nvs,        data,   nvs,        0x009000,   0x0F3000,
-otadata,    data,   ota,        0x0FD000,   0x002000,
-phy_init,   data,   phy,        0x0FF000,   0x001000,
-factory,    app,    factory,    0x100000,   0x100000,
-ota_0,      app,    ota_0,      0x200000,   0x100000,
-ota_1,      app,    ota_1,      0x300000,   0x100000,
+nvs,        data,   nvs,        0x009000,   0x043000,
+storage,    data,   spiffs,     0x04D000,   0x019000,
+otadata,    data,   ota,        0x066000,   0x002000,
+phy_init,   data,   phy,        0x068000,   0x001000,
+ota_0,      app,    ota_0,      0x070000,   0x1C0000,
+ota_1,      app,    ota_1,      0x230000,   0x1C0000,
