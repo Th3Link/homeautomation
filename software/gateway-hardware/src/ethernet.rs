@@ -1,8 +1,16 @@
 //! Wired Ethernet bring-up (the ESP32's built-in EMAC over RMII to a
-//! Clause-22 PHY) — mirrors `LAN.cpp`. This is the gateway's **primary**
-//! network path in practice (it's normally installed hardwired next to the
-//! CAN bus wiring); WiFi ([`crate::wifi`]) is the fallback for the minority
-//! of installs without a wired drop.
+//! Clause-22 PHY) — mirrors `LAN.cpp`. This is the gateway's **only**
+//! network path (it's installed hardwired next to the CAN bus wiring; see
+//! ADR 0013 for why WiFi was dropped).
+//!
+//! The network needs no setup: [`init_stack`] runs dual-stack — a DHCPv4
+//! client plus IPv6 SLAAC — so a freshly-flashed gateway just picks up
+//! addresses from the LAN (announcing its configured hostname over DHCP,
+//! so it's findable by name) and everything else — MQTT broker, credentials — is configured over the
+//! serial console. There's deliberately no link-up wait or timeout either:
+//! the EMAC driver reports link state to `embassy-net`, which starts DHCP
+//! when the cable comes up and redoes it if the link drops, so plugging
+//! the cable in late (or swapping it) just works.
 //!
 //! Pin wiring matches `LAN.cpp`'s `eth_esp32_emac_config_t` exactly: the
 //! RMII data pins (RXD0/RXD1/CRS_DV/TXD0/TXD1/TX_EN) are fixed by the ESP32
@@ -19,15 +27,6 @@
 //!   switch, change [`EthernetPins::clock`]'s type here and the
 //!   corresponding `peripherals.GPIO17`/`GPIO16` passed to it in
 //!   `main.rs` — they're the only two wired options on ESP32.
-//!
-//! **Hardware constraint, not just a preference**: esp-hal's own docs warn
-//! the APLL-based clock source ([`esp_hal::ethernet::clock::ApllClock`])
-//! "is unstable when Wi-Fi is active" and esp-hal does no APLL arbitration
-//! between the two — so on this board, Ethernet and WiFi must never be
-//! brought up at the same time (silent corruption otherwise, not just a
-//! conflict error). [`bring_up`] enforces this: it tries Ethernet first
-//! and only initializes WiFi at all if no link comes up within
-//! `LINK_TIMEOUT`.
 
 use crate::console_log;
 use embassy_executor::Spawner;
@@ -48,10 +47,6 @@ const PHY_ADDRESS: u8 = 1;
 /// traffic volume (MQTT + the occasional web UI request, not bulk transfer).
 const RX_DESCRIPTORS: usize = 4;
 const TX_DESCRIPTORS: usize = 4;
-
-/// How long to wait for a link-up after bringing the PHY up before giving
-/// up and falling back to WiFi.
-const LINK_TIMEOUT: Duration = Duration::from_secs(5);
 
 type EthDriver = Ethernet<'static, Async, GenericPhy>;
 
@@ -79,9 +74,9 @@ pub struct EthernetPins {
     pub reset: esp_hal::peripherals::GPIO5<'static>,
 }
 
-/// Pulses the PHY's reset line, brings up the EMAC over RMII, and waits up
-/// to `LINK_TIMEOUT` for a link. Returns `None` if no link came up (the
-/// caller should fall back to WiFi).
+/// Pulses the PHY's reset line and brings up the EMAC over RMII. Returns
+/// `None` only if the EMAC/PHY itself fails to initialize (no PHY answering
+/// on the MDIO bus — a hardware fault, not a missing cable).
 pub async fn bring_up(pins: EthernetPins) -> Option<EthDriver> {
     // Active-low reset: hold low, then release and let the PHY's internal
     // reset sequence settle before any MDIO access (Ethernet::new() does
@@ -112,45 +107,18 @@ pub async fn bring_up(pins: EthernetPins) -> Option<EthDriver> {
         mdio: pins.mdio,
     };
 
-    let mut eth = match Ethernet::new(
+    match Ethernet::new(
         pins.eth,
         storage,
         mac_addr,
         GenericPhy::new(PHY_ADDRESS),
         rmii_pins,
     ) {
-        Ok(eth) => eth.into_async(),
+        Ok(eth) => Some(eth.into_async()),
         Err(e) => {
             console_log!("ethernet: init failed: {e:?}");
-            return None;
-        }
-    };
-
-    console_log!(
-        "ethernet: waiting up to {}s for link",
-        LINK_TIMEOUT.as_secs()
-    );
-    match embassy_time::with_timeout(LINK_TIMEOUT, wait_for_link(&mut eth)).await {
-        Ok(()) => {
-            console_log!("ethernet: link up");
-            Some(eth)
-        }
-        Err(_) => {
-            console_log!(
-                "ethernet: no link after {}s, falling back to wifi",
-                LINK_TIMEOUT.as_secs()
-            );
             None
         }
-    }
-}
-
-async fn wait_for_link(eth: &mut EthDriver) {
-    loop {
-        if eth.poll_link(None).up {
-            return;
-        }
-        Timer::after(Duration::from_millis(100)).await;
     }
 }
 
@@ -159,17 +127,21 @@ async fn net_task(mut runner: Runner<'static, EthDriver>) {
     runner.run().await
 }
 
-/// Starts the `embassy-net` stack over `eth` — DHCP client, matching
-/// `LAN.cpp`'s (ESP-IDF default) behavior.
-pub async fn init_stack(eth: EthDriver, spawner: &Spawner) -> Stack<'static> {
+/// Starts the `embassy-net` stack over `eth` — a DHCPv4 client, matching
+/// `LAN.cpp`'s (ESP-IDF default) behavior, announcing `hostname` (DHCP
+/// option 12; silently omitted if it doesn't fit the 32-byte limit), plus
+/// IPv6 SLAAC (smoltcp has no DHCPv6 client).
+pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> Stack<'static> {
+    let mut dhcp = embassy_net::DhcpConfig::default();
+    dhcp.hostname = heapless::String::try_from(hostname).ok();
+
     let resources = NET_RESOURCES.init(StackResources::new());
     let seed = embassy_time::Instant::now().as_ticks();
-    let (stack, runner) = embassy_net::new(
-        eth,
-        embassy_net::Config::dhcpv4(Default::default()),
-        resources,
-        seed,
-    );
+    // `Config` is #[non_exhaustive]: start from the DHCPv4 constructor and
+    // add SLAAC on top (dual-stack).
+    let mut config = embassy_net::Config::dhcpv4(dhcp);
+    config.ipv6 = embassy_net::ConfigV6::Slaac;
+    let (stack, runner) = embassy_net::new(eth, config, resources, seed);
     spawner.spawn(net_task(runner).unwrap());
     stack
 }

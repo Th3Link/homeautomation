@@ -19,7 +19,7 @@ What's measured, and why these numbers:
   IRAM          .rwtext/.vectors (code placed in internal instruction RAM).
   static DRAM   .data + .bss + .noinit (+ RTC): everything the firmware
                 statically allocates in data RAM — including embassy task
-                futures and esp-alloc's heap, which is a static array.
+                futures and any heap, which would be a static array.
   stack budget  esp-hal's linker script gives the stack *whatever DRAM is
                 left* after static data (the `.stack` section runs up to the
                 end of the DRAM region). That's the stack's *budget*, not
@@ -278,7 +278,7 @@ def report(args):
             f"{delta(m, b, 'stack_budget')} |")
     out += [
         "",
-        "_Static DRAM = `.data` + `.bss` (+ RTC), including esp-alloc's heap "
+        "_Static DRAM = `.data` + `.bss` (+ RTC), including any heap array "
         "and embassy task futures. Stack budget = the DRAM esp-hal's linker "
         "script leaves over for the stack; it is **not** measured peak stack "
         "usage, which can't be derived from the ELF. Static DRAM + stack "

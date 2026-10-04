@@ -29,7 +29,7 @@ embassy-sync = { version = "0.8" }
 embassy-time = { version = "0.5" }
 embassy-futures = { version = "0.1" }
 embassy-embedded-hal = { version = "0.6" }
-esp-rtos = { version = "0.4", features = ["esp32", "embassy", "esp-radio"] }
+esp-rtos = { version = "0.4", features = ["esp32", "embassy"] }
 embedded-can = { version = "0.4" }
 embedded-io-async = { version = "0.7" }
 embedded-storage = { version = "0.3" }
@@ -43,9 +43,7 @@ num_enum = { version = "0.7", default-features = false }
 thiserror = { version = "2", default-features = false }
 gateway-core = { path = "../gateway-core/" }
 common-hardware = { path = "../common-hardware/" }
-esp-radio = { version = "=1.0.0-beta.1", features = ["esp32", "wifi", "unstable"] }
-embassy-net = { version = "0.9.1", features = ["proto-ipv4", "dhcpv4", "tcp", "dns", "medium-ethernet"] }
-esp-alloc = "0.11.0"
+embassy-net = { version = "0.9.1", features = ["proto-ipv4", "dhcpv4", "dhcpv4-hostname", "slaac", "tcp", "dns", "medium-ethernet"] }
 rust-mqtt = { version = "0.6.0", default-features = false, features = ["bump", "v3", "v5"] }
 picoserve = { version = "0.20.1", features = ["embassy", "json"] }
 
