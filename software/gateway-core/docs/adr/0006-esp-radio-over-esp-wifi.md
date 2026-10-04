@@ -1,6 +1,6 @@
 # ADR 0006: Use `esp-radio`, not `esp-wifi`, for WiFi
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0013](0013-ethernet-only-no-wifi.md)
 
 ## Context
 
