@@ -16,11 +16,12 @@
 //! | 6, 7 | 3-way valves (flow and return), always switched together |
 //! | 8, 9 | Mixer: 8 = towards hot, 9 = towards cold (more return water) |
 //! | 10 | Heating circuit pump |
-//! | 11 | Hot-water circuit pump (not driven by this controller) |
+//! | 11 | Hot-water circuit pump: never driven by the controller, switched only by CAN/MQTT relay commands (to pre-pump hot water to the fresh-water station) |
 //!
 //! # Heating rod
 //!
 //! Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 = 0-3, stage 3 = 0-5.
+//! Stage *n* starts at *n* × 3000 W + 300 W and stops below *n* × 3000 W.
 //! In normal operation the stage follows the available (feed-in) power, as
 //! long as the rod is released and the tank isn't full yet. In emergency
 //! operation the stage is dictated and the available power is ignored.
@@ -135,8 +136,9 @@ pub enum RodReason {
 #[derive(Debug, Clone, Copy)]
 pub struct RodConfig {
     pub stage_power_w: i32,
-    /// A stage is only dropped when the power falls this far below its
-    /// switch-on threshold.
+    /// Stage *n* switches on at `n × stage_power_w + stage_hysteresis_w` and
+    /// off again below `n × stage_power_w`, so a stage never starts on a
+    /// surplus it couldn't keep running on.
     pub stage_hysteresis_w: i32,
     /// Minimum time between two discretionary stage changes.
     pub min_dwell: Duration,
@@ -223,8 +225,8 @@ impl RodController {
     fn stage_for_power(&self, power_w: i32) -> u8 {
         for n in (1..=MAX_STAGE).rev() {
             let mut threshold = i32::from(n) * self.cfg.stage_power_w;
-            if self.stage >= n {
-                threshold -= self.cfg.stage_hysteresis_w;
+            if self.stage < n {
+                threshold += self.cfg.stage_hysteresis_w;
             }
             if power_w >= threshold {
                 return n;
@@ -403,6 +405,9 @@ pub enum MixerRequest {
     Hold,
     /// Drive to the hot end (no return water mixed in).
     FullHot,
+    /// Drive to the cold end: all return water mixed in. The safe position,
+    /// and where the mixer is when it isn't part of the circuit.
+    FullCold,
     /// Regulate the flow temperature to the target.
     Regulate {
         target_mc: i32,
@@ -423,7 +428,7 @@ pub enum MixerDrive {
 pub struct MixerConfig {
     /// Full travel of the actuator (VRG131 with ARA661: 90° in 120 s).
     pub travel: Duration,
-    /// How long to drive towards hot at start-up to be sure of reaching the
+    /// How long to drive towards cold at start-up to be sure of reaching the
     /// end stop.
     pub homing: Duration,
     /// No movement while the flow is this close to the target.
@@ -439,7 +444,8 @@ pub struct MixerConfig {
     /// Extra drive time when going to an end, so that a drifting position
     /// estimate gets corrected by the end stop.
     pub end_margin: Duration,
-    /// Re-drive to the hot end after this long without having been there.
+    /// Re-drive to an end stop after this long without having been there, as
+    /// long as that end is still the one asked for.
     pub resync_after: Duration,
 }
 
@@ -452,7 +458,7 @@ impl MixerConfig {
             pulse_per_kelvin: Duration::from_secs(3),
             min_pulse: Duration::from_secs(1),
             max_pulse: Duration::from_secs(15),
-            settle: Duration::from_secs(25),
+            settle: Duration::from_secs(60),
             reversal_pause: Duration::from_secs(1),
             end_margin: Duration::from_secs(10),
             resync_after: Duration::from_secs(6 * 60 * 60),
@@ -497,6 +503,7 @@ pub struct MixerController {
     /// Position in milliseconds of travel; 0 = cold end, `travel` = hot end.
     position_ms: i64,
     last_hot_sync: Instant,
+    last_cold_sync: Instant,
 }
 
 impl MixerController {
@@ -506,6 +513,7 @@ impl MixerController {
             state: MixerState::Start,
             position_ms: 0,
             last_hot_sync: Instant::MIN,
+            last_cold_sync: Instant::MIN,
         }
     }
 
@@ -518,7 +526,7 @@ impl MixerController {
         (self.position_ms * 100 / self.travel_ms().max(1)).clamp(0, 100) as u8
     }
 
-    /// True while the start-up reference run is still going.
+    /// True while the start-up reference run (to the cold end) is going.
     pub fn homing(&self) -> bool {
         matches!(self.state, MixerState::Start | MixerState::Homing { .. })
     }
@@ -538,18 +546,18 @@ impl MixerController {
                 self.state = MixerState::Homing {
                     until: now + self.cfg.homing,
                 };
-                MixerDrive::Hot
+                MixerDrive::Cold
             }
             MixerState::Homing { until } => {
                 if now >= until {
-                    self.position_ms = self.travel_ms();
-                    self.last_hot_sync = now;
+                    self.position_ms = 0;
+                    self.last_cold_sync = now;
                     self.state = MixerState::Pause {
                         until: now + self.cfg.reversal_pause,
                     };
                     MixerDrive::Stop
                 } else {
-                    MixerDrive::Hot
+                    MixerDrive::Cold
                 }
             }
             MixerState::Driving {
@@ -578,8 +586,12 @@ impl MixerController {
                 } else {
                     (self.position_ms - moved).max(0)
                 };
-                if to_end && hot {
-                    self.last_hot_sync = now;
+                if to_end {
+                    if hot {
+                        self.last_hot_sync = now;
+                    } else {
+                        self.last_cold_sync = now;
+                    }
                 }
                 let pause = if to_end {
                     self.cfg.reversal_pause
@@ -610,6 +622,16 @@ impl MixerController {
                     let remaining = Duration::from_millis((travel - self.position_ms) as u64);
                     self.start_drive(now, true, remaining + self.cfg.end_margin, true);
                     MixerDrive::Hot
+                } else {
+                    MixerDrive::Stop
+                }
+            }
+            MixerRequest::FullCold => {
+                let stale = age(now, self.last_cold_sync) >= self.cfg.resync_after;
+                if self.position_ms > 0 || stale {
+                    let remaining = Duration::from_millis(self.position_ms as u64);
+                    self.start_drive(now, false, remaining + self.cfg.end_margin, true);
+                    MixerDrive::Cold
                 } else {
                     MixerDrive::Stop
                 }
@@ -767,8 +789,10 @@ impl HeatingController {
         // gone, the next one down is the cautious stand-in.
         let tank_top = inputs.tank_temps_mc.iter().flatten().next().copied();
         let mixer_request = match target {
-            None => MixerRequest::Hold,
-            Some(t) if !t.tank_mode => MixerRequest::FullHot,
+            // Not part of the circuit, or nobody to tell what to do: all the
+            // way to return, the safe end.
+            None => MixerRequest::FullCold,
+            Some(t) if !t.tank_mode => MixerRequest::FullCold,
             Some(t) => {
                 if self.availability.update(tank_top, t.flow_target_mc) {
                     MixerRequest::Regulate {
@@ -856,36 +880,41 @@ mod tests {
     #[test]
     fn surplus_selects_the_stage() {
         let mut rod = rod();
-        assert_eq!(rod.step(t(0), &rod_inputs(energy(2_999, 0))), 0);
-        assert_eq!(rod.step(t(5), &rod_inputs(energy(3_000, 5))), 1);
+        // A stage starts 300 W above its nominal power.
+        assert_eq!(rod.step(t(0), &rod_inputs(energy(3_299, 0))), 0);
+        assert_eq!(rod.step(t(5), &rod_inputs(energy(3_300, 5))), 1);
         assert_eq!(rod.reason(), RodReason::Surplus);
     }
 
     #[test]
     fn higher_stages_wait_for_the_dwell_time() {
         let mut rod = rod();
-        assert_eq!(rod.step(t(0), &rod_inputs(energy(3_100, 0))), 1);
-        // 6.1 kW would be stage 2, but stage 1 was just entered.
-        assert_eq!(rod.step(t(5), &rod_inputs(energy(6_100, 5))), 1);
-        assert_eq!(rod.step(t(119), &rod_inputs(energy(6_100, 119))), 1);
-        assert_eq!(rod.step(t(120), &rod_inputs(energy(6_100, 120))), 2);
-        assert_eq!(rod.step(t(240), &rod_inputs(energy(9_500, 240))), 3);
+        assert_eq!(rod.step(t(0), &rod_inputs(energy(3_300, 0))), 1);
+        // 6.6 kW would be stage 2, but stage 1 was just entered.
+        assert_eq!(rod.step(t(5), &rod_inputs(energy(6_600, 5))), 1);
+        assert_eq!(rod.step(t(119), &rod_inputs(energy(6_600, 119))), 1);
+        assert_eq!(rod.step(t(120), &rod_inputs(energy(6_600, 120))), 2);
+        // Stage 2 needs 6.3 kW, stage 3 9.3 kW.
+        assert_eq!(rod.step(t(240), &rod_inputs(energy(9_299, 240))), 2);
+        assert_eq!(rod.step(t(241), &rod_inputs(energy(9_300, 241))), 3);
     }
 
     #[test]
-    fn stage_hysteresis_keeps_a_stage_just_below_its_threshold() {
+    fn a_running_stage_stays_on_down_to_its_nominal_power() {
         let mut rod = rod();
-        rod.step(t(0), &rod_inputs(energy(3_100, 0)));
-        // 2.8 kW is under 3 kW but within the 300 W hysteresis.
-        assert_eq!(rod.step(t(10), &rod_inputs(energy(2_800, 10))), 1);
-        assert_eq!(rod.step(t(20), &rod_inputs(energy(2_650, 20))), 0);
+        assert_eq!(rod.step(t(0), &rod_inputs(energy(3_200, 0))), 0);
+        assert_eq!(rod.step(t(5), &rod_inputs(energy(3_300, 5))), 1);
+        // Once on, 3 kW is enough to keep stage 1 running…
+        assert_eq!(rod.step(t(10), &rod_inputs(energy(3_000, 10))), 1);
+        // …and below that it switches off at once.
+        assert_eq!(rod.step(t(20), &rod_inputs(energy(2_999, 20))), 0);
     }
 
     #[test]
     fn dropping_to_a_lower_stage_waits_but_dropping_to_zero_does_not() {
         let mut rod = rod();
-        rod.step(t(0), &rod_inputs(energy(3_100, 0)));
-        assert_eq!(rod.step(t(120), &rod_inputs(energy(9_500, 120))), 3);
+        rod.step(t(0), &rod_inputs(energy(3_300, 0)));
+        assert_eq!(rod.step(t(120), &rod_inputs(energy(9_900, 120))), 3);
         // Power falls to stage 1 level: held at 3 until the dwell is over…
         assert_eq!(rod.step(t(125), &rod_inputs(energy(3_500, 125))), 3);
         assert_eq!(rod.step(t(239), &rod_inputs(energy(3_500, 239))), 3);
@@ -897,10 +926,10 @@ mod tests {
     #[test]
     fn restarting_after_a_shutdown_waits_for_the_dwell_time() {
         let mut rod = rod();
-        rod.step(t(0), &rod_inputs(energy(3_100, 0)));
+        rod.step(t(0), &rod_inputs(energy(3_300, 0)));
         assert_eq!(rod.step(t(10), &rod_inputs(energy(0, 10))), 0);
-        assert_eq!(rod.step(t(20), &rod_inputs(energy(3_100, 20))), 0);
-        assert_eq!(rod.step(t(130), &rod_inputs(energy(3_100, 130))), 1);
+        assert_eq!(rod.step(t(20), &rod_inputs(energy(3_300, 20))), 0);
+        assert_eq!(rod.step(t(130), &rod_inputs(energy(3_300, 130))), 1);
     }
 
     #[test]
@@ -919,7 +948,7 @@ mod tests {
     #[test]
     fn a_withdrawn_release_switches_off_immediately() {
         let mut rod = rod();
-        rod.step(t(0), &rod_inputs(energy(3_100, 0)));
+        rod.step(t(0), &rod_inputs(energy(3_300, 0)));
         let mut released = energy(9_000, 5);
         released.as_mut().unwrap().rod_enabled = false;
         assert_eq!(rod.step(t(5), &rod_inputs(released)), 0);
@@ -1045,7 +1074,7 @@ mod tests {
     #[test]
     fn emergency_stage_zero_means_no_emergency() {
         let mut rod = rod();
-        let mut inputs = rod_inputs(energy(3_100, 0));
+        let mut inputs = rod_inputs(energy(3_300, 0));
         inputs.emergency = Some(EmergencyInput {
             stage: 0,
             tank_target_mc: 55_000,
@@ -1122,11 +1151,12 @@ mod tests {
         }
     }
 
-    /// A mixer that has finished its start-up run, at the hot end, at `now`.
-    fn homed_mixer() -> (MixerController, u64) {
+    /// A mixer that has finished its start-up run (at the cold end) at the
+    /// returned time.
+    fn cold_mixer() -> (MixerController, u64) {
         let mut mixer = MixerController::new(MixerConfig::new());
         let mut now = 0;
-        assert_eq!(mixer.step(t(now), MixerRequest::Hold), MixerDrive::Hot);
+        assert_eq!(mixer.step(t(now), MixerRequest::Hold), MixerDrive::Cold);
         while mixer.homing() {
             now += 1;
             mixer.step(t(now), MixerRequest::Hold);
@@ -1139,17 +1169,84 @@ mod tests {
         (mixer, now)
     }
 
+    /// A mixer at the hot end, ready for regulating towards colder.
+    fn homed_mixer() -> (MixerController, u64) {
+        let (mut mixer, mut now) = cold_mixer();
+        assert_eq!(mixer.step(t(now), MixerRequest::FullHot), MixerDrive::Hot);
+        while mixer.step(t(now), MixerRequest::FullHot) == MixerDrive::Hot {
+            now += 1;
+        }
+        for _ in 0..3 {
+            now += 1;
+            mixer.step(t(now), MixerRequest::Hold);
+        }
+        assert_eq!(mixer.position_percent(), 100);
+        (mixer, now)
+    }
+
     #[test]
-    fn mixer_homes_towards_hot_at_start_up() {
+    fn mixer_homes_towards_cold_at_start_up() {
         let mut mixer = MixerController::new(MixerConfig::new());
-        assert_eq!(mixer.step(t(0), regulate(40_000, 30_000)), MixerDrive::Hot);
+        assert_eq!(mixer.step(t(0), regulate(40_000, 30_000)), MixerDrive::Cold);
         // Requests are ignored while homing.
-        assert_eq!(mixer.step(t(60), regulate(20_000, 30_000)), MixerDrive::Hot);
-        assert_eq!(mixer.step(t(129), MixerRequest::Hold), MixerDrive::Hot);
+        assert_eq!(
+            mixer.step(t(60), regulate(60_000, 30_000)),
+            MixerDrive::Cold
+        );
+        assert_eq!(mixer.step(t(129), MixerRequest::FullHot), MixerDrive::Cold);
         assert!(mixer.homing());
         assert_eq!(mixer.step(t(130), MixerRequest::Hold), MixerDrive::Stop);
         assert!(!mixer.homing());
-        assert_eq!(mixer.position_percent(), 100);
+        assert_eq!(mixer.position_percent(), 0);
+    }
+
+    #[test]
+    fn mixer_regulates_towards_hot_from_the_cold_end() {
+        let (mut mixer, now) = cold_mixer();
+        // 2 K too cold: a 6 s pulse towards hot = 5 % of the travel.
+        assert_eq!(
+            mixer.step(t(now + 1), regulate(40_000, 38_000)),
+            MixerDrive::Hot
+        );
+        assert_eq!(
+            mixer.step(t(now + 7), regulate(40_000, 38_000)),
+            MixerDrive::Stop
+        );
+        assert_eq!(mixer.position_percent(), 5);
+    }
+
+    #[test]
+    fn full_cold_drives_to_the_return_end_with_margin_and_then_stays() {
+        let (mut mixer, mut now) = homed_mixer();
+        assert_eq!(mixer.step(t(now), MixerRequest::FullCold), MixerDrive::Cold);
+        let started = now;
+        while mixer.step(t(now), MixerRequest::FullCold) == MixerDrive::Cold {
+            now += 1;
+            assert!(now - started < 200);
+        }
+        // A whole travel plus the 10 s margin.
+        assert_eq!(now - started, 130);
+        assert_eq!(mixer.position_percent(), 0);
+        now += 5;
+        assert_eq!(mixer.step(t(now), MixerRequest::FullCold), MixerDrive::Stop);
+    }
+
+    #[test]
+    fn full_cold_redrives_to_the_end_stop_after_six_hours() {
+        let (mut mixer, now) = cold_mixer();
+        assert_eq!(
+            mixer.step(t(now + 60), MixerRequest::FullCold),
+            MixerDrive::Stop
+        );
+        let later = now + 6 * 60 * 60 + 1;
+        assert_eq!(
+            mixer.step(t(later), MixerRequest::FullCold),
+            MixerDrive::Cold
+        );
+        assert_eq!(
+            mixer.step(t(later + 10), MixerRequest::FullCold),
+            MixerDrive::Stop
+        );
     }
 
     #[test]
@@ -1170,17 +1267,17 @@ mod tests {
         );
         // 12 s of 120 s = 10 % towards cold.
         assert_eq!(mixer.position_percent(), 90);
-        // Settling: no new pulse for 25 s even though the error remains.
+        // Settling: no new pulse for 60 s even though the error remains.
         assert_eq!(
             mixer.step(t(now + 30), regulate(40_000, 44_000)),
             MixerDrive::Stop
         );
         assert_eq!(
-            mixer.step(t(now + 37), regulate(40_000, 44_000)),
+            mixer.step(t(now + 72), regulate(40_000, 44_000)),
             MixerDrive::Stop
         );
         assert_eq!(
-            mixer.step(t(now + 38), regulate(40_000, 44_000)),
+            mixer.step(t(now + 73), regulate(40_000, 44_000)),
             MixerDrive::Cold
         );
     }
@@ -1277,7 +1374,7 @@ mod tests {
         }
         assert!(mixer.position_percent() < 60);
         // Wait out the settle time, then ask for full hot.
-        now += 30;
+        now += 61;
         assert_eq!(mixer.step(t(now), MixerRequest::FullHot), MixerDrive::Hot);
         let started = now;
         let mut duration = 0;
@@ -1381,40 +1478,54 @@ mod tests {
     #[test]
     fn a_cold_tank_sends_the_mixer_to_full_flow_instead_of_regulating() {
         let mut c = HeatingController::new();
-        // Past homing, valves on. Tank top 62 °C vs 40 °C target: regulates.
+        // Past homing (to the return end), valves on. Tank top 62 °C vs
+        // 40 °C target: regulates.
         run(&mut c, 0, 140, |_| {});
         assert!(c.status().tank_usable);
+        assert_eq!(c.status().mixer_percent, 0);
 
-        // The flow is 10 K too hot: it regulates towards cold.
-        let mut cold_pulse = false;
+        // The flow is 10 K too cold: it regulates towards hot.
+        let mut hot_pulse = false;
         for now in 141..200 {
             let mut i = inputs(now);
-            i.flow_mc = Some(50_000);
-            cold_pulse |= c.step(t(now), &i).mixer == MixerDrive::Cold;
+            i.flow_mc = Some(30_000);
+            hot_pulse |= c.step(t(now), &i).mixer == MixerDrive::Hot;
         }
-        assert!(cold_pulse);
+        assert!(hot_pulse);
+        assert!(c.status().mixer_percent > 0 && c.status().mixer_percent < 100);
 
         // Now the tank is lukewarm: full flow, whatever the flow reads.
-        let mut hot_drive = false;
         for now in 200..400 {
             let mut i = inputs(now);
             i.tank_temps_mc = [Some(40_500); TANK_SENSORS];
             i.flow_mc = Some(50_000);
-            hot_drive |= c.step(t(now), &i).mixer == MixerDrive::Hot;
+            c.step(t(now), &i);
         }
-        assert!(hot_drive);
         assert!(!c.status().tank_usable);
         assert_eq!(c.status().mixer_percent, 100);
     }
 
     #[test]
-    fn direct_operation_keeps_the_mixer_at_full_flow() {
+    fn direct_operation_parks_the_mixer_at_the_return_end() {
         let mut c = HeatingController::new();
-        run(&mut c, 0, 300, |i| {
-            i.target.as_mut().unwrap().tank_mode = false
-        });
+        // Tank operation first, with the mixer pulled away from the end.
+        for now in 0..400 {
+            let mut i = inputs(now);
+            i.tank_temps_mc = [Some(40_500); TANK_SENSORS];
+            c.step(t(now), &i);
+        }
         assert_eq!(c.status().mixer_percent, 100);
-        let out = run(&mut c, 301, 301, |i| {
+
+        // Back to direct operation: all the way to return, then stays.
+        let mut cold_drive = false;
+        for now in 400..600 {
+            let mut i = inputs(now);
+            i.target.as_mut().unwrap().tank_mode = false;
+            cold_drive |= c.step(t(now), &i).mixer == MixerDrive::Cold;
+        }
+        assert!(cold_drive);
+        assert_eq!(c.status().mixer_percent, 0);
+        let out = run(&mut c, 601, 601, |i| {
             i.target.as_mut().unwrap().tank_mode = false;
             i.flow_mc = Some(10_000);
         });
@@ -1422,25 +1533,38 @@ mod tests {
     }
 
     #[test]
-    fn losing_the_heating_target_drops_valves_and_pump_but_not_the_rod_logic() {
+    fn losing_the_heating_target_parks_the_circuit_and_leaves_the_rod_logic_alone() {
         let mut c = HeatingController::new();
-        run(&mut c, 0, 200, |_| {});
-        let out = c.step(
-            t(300),
-            &HeatingInputs {
-                target: Some(TargetInput {
-                    flow_target_mc: 40_000,
-                    tank_mode: true,
-                    received: t(200),
-                }),
-                energy: energy(9_500, 300),
-                ..inputs(300)
-            },
-        );
-        assert!(!out.valves_tank);
-        assert!(!out.pump);
-        assert_eq!(out.mixer, MixerDrive::Stop);
-        assert_eq!(out.rod_stage, 3);
+        for now in 0..400 {
+            let mut i = inputs(now);
+            i.tank_temps_mc = [Some(40_500); TANK_SENSORS];
+            c.step(t(now), &i);
+        }
+        assert_eq!(c.status().mixer_percent, 100);
+
+        // The target message is 100 s old; power keeps coming.
+        let mut cold_drive = false;
+        let mut last = HeatingOutputs::OFF;
+        for now in 500..700 {
+            last = c.step(
+                t(now),
+                &HeatingInputs {
+                    target: Some(TargetInput {
+                        flow_target_mc: 40_000,
+                        tank_mode: true,
+                        received: t(400),
+                    }),
+                    energy: energy(9_900, now),
+                    ..inputs(now)
+                },
+            );
+            cold_drive |= last.mixer == MixerDrive::Cold;
+        }
+        assert!(!last.valves_tank);
+        assert!(!last.pump);
+        assert!(cold_drive);
+        assert_eq!(c.status().mixer_percent, 0);
+        assert_eq!(last.rod_stage, 3);
     }
 
     #[test]

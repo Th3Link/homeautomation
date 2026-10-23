@@ -197,7 +197,7 @@ resent).
 A `HeatingControl` node (device type 9) has the relay hardware of a
 `Relais` node and drives it itself — a tank with a three-stage heating
 rod, two 3-way valves, a mixer and a pump. CAN `Relais` commands for its
-relays 0-10 are ignored. It is controlled by three messages, all sent to
+relays 0-10 are ignored (relay 11 is not part of the controller). It is controlled by three messages, all sent to
 the node's device id. Temperatures are signed 1/16 °C values like the
 sensor messages; multi-byte values are little-endian; extra bytes are
 ignored.
@@ -215,7 +215,7 @@ s); **30 s without one counts as the input being gone** — without
 
 **Rod stages.** Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 =
 0-3, stage 3 = 0-5 (always in pairs). Normally the stage follows the
-available power (stage *n* from *n* × 3000 W, dropping out 300 W lower),
+available power (stage *n* starts at *n* × 3000 W + 300 W and keeps running down to *n* × 3000 W),
 as long as the rod is released and the tank's reference sensor is below
 the tank target. Discretionary stage changes happen at most every 120 s;
 anything unsafe or pointless switches the rod off at once: a tank sensor
@@ -228,9 +228,14 @@ at 90 °C).
 together; the circuit pump (relay 10) follows 2 minutes later and stops
 together with the valves. The mixer (relays 8 = hot, 9 = cold; 90° in
 120 s) regulates the flow temperature to the target with a stepwise
-controller while the tank is hot enough; if it isn't, or in direct
-operation, the mixer goes to the hot end. After a restart it first drives
-to the hot end to find its position.
+controller (a pulse, then 60 s for the sensor to follow) while the tank is
+hot enough; if it isn't, the mixer goes to the hot end (full flow). In
+direct operation, and while no `HeatingTarget` arrives, it goes all the way
+to return (cold end), the safe position. After a restart it first drives
+to the cold end to find its position.
+
+Relay 11 (hot-water circuit pump) is not touched by the controller; it
+stays available to ordinary `Relais` commands over CAN and MQTT.
 
 **Faults** are reported as `DeviceError` with `Component::Heating`:
 `OverTemperature` (details: hottest tank temperature), `SensorLost` (no
@@ -239,9 +244,11 @@ stopped), `InvalidData` (a malformed message; `local_code` is the
 message type). Persisting faults are repeated every minute.
 
 The console of a `HeatingControl` node has `tank-sensor`, `flow-sensor`,
-`tank-target`, `tank-ref` and `heating` to assign the sensors (by the id
-`sensors` prints), set the charge target and see what the controller is
-doing and why.
+`tank-target` (default 75 °C), `tank-ref` and `heating` to assign the
+sensors (by the id `sensors` prints), set the charge target and the tank
+position it is compared with (default: the bottom one, position 6), and to
+see what the controller is doing and why. Until a reference sensor is
+assigned, the rod stays off.
 
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
 
