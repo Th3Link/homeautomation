@@ -67,6 +67,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0013-ethernet-only-no-wifi.md")]
     pub mod adr_0013_ethernet_only_no_wifi {}
+
+    #[doc = include_str!("../docs/adr/0014-on-gateway-automation-rules.md")]
+    pub mod adr_0014_on_gateway_automation_rules {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with
@@ -77,6 +80,14 @@ pub mod protocol_can {}
 /// The MQTT topic scheme and payload format specification (gateway-only).
 #[doc = include_str!("../docs/protocol-mqtt.md")]
 pub mod protocol_mqtt {}
+
+/// Spec for on-gateway automation rules (draft, see ADR 0014).
+#[doc = include_str!("../docs/spec-automation-rules.md")]
+pub mod spec_automation_rules {}
+
+/// Implementation plan for the automation rules.
+#[doc = include_str!("../docs/plan-automation-rules.md")]
+pub mod plan_automation_rules {}
 
 /// Known technical debt and unfinished work (gateway-only).
 #[doc = include_str!("../docs/technical-debt.md")]

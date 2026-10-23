@@ -14,3 +14,4 @@ globally-numbered list including cross-cutting decisions.
 | [0008](0008-mandatory-web-authentication.md) | Require Basic Auth on every web endpoint unconditionally | Accepted |
 | [0009](0009-promiscuous-can-dispatch.md) | Replace the dispatcher-list CAN fan-out with direct `msg_type` routing | Accepted |
 | [0013](0013-ethernet-only-no-wifi.md) | Wired Ethernet is the only network path — drop WiFi | Accepted |
+| [0014](0014-on-gateway-automation-rules.md) | On-gateway automation rules — event-driven, JSON over a resource-oriented REST API | Proposed |
