@@ -92,7 +92,15 @@ none of them are built yet:
   [`technical-debt.md`](technical-debt.md#can-bus-ota-is-unreliable).
 - **A better RPC API** than `/control.json` in its current shape — see
   [`technical-debt.md`](technical-debt.md#the-controljson-rpc-api-is-not-good).
-  No replacement design chosen yet.
+  No replacement design chosen yet; the rule API below
+  ([ADR 0014](adr/0014-on-gateway-automation-rules.md)) sets the pattern
+  (resource-oriented, versioned, RFC 9457 errors).
+- **On-gateway automation rules** — named *if this then that* rules
+  (conditions combinable with AND/OR/NOT, several actions), managed over
+  a REST API and executed on the gateway without MQTT or hub. Specified
+  in [`spec-automation-rules.md`](spec-automation-rules.md), planned in
+  [`plan-automation-rules.md`](plan-automation-rules.md). This is the
+  single-gateway first step of ADR 0011.
 - **Multiple, smaller gateways** (three, each owning fewer nodes than
   today's single gateway) that can **discover each other and exchange
   CAN-originated messages directly**, without requiring the MQTT uplink

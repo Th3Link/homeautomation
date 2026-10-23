@@ -26,6 +26,7 @@ next to the component they constrain — e.g.
 | [0011](0011-gateway-mesh-planned.md) | Multiple gateways, mesh-aware, with on-gateway automation independent of MQTT | workspace | Proposed |
 | [0012](0012-shared-common-crates.md) | Extract `common-core`/`common-hardware`, superseding independent reimplementation | workspace | Accepted |
 | [0013](../../software/gateway-core/docs/adr/0013-ethernet-only-no-wifi.md) | Wired Ethernet is the only network path — drop WiFi | gateway | Accepted |
+| [0014](../../software/gateway-core/docs/adr/0014-on-gateway-automation-rules.md) | On-gateway automation rules — event-driven, JSON over a resource-oriented REST API | gateway | Proposed |
 
 ADRs 0010 and 0011 are **proposed**, not yet implemented — see
 [`gateway-core`'s technical-debt.md`](../../software/gateway-core/docs/technical-debt.md)
