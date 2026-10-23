@@ -48,7 +48,7 @@ const RESYNC_PERIOD: Duration = Duration::from_secs(10);
 const REPORT_REPEAT: Duration = Duration::from_secs(60);
 
 /// Default charge target until one is set.
-const DEFAULT_TANK_TARGET_C: u8 = 60;
+const DEFAULT_TANK_TARGET_C: u8 = 75;
 /// Highest charge target the console accepts — safely below the 80 °C
 /// hard limit.
 pub const MAX_TANK_TARGET_C: u8 = 75;
@@ -77,7 +77,9 @@ static SETTINGS: Shared<Cell<Settings>> = BlockingMutex::new(Cell::new(Settings 
     tank_sensor_ids: [0; TANK_SENSORS],
     flow_sensor_id: 0,
     tank_target_c: DEFAULT_TANK_TARGET_C,
-    // Bottom of the tank by default: it's only full once that is warm.
+    // Bottom of the tank by default: it's only full once that is warm. Set
+    // it with `tank-ref` if the heating rod would reach the target higher up
+    // before the bottom does.
     tank_ref_index: (TANK_SENSORS - 1) as u8,
 }));
 
