@@ -16,7 +16,7 @@ pub use common_core::DecodeError;
 /// re-exported from [`common_core`] so existing `crate::can_id`/
 /// `crate::can_message_type`/`crate::device_type`/`crate::device_message`
 /// paths keep working unchanged.
-pub use common_core::{can_id, can_message_type, device_message, device_type};
+pub use common_core::{can_id, can_message_type, device_message, device_type, heating_message};
 
 pub mod button_fsm;
 pub mod button_message;
@@ -24,5 +24,6 @@ pub mod docs;
 pub mod ds18b20;
 pub mod error;
 pub mod extension;
+pub mod heating;
 pub mod relais;
 pub mod relais_manager;

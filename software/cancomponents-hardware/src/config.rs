@@ -34,7 +34,20 @@ pub enum Key {
     /// Seconds between `TemperatureSensor` CAN frames (`u32`), see
     /// `temperature::set_send_interval_secs`.
     SensorSendInterval = 8,
+    /// DS18B20 topic id (`u32`) of the heating circuit's flow sensor; 0 =
+    /// not set.
+    HeatingFlowSensor = 9,
+    /// Tank charge target in whole °C (`u8`).
+    HeatingTankTarget = 10,
+    /// Index (0 = top) of the tank sensor the charge target is compared
+    /// with (`u8`).
+    HeatingTankRef = 11,
 }
+
+/// Flash key of the tank sensor at position 0 (top); position `n` lives at
+/// `TANK_SENSOR_KEY_BASE + n` (`u32` topic id, 0 = not set). Raw keys, clear
+/// of the [`Key`] values and of the sensor list at 0x40.
+pub const TANK_SENSOR_KEY_BASE: u8 = 0x60;
 
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than
 /// once (e.g. from multiple init paths).
