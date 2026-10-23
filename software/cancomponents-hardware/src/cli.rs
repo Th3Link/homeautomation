@@ -18,6 +18,7 @@ use crate::console_log;
 use crate::device::device;
 use crate::logging::CLI_ACTIVE;
 use crate::relais::send_relais_command;
+use crate::temperature;
 use bareminal_cli::cli::{Bareminal, CommandWriter};
 use bareminal_macros::Command;
 use cancomponents_core::can_message_type::CanMessageType;
@@ -88,6 +89,16 @@ enum Commands<'a> {
         "software_rollershutter", "hardware_rollershutter",
     ])]
     ExtensionMode(ExtensionModeArg),
+    /// Set how often (in seconds, 10..=86400) the DS18B20 temperatures are
+    /// sent over CAN. They are measured every 10 s regardless.
+    #[set(min = 10, max = 86400)]
+    SensorInterval(u32),
+    /// List all DS18B20 temperature sensors: slot, ROM, the id used in CAN
+    /// frames and MQTT topics, current temperature and age.
+    Sensors,
+    /// Stop tracking (and reporting) sensors that are currently lost, e.g.
+    /// after removing one on purpose.
+    SensorsForget,
     /// Directly drive one relay/rollershutter channel, for bring-up testing
     /// without a CAN bus master.
     Relais {
@@ -321,6 +332,12 @@ async fn handle_command(
         Commands::CustomString(text) => respond(writer, &cmd_custom_string(text).await).await,
         Commands::RelaisMode(mode) => respond(writer, &cmd_relais_mode(mode).await).await,
         Commands::ExtensionMode(mode) => respond(writer, &cmd_extension_mode(mode).await).await,
+        Commands::Sensors => cmd_sensors(writer).await,
+        Commands::SensorsForget => {
+            temperature::forget_lost_sensors();
+            respond(writer, "lost sensors are dropped within 10 s").await
+        }
+        Commands::SensorInterval(secs) => respond(writer, &cmd_sensor_interval(secs).await).await,
         Commands::Relais { num, state } => respond(writer, &cmd_relais(num, state).await).await,
         Commands::Ping => {
             send_can_message(CanMessageType::Ping, &[], false).await;
@@ -370,6 +387,26 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     match custom_string {
         Some(s) => respond(writer, &fmt_msg(format_args!("custom_string: {s}"))).await?,
         None => respond(writer, "custom_string: (unset)").await?,
+    }
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "sensor_interval: {} s",
+            temperature::send_interval_secs()
+        )),
+    )
+    .await?;
+    let sensors = temperature::sensors();
+    if !sensors.is_empty() {
+        let lost = sensors.iter().filter(|s| s.lost).count();
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "sensors: {} ({lost} lost, see 'sensors')",
+                sensors.len()
+            )),
+        )
+        .await?;
     }
     respond(
         writer,
@@ -479,6 +516,50 @@ async fn cmd_extension_mode(mode: ExtensionModeArg) -> String<LINE_CAP> {
         "extension_mode set to {:?} (takes effect after restart)",
         ExtensionMode::from(value)
     ))
+}
+
+async fn cmd_sensors(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    let sensors = temperature::sensors();
+    if sensors.is_empty() {
+        return respond(writer, "no sensors found").await;
+    }
+    for sensor in sensors {
+        let rom = sensor.rom.as_bytes();
+        let mut line: String<LINE_CAP> = String::new();
+        let _ = write!(line, "#{} rom ", sensor.slot);
+        for byte in rom {
+            let _ = write!(line, "{byte:02X}");
+        }
+        let _ = write!(line, "  id 0x{:x}  ", sensor.rom.topic_id());
+        match (sensor.reading, sensor.lost) {
+            (Some(reading), _) => {
+                let milli = reading.temperature.millicelsius();
+                let sign = if milli < 0 { "-" } else { "" };
+                let _ = write!(
+                    line,
+                    "{sign}{}.{:03} C  ({} s ago)",
+                    milli.unsigned_abs() / 1000,
+                    milli.unsigned_abs() % 1000,
+                    reading.at.elapsed().as_secs(),
+                );
+            }
+            (None, true) => {
+                let _ = write!(line, "LOST");
+            }
+            (None, false) => {
+                let _ = write!(line, "no reading yet");
+            }
+        }
+        respond(writer, &line).await?;
+    }
+    Ok(())
+}
+
+async fn cmd_sensor_interval(secs: u32) -> String<LINE_CAP> {
+    match temperature::set_send_interval_secs(secs).await {
+        Ok(applied) => fmt_msg(format_args!("sensor_interval set to {applied} s")),
+        Err(()) => str_msg("failed to persist sensor_interval"),
+    }
 }
 
 async fn cmd_relais(num: usize, state: RelaisStateArg) -> String<LINE_CAP> {

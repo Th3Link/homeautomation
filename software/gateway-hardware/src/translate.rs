@@ -77,7 +77,14 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
         | CanMessageType::AirQuality => {
             if let Ok(reading) = FixedPointReading::from_bytes(data) {
                 let mut body: HString<24> = HString::new();
-                let _ = core::fmt::write(&mut body, format_args!("{}", reading.value()));
+                // Only temperatures can be below zero; the other sensors'
+                // raw values use the full unsigned 16-bit range.
+                let value = if id.msg_type == CanMessageType::TemperatureSensor {
+                    reading.signed_value()
+                } else {
+                    reading.value()
+                };
+                let _ = core::fmt::write(&mut body, format_args!("{value}"));
                 let key = id.device_key();
                 let msg_type = id.msg_type;
                 publish_with_custom_string(

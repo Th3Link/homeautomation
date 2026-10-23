@@ -31,6 +31,9 @@ pub enum Key {
     /// Stored but currently unused — see the note in `can::init`.
     Baudrate = 6,
     HardwareRevision = 7,
+    /// Seconds between `TemperatureSensor` CAN frames (`u32`), see
+    /// `temperature::set_send_interval_secs`.
+    SensorSendInterval = 8,
 }
 
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than
