@@ -82,6 +82,10 @@ pub enum ErrorCode {
     SensorLost = 2,
     /// A sensor that was reported lost answers again.
     SensorRecovered = 3,
+    /// A temperature reached its hard limit ([`Component::Heating`]).
+    OverTemperature = 4,
+    /// Required input messages stopped arriving ([`Component::Heating`]).
+    Timeout = 5,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, FromPrimitive)]
@@ -110,6 +114,8 @@ pub enum Component {
     /// 1-Wire temperature sensors. `local_code` is the sensor's slot,
     /// `details` its first four serial bytes (the gateway's MQTT topic id).
     Sensor = 7,
+    /// The heating controller (`DeviceType::HeatingControl`).
+    Heating = 8,
 }
 
 #[cfg(test)]
@@ -158,6 +164,7 @@ mod tests {
             Component::Ota,
             Component::Relais,
             Component::Sensor,
+            Component::Heating,
         ] {
             let byte: u8 = c.into();
             assert_eq!(Component::from(byte), c);
@@ -165,6 +172,8 @@ mod tests {
         assert_eq!(ErrorCode::from(1), ErrorCode::InvalidData);
         assert_eq!(ErrorCode::from(2), ErrorCode::SensorLost);
         assert_eq!(ErrorCode::from(3), ErrorCode::SensorRecovered);
+        assert_eq!(ErrorCode::from(4), ErrorCode::OverTemperature);
+        assert_eq!(ErrorCode::from(5), ErrorCode::Timeout);
         assert_eq!(ErrorCode::from(99), ErrorCode::Unknown);
     }
 }

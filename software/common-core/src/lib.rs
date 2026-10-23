@@ -29,3 +29,4 @@ pub mod can_id;
 pub mod can_message_type;
 pub mod device_message;
 pub mod device_type;
+pub mod heating_message;

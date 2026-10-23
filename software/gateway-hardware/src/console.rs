@@ -117,6 +117,7 @@ impl FromStr for DeviceTypeArg {
             "gateway" => DeviceType::Gateway,
             "rollershutter" => DeviceType::Rollershutter,
             "ssr" => DeviceType::SSR,
+            "heatingcontrol" => DeviceType::HeatingControl,
             _ => return Err(()),
         }))
     }

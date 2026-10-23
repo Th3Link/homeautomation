@@ -56,6 +56,12 @@ pub enum CanMessageType {
     Ping = 156,
     PingDisable = 157,
     Echo = 158,
+    /// Heating controller: flow-temperature target and tank-mode request.
+    HeatingTarget = 160,
+    /// Heating controller: available (feed-in) power and heating-rod release.
+    HeatingEnergy = 161,
+    /// Heating controller: emergency operation with a fixed rod stage.
+    HeatingEmergency = 162,
     /// Not part of the wire protocol. The original C++'s `switch` on
     /// `MSG_ID_t` silently drops unrecognized bytes; representing that as a
     /// typed fallback (rather than refusing to build a [`CanMessageType`]
@@ -118,6 +124,9 @@ mod tests {
             (CanMessageType::Ping, 156),
             (CanMessageType::PingDisable, 157),
             (CanMessageType::Echo, 158),
+            (CanMessageType::HeatingTarget, 160),
+            (CanMessageType::HeatingEnergy, 161),
+            (CanMessageType::HeatingEmergency, 162),
         ];
 
         for &(variant, byte) in known {

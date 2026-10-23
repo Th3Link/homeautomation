@@ -5,6 +5,7 @@ use crate::config;
 use crate::console_log;
 use crate::device::device;
 use crate::echo_guard::{disable_echo, dispatch_echo};
+use crate::heating::heating_handler;
 use crate::relais::relais_handler;
 use crate::update::update;
 use cancomponents_core::can_id::{filter_code_mask, CanId};
@@ -111,6 +112,11 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         CanMessageType::Relais => relais_handler(id, frame.data(), frame.is_remote_frame()).await,
         CanMessageType::Rollershutter => {
             relais_handler(id, frame.data(), frame.is_remote_frame()).await
+        }
+        CanMessageType::HeatingTarget
+        | CanMessageType::HeatingEnergy
+        | CanMessageType::HeatingEmergency => {
+            heating_handler(id, frame.data(), frame.is_remote_frame()).await
         }
         CanMessageType::RelaisMode => {
             let _ = device()

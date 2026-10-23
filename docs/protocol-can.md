@@ -70,11 +70,12 @@ discriminants, gaps included:
 | 6 | `Gateway` (this device's own type, when it addresses itself) |
 | 7 | `Rollershutter` |
 | 8 | `SSR` |
+| 9 | `HeatingControl` |
 
 ## Message types
 
 `ICAN::MSG_ID_t` / `gateway_core::can_message_type::CanMessageType`. Fixed
-discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159–254) are
+discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159, 163–254) are
 intentional, not omissions:
 
 | Value | Name | Value | Name |
@@ -98,10 +99,10 @@ intentional, not omissions:
 | 16 | `FlashSelect` | 156 | `Ping` |
 | 17 | `FlashErase` | 157 | `PingDisable` |
 | 18 | `FlashRead` | 158 | `Echo` |
-| 19 | `FlashWrite` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 20 | `FlashVerify` | | |
-| 21 | `FlashProgress` | | |
-| 22 | `FlashComplete` | | |
+| 19 | `FlashWrite` | 160 | `HeatingTarget` |
+| 20 | `FlashVerify` | 161 | `HeatingEnergy` |
+| 21 | `FlashProgress` | 162 | `HeatingEmergency` |
+| 22 | `FlashComplete` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 30 | `ButtonEvent` | | |
 | 31 | `TemperatureSensor` | | |
 | 41 | `HwRev` | | |
@@ -170,9 +171,10 @@ looks at byte 0 either way, so its values are *not* the legacy
 | 2 | `Device` | | 2 | `SensorLost` |
 | 3 | `Update` | | 3 | `SensorRecovered` |
 | 4 | `Storage` | | | |
-| 5 | `Ota` | | | |
-| 6 | `Relais` | | | |
+| 5 | `Ota` | | 4 | `OverTemperature` |
+| 6 | `Relais` | | 5 | `Timeout` |
 | 7 | `Sensor` | | | |
+| 8 | `Heating` | | | |
 
 `severity`: 1 `Warning`, 2 `RecoverableError`, 3 `RepeatingError`,
 4 `Error`, 5 `CriticalError`.
@@ -189,6 +191,57 @@ id the gateway puts in the sensor's MQTT topic.
 
 A lost sensor's `TemperatureSensor` frames stop (no stale value is
 resent).
+
+## Heating controller (`HeatingTarget` / `HeatingEnergy` / `HeatingEmergency`)
+
+A `HeatingControl` node (device type 9) has the relay hardware of a
+`Relais` node and drives it itself — a tank with a three-stage heating
+rod, two 3-way valves, a mixer and a pump. CAN `Relais` commands for its
+relays 0-10 are ignored. It is controlled by three messages, all sent to
+the node's device id. Temperatures are signed 1/16 °C values like the
+sensor messages; multi-byte values are little-endian; extra bytes are
+ignored.
+
+| Message | Payload | Meaning |
+|---|---|---|
+| `HeatingTarget` (160) | `[flow_target i16][flags]` | Wanted flow temperature of the heating circuit. Flag bit 0: supply the circuit from the tank instead of directly from the heat pump. |
+| `HeatingEnergy` (161) | `[power i32 W][flags]` | Available (feed-in) power; negative while importing. Flag bit 0: the heating rod is released. |
+| `HeatingEmergency` (162) | `[stage u8][tank_target i16]` | Emergency operation: run the rod at `stage` (0-3) regardless of the available power, until the tank reaches `tank_target`. Stage 0 means no emergency. |
+
+Every message must be repeated at least every 30 s (the intended rate is 5
+s); **30 s without one counts as the input being gone** — without
+`HeatingEnergy`/`HeatingEmergency` all rod stages switch off, without
+`HeatingTarget` the valves and the pump return to direct operation.
+
+**Rod stages.** Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 =
+0-3, stage 3 = 0-5 (always in pairs). Normally the stage follows the
+available power (stage *n* from *n* × 3000 W, dropping out 300 W lower),
+as long as the rod is released and the tank's reference sensor is below
+the tank target. Discretionary stage changes happen at most every 120 s;
+anything unsafe or pointless switches the rod off at once: a tank sensor
+at 80 °C (re-armed at 75 °C), no usable tank sensor, missing input
+messages, a withdrawn release, a full tank. This is in addition to, not
+instead of, the independent hardware protection (contactor at 85 °C, STB
+at 90 °C).
+
+**Circuit.** In tank operation both 3-way valves (relays 6 and 7) switch
+together; the circuit pump (relay 10) follows 2 minutes later and stops
+together with the valves. The mixer (relays 8 = hot, 9 = cold; 90° in
+120 s) regulates the flow temperature to the target with a stepwise
+controller while the tank is hot enough; if it isn't, or in direct
+operation, the mixer goes to the hot end. After a restart it first drives
+to the hot end to find its position.
+
+**Faults** are reported as `DeviceError` with `Component::Heating`:
+`OverTemperature` (details: hottest tank temperature), `SensorLost` (no
+usable tank sensor while heat is wanted), `Timeout` (the power messages
+stopped), `InvalidData` (a malformed message; `local_code` is the
+message type). Persisting faults are repeated every minute.
+
+The console of a `HeatingControl` node has `tank-sensor`, `flow-sensor`,
+`tank-target`, `tank-ref` and `heating` to assign the sensors (by the id
+`sensors` prints), set the charge target and see what the controller is
+doing and why.
 
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
 
