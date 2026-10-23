@@ -20,4 +20,5 @@ pub mod gpio_interrupt;
 pub mod pwm;
 pub mod relais;
 pub mod sensors;
+pub mod temperature;
 pub mod update;

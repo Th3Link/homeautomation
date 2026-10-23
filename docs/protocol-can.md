@@ -157,6 +157,39 @@ The only live producer is a CAN driver's own bus-alert reporting
 Consumers (the node registry) only ever read byte 0 for display — they
 don't decode the rest.
 
+### Structured reports from `cancomponents` nodes
+
+The `cancomponents` firmware doesn't use the layout above; its reports are
+`[component, code, severity, local_code, details × 4]`. The gateway only
+looks at byte 0 either way, so its values are *not* the legacy
+`ICAN::ERROR_t` ones (e.g. `Relais` is 6 here, `Light` in the table above).
+
+| `component` | Name | | `code` | Name |
+|---|---|---|---|---|
+| 1 | `Can` | | 1 | `InvalidData` |
+| 2 | `Device` | | 2 | `SensorLost` |
+| 3 | `Update` | | 3 | `SensorRecovered` |
+| 4 | `Storage` | | | |
+| 5 | `Ota` | | | |
+| 6 | `Relais` | | | |
+| 7 | `Sensor` | | | |
+
+`severity`: 1 `Warning`, 2 `RecoverableError`, 3 `RepeatingError`,
+4 `Error`, 5 `CriticalError`.
+
+**`Sensor` reports** concern DS18B20 temperature sensors. `local_code` is
+the sensor's slot (order of discovery since boot) and `details` the first
+four serial bytes, i.e. the `sub_id` low 32 bits little-endian — the same
+id the gateway puts in the sensor's MQTT topic.
+
+- `SensorLost` / `Error`: the sensor failed three measurement cycles
+  (30 s) in a row. Repeated as `SensorLost` / `RepeatingError` every minute
+  while it stays lost.
+- `SensorRecovered` / `Warning`: a lost sensor answers again.
+
+A lost sensor's `TemperatureSensor` frames stop (no stale value is
+resent).
+
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
 
 **Two different wire shapes exist for a *command*, depending on which
@@ -274,6 +307,26 @@ byte:  0..5               6..7
 ```
 
 Decoded value = `raw_value / 16.0` (fixed-point, ÷16 scale).
+
+### `TemperatureSensor` from DS18B20 sensors
+
+Relais devices with DS18B20 sensors on their 1-Wire header send one
+`TemperatureSensor` frame per sensor. `sub_id` is the sensor's 48-bit
+serial (ROM bytes 1..=6, without the family code and CRC byte) and
+`raw_value` is the sensor's native 1/16 °C reading. Every sensor is
+measured every 10 s; the frames go out every 30 s by default (CLI:
+`sensor-interval`). The layout is the one the original C++ firmware used.
+
+`raw_value` is a signed two's-complement value for `TemperatureSensor`
+(below-zero temperatures), which the gateway decodes accordingly
+(`FixedPointReading::signed_value`). The other fixed-point sensors are
+unsigned.
+
+On the gateway the sensor shows up as `canbus/temperature/<device>/0x<id>`,
+where `<id>` is the low 32 bits of `sub_id` in lowercase hex — for a sensor
+with ROM `28 22 B0 C3 32 20 01 36` that is `0x32c3b022`. The node's
+`sensors` console command prints this id next to each sensor's ROM and
+current temperature, to map physical sensors to topics.
 
 Ambient light (`AmbientLightSensor`, and nominally
 `AmbientLightSensorWhite` though nothing in the live gateway actually

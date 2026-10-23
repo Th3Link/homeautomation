@@ -21,6 +21,7 @@ pub use common_core::{can_id, can_message_type, device_message, device_type};
 pub mod button_fsm;
 pub mod button_message;
 pub mod docs;
+pub mod ds18b20;
 pub mod error;
 pub mod extension;
 pub mod relais;
