@@ -141,38 +141,48 @@ pub async fn set_tank_ref(index: u8) -> Result<(), ()> {
     Ok(())
 }
 
+/// Feeds a `HeatingTarget`, as if it had arrived over CAN.
+pub fn inject_target(message: HeatingTarget) {
+    TARGET.lock(|cell| {
+        cell.set(Some(TargetInput {
+            flow_target_mc: message.flow_target_millicelsius(),
+            tank_mode: message.tank_mode,
+            received: Instant::now(),
+        }))
+    });
+}
+
+/// Feeds a `HeatingEnergy`, as if it had arrived over CAN.
+pub fn inject_energy(message: HeatingEnergy) {
+    ENERGY.lock(|cell| {
+        cell.set(Some(EnergyInput {
+            power_w: message.power_w,
+            rod_enabled: message.rod_enabled,
+            received: Instant::now(),
+        }))
+    });
+}
+
+/// Feeds a `HeatingEmergency`, as if it had arrived over CAN.
+pub fn inject_emergency(message: HeatingEmergency) {
+    EMERGENCY.lock(|cell| {
+        cell.set(Some(EmergencyInput {
+            stage: message.stage,
+            tank_target_mc: message.tank_target_millicelsius(),
+            received: Instant::now(),
+        }))
+    });
+}
+
 /// Handles the heating CAN messages. Malformed ones are reported and
 /// dropped, and leave the previous value to time out on its own.
 pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
-    let now = Instant::now();
     let decoded = match id.msg_type {
-        CanMessageType::HeatingTarget => HeatingTarget::from_bytes(data).map(|m| {
-            TARGET.lock(|cell| {
-                cell.set(Some(TargetInput {
-                    flow_target_mc: m.flow_target_millicelsius(),
-                    tank_mode: m.tank_mode,
-                    received: now,
-                }))
-            })
-        }),
-        CanMessageType::HeatingEnergy => HeatingEnergy::from_bytes(data).map(|m| {
-            ENERGY.lock(|cell| {
-                cell.set(Some(EnergyInput {
-                    power_w: m.power_w,
-                    rod_enabled: m.rod_enabled,
-                    received: now,
-                }))
-            })
-        }),
-        CanMessageType::HeatingEmergency => HeatingEmergency::from_bytes(data).map(|m| {
-            EMERGENCY.lock(|cell| {
-                cell.set(Some(EmergencyInput {
-                    stage: m.stage,
-                    tank_target_mc: m.tank_target_millicelsius(),
-                    received: now,
-                }))
-            })
-        }),
+        CanMessageType::HeatingTarget => HeatingTarget::from_bytes(data).map(inject_target),
+        CanMessageType::HeatingEnergy => HeatingEnergy::from_bytes(data).map(inject_energy),
+        CanMessageType::HeatingEmergency => {
+            HeatingEmergency::from_bytes(data).map(inject_emergency)
+        }
         _ => return,
     };
     if decoded.is_err() {

@@ -24,6 +24,9 @@ use bareminal_cli::cli::{Bareminal, CommandWriter};
 use bareminal_macros::Command;
 use cancomponents_core::can_message_type::CanMessageType;
 use cancomponents_core::extension::Mode as ExtensionMode;
+use cancomponents_core::heating_message::{
+    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingTarget,
+};
 use cancomponents_core::relais::{Message as RelaisMessage, Mode as RelaisMode, State};
 use core::fmt::Write as _;
 use core::str::FromStr;
@@ -122,6 +125,31 @@ enum Commands<'a> {
     TankRef(u8),
     /// Heating controller: show what it is doing and why.
     Heating,
+    /// Bring-up: feed the heating controller a HeatingTarget as if it had
+    /// arrived over CAN (flow target in °C, tank operation 0/1). Expires
+    /// after 30 s like the real message.
+    SimTarget {
+        #[set(short)]
+        celsius: u8,
+        #[set(short, min = 0, max = 1)]
+        tank: u8,
+    },
+    /// Bring-up: feed the heating controller a HeatingEnergy (available
+    /// power in W, rod released 0/1).
+    SimEnergy {
+        #[set(short)]
+        watts: i32,
+        #[set(short, min = 0, max = 1)]
+        rod: u8,
+    },
+    /// Bring-up: feed the heating controller a HeatingEmergency (rod stage
+    /// 0-3, tank target in °C).
+    SimEmergency {
+        #[set(short, min = 0, max = 3)]
+        stage: u8,
+        #[set(short)]
+        celsius: u8,
+    },
     /// Directly drive one relay/rollershutter channel, for bring-up testing
     /// without a CAN bus master.
     Relais {
@@ -362,6 +390,15 @@ async fn handle_command(
         Commands::TankTarget(celsius) => respond(writer, &cmd_tank_target(celsius).await).await,
         Commands::TankRef(index) => respond(writer, &cmd_tank_ref(index).await).await,
         Commands::Heating => cmd_heating(writer).await,
+        Commands::SimTarget { celsius, tank } => {
+            respond(writer, &cmd_sim_target(celsius, tank != 0).await).await
+        }
+        Commands::SimEnergy { watts, rod } => {
+            respond(writer, &cmd_sim_energy(watts, rod != 0).await).await
+        }
+        Commands::SimEmergency { stage, celsius } => {
+            respond(writer, &cmd_sim_emergency(stage, celsius).await).await
+        }
         Commands::Sensors => cmd_sensors(writer).await,
         Commands::SensorsForget => {
             temperature::forget_lost_sensors();
@@ -606,6 +643,43 @@ async fn cmd_tank_ref(index: u8) -> String<LINE_CAP> {
         Ok(()) => fmt_msg(format_args!("tank reference sensor is position {index}")),
         Err(()) => str_msg("position must be 0 (top) to 6 (bottom), or storing failed"),
     }
+}
+
+const NOT_A_CONTROLLER: &str = "not a HeatingControl device";
+
+async fn cmd_sim_target(celsius: u8, tank: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_target(HeatingTarget {
+        flow_target_raw: millicelsius_to_raw(i32::from(celsius) * 1000),
+        tank_mode: tank,
+    });
+    fmt_msg(format_args!("target {celsius} C, tank operation {tank}"))
+}
+
+async fn cmd_sim_energy(watts: i32, rod: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_energy(HeatingEnergy {
+        power_w: watts,
+        rod_enabled: rod,
+    });
+    fmt_msg(format_args!("energy {watts} W, rod released {rod}"))
+}
+
+async fn cmd_sim_emergency(stage: u8, celsius: u8) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_emergency(HeatingEmergency {
+        stage,
+        tank_target_raw: millicelsius_to_raw(i32::from(celsius) * 1000),
+    });
+    fmt_msg(format_args!(
+        "emergency stage {stage}, tank target {celsius} C"
+    ))
 }
 
 async fn cmd_heating(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
