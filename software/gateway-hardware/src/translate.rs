@@ -6,7 +6,6 @@ use crate::device_list::DEVICE_LIST;
 use gateway_core::button::ButtonEvent;
 use gateway_core::can_id::CanId;
 use gateway_core::can_message_type::CanMessageType;
-use gateway_core::device_message::encode_id_type;
 use gateway_core::relais::{self, RelaisMsg};
 use gateway_core::sensor::{decode_ambient_light, FixedPointReading};
 use gateway_core::topics::{
@@ -262,16 +261,4 @@ async fn resolve_target(topic: &str) -> Option<u32> {
 async fn send_command(target_key: u32, msg_type: CanMessageType, data: &[u8]) {
     let id = target_key + u8::from(msg_type) as u32;
     crate::can::send_raw(id, data, false).await;
-}
-
-/// `Command::save_device`'s `DeviceIdType`/`DeviceUid0`/`DeviceUid1` triple
-/// — exposed for the web config server's (not yet implemented — see
-/// `docs/technical-debt.md`) `/control.json` handler.
-pub async fn send_device_id_type(target_key: u32, device_id: u8, device_type: u8) {
-    send_command(
-        target_key,
-        CanMessageType::DeviceIdType,
-        &encode_id_type(device_id, device_type),
-    )
-    .await;
 }

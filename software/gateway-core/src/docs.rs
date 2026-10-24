@@ -67,6 +67,12 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0013-ethernet-only-no-wifi.md")]
     pub mod adr_0013_ethernet_only_no_wifi {}
+
+    #[doc = include_str!("../docs/adr/0014-rest-api-by-resource.md")]
+    pub mod adr_0014_rest_api_by_resource {}
+
+    #[doc = include_str!("../docs/adr/0015-mqtt-tls-pinned-public-key.md")]
+    pub mod adr_0015_mqtt_tls_pinned_public_key {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with
@@ -81,3 +87,7 @@ pub mod protocol_mqtt {}
 /// Known technical debt and unfinished work (gateway-only).
 #[doc = include_str!("../docs/technical-debt.md")]
 pub mod technical_debt {}
+
+/// The gateway's REST API and web UI.
+#[doc = include_str!("../docs/api-rest.md")]
+pub mod api_rest {}

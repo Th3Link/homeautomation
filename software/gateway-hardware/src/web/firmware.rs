@@ -31,7 +31,7 @@ const GATEWAY_MAX_SIZE: usize = 0x1C0000;
 /// What a CAN node can be sent: an STM32/ESP32 node image.
 const NODE_MAX_SIZE: usize = 0x100000;
 /// How much of the image is handled in one go.
-const CHUNK: usize = 512;
+const CHUNK: usize = 4096;
 /// Receiving a whole image, which is paced by the CAN bus for nodes.
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -197,8 +197,8 @@ async fn receive<B: Read>(
     let mut received = 0;
     while received < size {
         let want = chunk.len().min(size - received);
-        let read = match reader.read(&mut chunk[..want]).await {
-            Ok(0) | Err(_) => {
+        let read = match reader.read_exact(&mut chunk[..want]).await {
+            Err(_) => {
                 abort(target).await;
                 return Err(fail(
                     "the upload was interrupted",
@@ -207,7 +207,7 @@ async fn receive<B: Read>(
                 )
                 .await);
             }
-            Ok(read) => read,
+            Ok(()) => want,
         };
         let written = match target {
             Target::Gateway => crate::update::write(&chunk[..read]).await,
