@@ -129,6 +129,11 @@ Payload: whatever was sent, 0–8 bytes, any content. On receipt, the exact
 same CAN id and payload is immediately resent onto the bus, unconditionally
 (not gated by `UpdateSilence`) — a round-trip latency/connectivity probe.
 
+A `cancomponents` node also sends an `Echo` request every 30 s and restarts
+itself if none comes back for several intervals (the bus is broken or the
+gateway is gone). The console's `echo-restart off` switches the restart off
+(persisted); the node keeps probing but no longer resets.
+
 ## `DeviceIdType` — device provisioning
 
 Payload (2 bytes): `[device_id, device_type]`. Assigns a node's identity.
@@ -190,7 +195,11 @@ id the gateway puts in the sensor's MQTT topic.
 - `SensorRecovered` / `Warning`: a lost sensor answers again.
 
 A lost sensor's `TemperatureSensor` frames stop (no stale value is
-resent).
+resent). A sensor that was just found, or that comes back after being lost,
+answers with its power-on value of 85 °C until its first real conversion,
+so it is sampled every 3 s until three readings in a row agree (within
+0.5 K) before its values are sent or reported as recovered. The list of
+sensors is only kept in RAM: a sensor that is dead at boot is never seen.
 
 ## Heating controller (`HeatingTarget` / `HeatingEnergy` / `HeatingEmergency`)
 

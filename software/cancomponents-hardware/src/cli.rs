@@ -16,6 +16,7 @@ use crate::can::{send_can_message, DEVICE_ID, DEVICE_TYPE};
 use crate::config::{self, config};
 use crate::console_log;
 use crate::device::device;
+use crate::echo_guard;
 use crate::heating;
 use crate::logging::CLI_ACTIVE;
 use crate::relais::send_relais_command;
@@ -150,6 +151,10 @@ enum Commands<'a> {
         #[set(short)]
         celsius: u8,
     },
+    /// Whether a missing CAN `Echo` (bus or gateway gone) restarts the
+    /// device. On by default; turn it off for a device without a gateway.
+    #[set(one_of = ["on", "off"])]
+    EchoRestart(OnOffArg),
     /// Directly drive one relay/rollershutter channel, for bring-up testing
     /// without a CAN bus master.
     Relais {
@@ -240,6 +245,24 @@ impl FromStr for ExtensionModeArg {
             "legacy_sensors" => Ok(Self::LegacySensors),
             "software_rollershutter" => Ok(Self::SoftwareRollershutter),
             "hardware_rollershutter" => Ok(Self::HardwareRollershutter),
+            _ => Err(()),
+        }
+    }
+}
+
+/// `on`/`off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnOffArg {
+    On,
+    Off,
+}
+
+impl FromStr for OnOffArg {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "on" => Ok(Self::On),
+            "off" => Ok(Self::Off),
             _ => Err(()),
         }
     }
@@ -399,6 +422,9 @@ async fn handle_command(
         Commands::SimEmergency { stage, celsius } => {
             respond(writer, &cmd_sim_emergency(stage, celsius).await).await
         }
+        Commands::EchoRestart(setting) => {
+            respond(writer, &cmd_echo_restart(setting == OnOffArg::On).await).await
+        }
         Commands::Sensors => cmd_sensors(writer).await,
         Commands::SensorsForget => {
             temperature::forget_lost_sensors();
@@ -460,6 +486,18 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         &fmt_msg(format_args!(
             "sensor_interval: {} s",
             temperature::send_interval_secs()
+        )),
+    )
+    .await?;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "echo_restart: {}",
+            if echo_guard::restart_enabled() {
+                "on"
+            } else {
+                "off"
+            }
         )),
     )
     .await?;
@@ -819,6 +857,9 @@ async fn cmd_sensors(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             (None, true) => {
                 let _ = write!(line, "LOST");
             }
+            (None, false) if sensor.settling => {
+                let _ = write!(line, "settling");
+            }
             (None, false) => {
                 let _ = write!(line, "no reading yet");
             }
@@ -826,6 +867,16 @@ async fn cmd_sensors(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         respond(writer, &line).await?;
     }
     Ok(())
+}
+
+async fn cmd_echo_restart(enabled: bool) -> String<LINE_CAP> {
+    match echo_guard::set_restart_enabled(enabled).await {
+        Ok(()) => fmt_msg(format_args!(
+            "restart on missing echo: {}",
+            if enabled { "on" } else { "off" }
+        )),
+        Err(()) => str_msg("failed to persist echo_restart"),
+    }
 }
 
 async fn cmd_sensor_interval(secs: u32) -> String<LINE_CAP> {

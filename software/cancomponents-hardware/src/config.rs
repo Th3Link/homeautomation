@@ -42,11 +42,14 @@ pub enum Key {
     /// Index (0 = top) of the tank sensor the charge target is compared
     /// with (`u8`).
     HeatingTankRef = 11,
+    /// Whether missing `Echo` frames restart the device (`u8`, 0 = off;
+    /// unset means on). See `echo_guard`.
+    EchoRestart = 12,
 }
 
 /// Flash key of the tank sensor at position 0 (top); position `n` lives at
 /// `TANK_SENSOR_KEY_BASE + n` (`u32` topic id, 0 = not set). Raw keys, clear
-/// of the [`Key`] values and of the sensor list at 0x40.
+/// of the [`Key`] values.
 pub const TANK_SENSOR_KEY_BASE: u8 = 0x60;
 
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than

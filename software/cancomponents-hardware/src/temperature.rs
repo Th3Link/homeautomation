@@ -21,10 +21,15 @@
 //! every minute while it stays lost, followed by `ErrorCode::SensorRecovered`
 //! when it answers again. `local_code` is the sensor's slot and `details` its
 //! first four serial bytes — the same id the gateway puts into the MQTT
-//! topic. The list of sensors seen is kept in flash, so a sensor that's
-//! already dead after a reboot (the echo watchdog restarts the device
-//! whenever the bus goes quiet) is still reported. It stays on the list until
-//! [`forget_lost_sensors`] — use that when removing one on purpose.
+//! topic. Sensors are only remembered in RAM: a sensor that's already dead
+//! at boot is never seen, so it can't be reported. A sensor stays on the list
+//! until [`forget_lost_sensors`] — use that when removing one on purpose.
+//!
+//! A sensor that was just found, or that came back after being lost, answers
+//! with its power-on value of +85 °C until its first real conversion. Such a
+//! sensor is therefore on *probation*: it is sampled every
+//! [`SETTLE_INTERVAL`] until a few readings in a row agree, and only then
+//! are its values stored, sent and used.
 //!
 //! Assumptions about the wiring: the sensors are externally powered (3-wire,
 //! not parasite power) and the data line has an external pull-up.
@@ -72,10 +77,11 @@ pub const MIN_SEND_INTERVAL_SECS: u32 = SAMPLE_PERIOD.as_secs() as u32;
 /// Longest allowed CAN send interval (one day).
 pub const MAX_SEND_INTERVAL_SECS: u32 = 24 * 60 * 60;
 
-/// Flash key of sensor slot 0; slot `n` lives at `SENSOR_KEY_BASE + n`
-/// (0x40..=0x5F, clear of the `config::Key` values). The value is the 8 ROM
-/// bytes; all zeros marks an unused slot.
-const SENSOR_KEY_BASE: u8 = 0x40;
+/// A sensor on probation is sampled again after this long…
+const SETTLE_INTERVAL: Duration = Duration::from_secs(3);
+/// …at most this many times per measurement cycle (it carries on in the next
+/// cycle if it hasn't settled by then).
+const MAX_SETTLE_ROUNDS: usize = 6;
 
 /// Re-search the bus (find new / lost sensors) every this many cycles.
 const RESCAN_EVERY_CYCLES: u32 = 6;
@@ -122,6 +128,9 @@ pub struct SensorStatus {
     /// read successfully yet.
     pub reading: Option<Reading>,
     pub lost: bool,
+    /// New, or back after being lost, and not yet trusted (see the module
+    /// docs).
+    pub settling: bool,
 }
 
 /// Every sensor seen since boot, lost ones included, in slot order.
@@ -138,6 +147,7 @@ pub fn sensors() -> Vec<SensorStatus, MAX_SENSORS> {
                     rom,
                     reading: bank.get(&rom).copied(),
                     lost: health.is_lost(&rom),
+                    settling: health.is_on_probation(&rom),
                 })
                 .collect()
         })
@@ -190,44 +200,7 @@ pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
             Ordering::Relaxed,
         );
     }
-    load_known_sensors().await;
     spawner.spawn(temperature_task(BitBangBus::new(pin)).unwrap());
-}
-
-/// Re-registers the sensors stored in flash, so they're tracked (and
-/// reported if they don't answer) from the first cycle on.
-async fn load_known_sensors() {
-    for slot in 0..MAX_SENSORS as u8 {
-        let stored = config().await.get_array::<8>(SENSOR_KEY_BASE + slot).await;
-        let Some(rom) = stored.and_then(|bytes| RomCode::new(bytes).ok()) else {
-            continue;
-        };
-        if rom.is_ds18b20_compatible() {
-            let _ = HEALTH.lock(|health| health.borrow_mut().register(rom));
-        }
-    }
-    let known = HEALTH.lock(|health| health.borrow().len());
-    if known > 0 {
-        console_log!("temperature: {known} known sensor(s) from flash");
-    }
-}
-
-/// Writes the current sensor list to flash (call after it changes). Slots
-/// past the end are blanked.
-async fn persist_known_sensors() {
-    let roms: Vec<RomCode, MAX_SENSORS> = HEALTH.lock(|health| health.borrow().roms().collect());
-    for slot in 0..MAX_SENSORS {
-        let bytes = roms.get(slot).map_or([0u8; 8], |rom| *rom.as_bytes());
-        let key = SENSOR_KEY_BASE + slot as u8;
-        let mut config = config().await;
-        // Skip the write when the slot already holds this value, so
-        // unchanged slots cost no flash wear.
-        if config.get_array::<8>(key).await.unwrap_or([0u8; 8]) != bytes
-            && config.set_array(key, bytes).await.is_err()
-        {
-            console_log!("temperature: failed to persist sensor slot {slot}");
-        }
-    }
 }
 
 /// Open-drain bit-banged 1-Wire master on one GPIO.
@@ -315,7 +288,7 @@ async fn temperature_task(mut bus: BitBangBus) {
         let cycle_start = Instant::now();
 
         if FORGET_LOST.swap(false, Ordering::Relaxed) {
-            forget_lost().await;
+            forget_lost();
         }
 
         let known = HEALTH.lock(|health| health.borrow().len());
@@ -348,11 +321,10 @@ async fn temperature_task(mut bus: BitBangBus) {
     }
 }
 
-async fn forget_lost() {
+fn forget_lost() {
     let forgotten = HEALTH.lock(|health| health.borrow_mut().forget_lost());
     if forgotten > 0 {
         console_log!("temperature: forgot {forgotten} lost sensor(s)");
-        persist_known_sensors().await;
     }
 }
 
@@ -361,14 +333,12 @@ async fn forget_lost() {
 /// their failing measurements are what reports them lost.
 async fn rescan(bus: &mut BitBangBus) {
     let mut search = RomSearch::new();
-    let mut found_new = false;
     loop {
         match search.next(bus) {
             Ok(Some(rom)) if rom.is_ds18b20_compatible() => {
                 match HEALTH.lock(|health| health.borrow_mut().register(rom)) {
                     Ok(true) => {
                         console_log!("temperature: new sensor {:02X?}", rom.as_bytes());
-                        found_new = true;
                     }
                     Ok(false) => {}
                     Err(_) => {
@@ -394,43 +364,56 @@ async fn rescan(bus: &mut BitBangBus) {
         // One search step blocks for ~15 ms; let the other tasks run.
         yield_now().await;
     }
-    if found_new {
-        persist_known_sensors().await;
-    }
 }
 
-/// Runs one conversion on all sensors, stores the results and updates every
-/// sensor's health (announcing changes on CAN). Returns how many sensors
-/// delivered a valid reading.
+/// Runs one conversion on all sensors, stores the trusted results and
+/// updates every sensor's health (announcing changes on CAN). Sensors on
+/// probation are sampled again every [`SETTLE_INTERVAL`] until they settle.
+/// Returns how many sensors delivered a trusted reading.
 async fn measure(bus: &mut BitBangBus, devices: &[RomCode]) -> usize {
-    let mut good = 0;
+    let mut accepted: Vec<RomCode, MAX_SENSORS> = Vec::new();
+    // Sensors still to read in this round.
+    let mut pending: Vec<RomCode, MAX_SENSORS> = Vec::new();
+    let _ = pending.extend_from_slice(devices);
 
-    if convert(bus).await {
-        for rom in devices {
-            let temperature = read_scratchpad(bus, rom);
-            if let Some(temperature) = temperature {
-                // A full bank can't happen: the bank never holds more
-                // sensors than the health tracker, which has the same limit.
-                let _ = BANK.lock(|bank| {
-                    bank.borrow_mut().update(Reading {
-                        rom: *rom,
-                        temperature,
-                        at: Instant::now(),
-                    })
-                });
-                good += 1;
-            } else {
-                console_log!("temperature: bad reading from {:02X?}", rom.as_bytes());
+    let mut round = 0;
+    while convert(bus).await {
+        let mut unsettled: Vec<RomCode, MAX_SENSORS> = Vec::new();
+        for rom in &pending {
+            match read_scratchpad(bus, rom) {
+                Some(temperature) => {
+                    if HEALTH.lock(|health| health.borrow_mut().vet(rom, temperature)) {
+                        // A full bank can't happen: the bank never holds more
+                        // sensors than the health tracker, which has the same
+                        // limit.
+                        let _ = BANK.lock(|bank| {
+                            bank.borrow_mut().update(Reading {
+                                rom: *rom,
+                                temperature,
+                                at: Instant::now(),
+                            })
+                        });
+                        let _ = accepted.push(*rom);
+                    } else {
+                        let _ = unsettled.push(*rom);
+                    }
+                }
+                None => console_log!("temperature: bad reading from {:02X?}", rom.as_bytes()),
             }
-            record(rom, temperature.is_some()).await;
             yield_now().await;
         }
-    } else {
-        for rom in devices {
-            record(rom, false).await;
+        pending = unsettled;
+        if pending.is_empty() || round >= MAX_SETTLE_ROUNDS {
+            break;
         }
+        round += 1;
+        Timer::after(SETTLE_INTERVAL).await;
     }
-    good
+
+    for rom in devices {
+        record(rom, accepted.contains(rom)).await;
+    }
+    accepted.len()
 }
 
 /// Starts a conversion on every sensor and waits for it to finish. Returns
