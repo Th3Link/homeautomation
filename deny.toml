@@ -25,5 +25,6 @@ allow = [
     "GPL-3.0-or-later",
     "ISC",
     "0BSD",
+    "BSD-3-Clause",
 ]
 confidence-threshold = 0.8
