@@ -27,7 +27,7 @@ use picoserve::{ResponseSent, Router};
 use serde::{Deserialize, Serialize};
 
 /// The OTA slot of the gateway (see `partitions.csv`).
-const GATEWAY_MAX_SIZE: usize = 0x1C0000;
+const GATEWAY_MAX_SIZE: usize = 0x7C0000;
 /// What a CAN node can be sent: an STM32/ESP32 node image.
 const NODE_MAX_SIZE: usize = 0x100000;
 /// How much of the image is handled in one go.
