@@ -55,6 +55,7 @@ sha2 = { version = "0.10", default-features = false }
 rsa = { version = "0.9", default-features = false, features = ["sha2"] }
 esp-alloc = { version = "0.11.0", features = ["esp32"] }
 picoserve = { version = "0.20.1", features = ["embassy", "json"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
 
 [build-dependencies]
 vergen-git2 = { version = "10", features = ["build", "cargo", "rustc", "si"] }

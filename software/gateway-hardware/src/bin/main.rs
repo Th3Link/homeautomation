@@ -8,7 +8,7 @@ use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
-use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update};
+use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update, web};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -21,9 +21,11 @@ async fn main(spawner: Spawner) -> ! {
 
     console_log!("gateway-hardware booting");
 
-    // A small heap, for the RSA signature check of TLS and nothing else:
-    // everything else in this crate stays on heapless/static allocation.
-    esp_alloc::heap_allocator!(size: 32 * 1024);
+    // The heap lives in the RAM the ESP32's ROM leaves free above the
+    // normal data segment (`dram2`, ~96 KB), so it costs the statics nothing.
+    // It holds the web server's tasks (see `web`) and the RSA signature
+    // check of TLS; everything else stays on heapless/static allocation.
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 94 * 1024);
 
     // TLS needs unpredictable random numbers; without a radio the hardware
     // generator only gets entropy from the ADC noise source.
@@ -91,6 +93,7 @@ async fn main(spawner: Spawner) -> ! {
         for slot in 0..gateway_core::config::MQTT_BROKERS {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
+        web::spawn(&spawner, stack);
     }
 
     can::send_can_message(
