@@ -72,13 +72,17 @@ These aren't "bad", just genuinely unfinished relative to the original's
 feature set — tracked here so they don't get lost, distinct from the
 design-quality complaints above:
 
-- **The web configuration server** (`/state.json`, `/control.json` itself,
-  `/bridge_config.json`, `/update/data`, and the static config-page UI)
-  doesn't exist in `gateway-hardware` yet. The CAN↔MQTT bridge, the
-  commissioning console, self-OTA, and CAN-OTA orchestration are all
-  implemented and wired into `main.rs`; the HTTP layer connecting them to
-  a browser is not. (`picoserve` was selected as the library for this and
-  is already a dependency, but no routes are implemented.)
+- **HTTPS.** The web server (REST API and UI, [`api-rest.md`](api-rest.md))
+  speaks plain HTTP only, so the Basic Auth password crosses the LAN in the
+  clear. `embedded-tls` is client-only; a server needs another TLS library
+  (`mbedtls-rs` is the candidate, not tried on this chip and `esp-hal`) or an
+  own server handshake. picoserve takes any socket that implements its
+  `io::Socket` trait, so a TLS socket can slot in.
+- **Ethernet checksums.** The `esp-hal` Ethernet driver leaves the TCP/IP
+  checksums to the MAC, and the MAC gets them wrong for much of the traffic:
+  responses over a few hundred bytes never arrived. The stack computes them
+  itself now (`SoftwareChecksums` in `gateway-hardware/src/ethernet.rs`); the
+  cause in the driver or the silicon wasn't found.
 - **CAN-bus MQTT logging passthrough** (`canbus/log/0x<hex>`, toggled by
   the `mqtt_logging` RPC verb in the original) is speced in
   [`protocol-mqtt.md`](protocol-mqtt.md#canbuslog0xhex-planned-in-the-original-not-currently-wired-up)

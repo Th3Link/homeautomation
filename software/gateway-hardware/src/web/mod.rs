@@ -5,6 +5,7 @@
 //! read-only ones). One [`web_task`] serves one connection at a time, so
 //! [`TASKS`] of them are started; each builds the (zero-sized) router itself.
 
+mod assets;
 mod commands;
 mod devices;
 mod error;
@@ -55,7 +56,7 @@ async fn web_task(id: usize, stack: Stack<'static>) -> ! {
 async fn serve(id: usize, stack: Stack<'static>) -> ! {
     let app = app();
     let mut http_buffer = [0u8; 1536];
-    let mut tcp_rx = [0u8; 2048];
+    let mut tcp_rx = [0u8; 4096];
     let mut tcp_tx = [0u8; 1024];
     picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
         .listen_and_serve(id, stack, PORT, &mut tcp_rx, &mut tcp_tx)
@@ -72,7 +73,8 @@ fn app() -> Router<impl PathRouter> {
     let api = settings::routes(api);
     let api = mqtt::routes(api);
     let api = firmware::routes(api);
-    Router::new().nest("/api/v1", api).layer(BasicAuth)
+    let app = Router::new().nest("/api/v1", api);
+    assets::routes(app).layer(BasicAuth)
 }
 
 /// Lets only requests through that carry the configured web credentials in

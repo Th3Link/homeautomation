@@ -39,20 +39,72 @@ use esp_hal::ethernet::{Ethernet, EthernetDmaStorage, RmiiPinBundle};
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::peripherals::ETH;
 use esp_hal::Async;
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 
 /// `smi_mdc_gpio_num`/`smi_mdio_gpio_num` from `LAN.cpp`.
 const PHY_ADDRESS: u8 = 1;
 
 /// DMA descriptor/buffer ring sizes — small is fine for this gateway's
 /// traffic volume (MQTT + the occasional web UI request, not bulk transfer).
-const RX_DESCRIPTORS: usize = 4;
+const RX_DESCRIPTORS: usize = 8;
 const TX_DESCRIPTORS: usize = 4;
 
-type EthDriver = Ethernet<'static, Async, GenericPhy>;
+type RawDriver = Ethernet<'static, Async, GenericPhy>;
+type EthDriver = SoftwareChecksums<RawDriver>;
 
-static DMA_STORAGE: StaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
-    StaticCell::new();
+/// Passes everything through to the Ethernet driver, but has the network
+/// stack compute the checksums itself.
+///
+/// The driver leaves them to the MAC (descriptor "checksum insertion"), and
+/// that produces wrong TCP checksums for a good part of the segments: the
+/// peer drops them, so responses of more than a few hundred bytes never
+/// arrived (and uploads crawled along on retransmissions). With a correct
+/// checksum already in the frame, what the MAC then inserts is right.
+pub struct SoftwareChecksums<D>(D);
+
+impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareChecksums<D> {
+    type RxToken<'a>
+        = D::RxToken<'a>
+    where
+        Self: 'a;
+    type TxToken<'a>
+        = D::TxToken<'a>
+    where
+        Self: 'a;
+
+    fn receive(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+    ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+        self.0.receive(cx)
+    }
+
+    fn transmit(&mut self, cx: &mut core::task::Context<'_>) -> Option<Self::TxToken<'_>> {
+        self.0.transmit(cx)
+    }
+
+    fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> embassy_net_driver::LinkState {
+        self.0.link_state(cx)
+    }
+
+    fn capabilities(&self) -> embassy_net_driver::Capabilities {
+        let mut capabilities = self.0.capabilities();
+        capabilities.checksum.ipv4 = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.tcp = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.udp = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.icmpv4 = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.icmpv6 = embassy_net_driver::Checksum::Both;
+        capabilities
+    }
+
+    fn hardware_address(&self) -> embassy_net_driver::HardwareAddress {
+        self.0.hardware_address()
+    }
+}
+
+// Constructed in place: by value it would pass through the stack.
+static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
+    ConstStaticCell::new(EthernetDmaStorage::new());
 static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
 
 /// Peripherals/pins Ethernet needs from `main.rs` — grouped since there are
@@ -95,7 +147,7 @@ pub async fn bring_up(pins: EthernetPins, clock_gpio: u8) -> Option<EthDriver> {
         .try_into()
         .expect("MAC address is always 6 bytes");
 
-    let storage = DMA_STORAGE.init(EthernetDmaStorage::new());
+    let storage = DMA_STORAGE.take();
     console_log!("ethernet: RMII clock on GPIO{clock_gpio}");
     let phy = GenericPhy::new(PHY_ADDRESS);
     // The clock pin's type is part of the pin bundle's type, so the choice
@@ -122,7 +174,7 @@ pub async fn bring_up(pins: EthernetPins, clock_gpio: u8) -> Option<EthDriver> {
     };
 
     match started {
-        Ok(eth) => Some(eth.into_async()),
+        Ok(eth) => Some(SoftwareChecksums(eth.into_async())),
         Err(e) => {
             console_log!("ethernet: init failed: {e:?}");
             None
