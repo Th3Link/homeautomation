@@ -21,5 +21,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "c83a9b9b176f9f9c088e7f828fa75410a90dd449",
+  "date": "2026-10-24T16:25:48+02:00",
+  "subject": "Merge pull request #5 from Th3Link/feat/drop-wifi",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 316564,
+    "iram": 18964,
+    "dram_static": 24008,
+    "stack_budget": 172596,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 301131,
+    "iram": 16036,
+    "dram_static": 23844,
+    "stack_budget": 172760,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
