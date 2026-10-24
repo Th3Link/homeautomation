@@ -41,6 +41,9 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Verify-only uses of rsa and crypto-bigint, see .cargo/audit.toml
+          # (the same list, for the case that the action doesn't read it).
+          ignore: RUSTSEC-2023-0071,RUSTSEC-2026-0387
 
   # License compliance: this project is GPL-3.0-or-later, so every
   # dependency's license needs to actually be compatible with that. See
