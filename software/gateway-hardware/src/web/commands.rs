@@ -9,6 +9,7 @@
 
 use super::devices::DeviceName;
 use super::error::ApiError;
+use super::json::with_status;
 use crate::device_list::DEVICE_LIST;
 use gateway_core::can_message_type::CanMessageType;
 use gateway_core::command::{self, CanSend, SaveDeviceFields, Target, MAX_SENDS};
@@ -57,6 +58,18 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
             (DEVICES, device(), "/heating/emergency"),
             put(heating_emergency),
         )
+        .route(
+            ("/device-types", parse_path_segment::<u8>(), "/ping"),
+            post(type_ping),
+        )
+        .route(
+            ("/device-types", parse_path_segment::<u8>(), "/refresh"),
+            post(type_refresh),
+        )
+        .route(
+            ("/device-types", parse_path_segment::<u8>(), "/restart"),
+            post(type_restart),
+        )
         .route("/bus/ping", post(bus_ping))
         .route("/bus/refresh", post(bus_refresh))
         .route("/bus/restart", post(bus_restart))
@@ -71,14 +84,12 @@ struct Sent {
     sent: usize,
 }
 
-async fn send_all(sends: Vec<CanSend, MAX_SENDS>) -> impl IntoResponse {
+async fn send_all(sends: Vec<CanSend, MAX_SENDS>) -> Result<impl IntoResponse, ApiError> {
     let sent = sends.len();
     for send in sends {
         crate::can::send_raw(send.can_id, &send.data, send.request).await;
     }
-    Json(Sent { sent })
-        .into_response()
-        .with_status_code(StatusCode::ACCEPTED)
+    with_status(StatusCode::ACCEPTED, &Sent { sent }).await
 }
 
 async fn device_key(name: &DeviceName) -> Result<u32, ApiError> {
@@ -96,19 +107,19 @@ async fn target(name: &DeviceName) -> Result<Target, ApiError> {
 // ---- single device -------------------------------------------------------
 
 async fn ping(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    Ok(send_all(command::ping_sends(&target(&name).await?)).await)
+    send_all(command::ping_sends(&target(&name).await?)).await
 }
 
 async fn refresh(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    Ok(send_all(command::refresh_sends(&target(&name).await?)).await)
+    send_all(command::refresh_sends(&target(&name).await?)).await
 }
 
 async fn restart(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    Ok(send_all(command::restart_device_sends(&target(&name).await?)).await)
+    send_all(command::restart_device_sends(&target(&name).await?)).await
 }
 
 async fn legacy_mode(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    Ok(send_all(command::legacy_mode_sends(&target(&name).await?)).await)
+    send_all(command::legacy_mode_sends(&target(&name).await?)).await
 }
 
 #[derive(Deserialize)]
@@ -120,7 +131,7 @@ async fn silence(
     name: DeviceName,
     Json(body): Json<Silence>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok(send_all(command::silence_sends(&target(&name).await?, body.on)).await)
+    send_all(command::silence_sends(&target(&name).await?, body.on)).await
 }
 
 #[derive(Deserialize)]
@@ -152,7 +163,7 @@ async fn relay_or_rollershutter(
         bank: body.bank,
     };
     let sends = command::relais_rollershutter_sends(&target(&name).await?, rollershutter, msg);
-    Ok(send_all(sends).await)
+    send_all(sends).await
 }
 
 async fn relay(
@@ -195,7 +206,7 @@ async fn lamps(
         &msg.to_bytes_full(),
         false,
     );
-    Ok(send_all(sends).await)
+    send_all(sends).await
 }
 
 // ---- heating controller --------------------------------------------------
@@ -224,7 +235,7 @@ async fn heating(
     data: &[u8],
 ) -> Result<impl IntoResponse, ApiError> {
     let sends = command::targeted_sends(&target(&name).await?, msg_type, data, false);
-    Ok(send_all(sends).await)
+    send_all(sends).await
 }
 
 async fn heating_target(
@@ -324,23 +335,40 @@ pub async fn save(
             None => None,
         },
     };
-    Ok(send_all(command::save_device_sends(&target(&name).await?, &fields)).await)
+    send_all(command::save_device_sends(&target(&name).await?, &fields)).await
+}
+
+// ---- every device of one type -------------------------------------------
+
+async fn type_ping(device_type: u8) -> Result<impl IntoResponse, ApiError> {
+    send_all(command::ping_sends(&Target::CanByType(device_type))).await
+}
+
+async fn type_refresh(device_type: u8) -> Result<impl IntoResponse, ApiError> {
+    send_all(command::refresh_sends(&Target::CanByType(device_type))).await
+}
+
+async fn type_restart(device_type: u8) -> Result<impl IntoResponse, ApiError> {
+    send_all(command::restart_device_sends(&Target::CanByType(
+        device_type,
+    )))
+    .await
 }
 
 // ---- everybody on the bus ------------------------------------------------
 
-async fn bus_ping() -> impl IntoResponse {
+async fn bus_ping() -> Result<impl IntoResponse, ApiError> {
     send_all(command::ping_sends(&Target::CanAll)).await
 }
 
-async fn bus_refresh() -> impl IntoResponse {
+async fn bus_refresh() -> Result<impl IntoResponse, ApiError> {
     send_all(command::refresh_sends(&Target::CanAll)).await
 }
 
-async fn bus_restart() -> impl IntoResponse {
+async fn bus_restart() -> Result<impl IntoResponse, ApiError> {
     send_all(command::restart_device_sends(&Target::CanAll)).await
 }
 
-async fn bus_silence(Json(body): Json<Silence>) -> impl IntoResponse {
+async fn bus_silence(Json(body): Json<Silence>) -> Result<impl IntoResponse, ApiError> {
     send_all(command::silence_sends(&Target::CanAll, body.on)).await
 }

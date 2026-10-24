@@ -3,6 +3,7 @@
 //! the values the REST API takes from paths and queries.
 
 use crate::command::{ExtensionMode, RelaisMode};
+use crate::config::Bitrate;
 use heapless::String;
 
 /// Longest user name / password Basic Auth is checked for, same as the
@@ -130,6 +131,27 @@ fn upper_name(name: &str) -> Option<String<20>> {
     Some(out)
 }
 
+/// The CAN bitrate called `name` (`b22_222`, `b25`, `b50`, `b100`), without
+/// [`Bitrate::from_name`]'s fallback to 50 kbit/s for names it doesn't know.
+pub fn strict_bitrate(name: &str) -> Option<Bitrate> {
+    ["b22_222", "b25", "b50", "b100"]
+        .contains(&name)
+        .then(|| Bitrate::from_name(name))
+}
+
+/// Whether `name` can be a DHCP host name: 1-40 letters, digits and
+/// hyphens, not starting or ending with a hyphen.
+pub fn valid_hostname(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 40
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// Shortest web password accepted when it is changed.
+pub const MIN_PASSWORD_LEN: usize = 8;
+
 /// A `0x…` hexadecimal number, the way the API shows UIDs.
 pub fn parse_hex_u64(text: &str) -> Option<u64> {
     u64::from_str_radix(text.strip_prefix("0x")?, 16).ok()
@@ -246,6 +268,26 @@ mod tests {
         assert_eq!(parse_hex_u64("10"), None);
         assert_eq!(parse_hex_u64("0x"), None);
         assert_eq!(parse_hex_u64("0xzz"), None);
+    }
+
+    #[test]
+    fn bitrates_are_strict() {
+        assert_eq!(strict_bitrate("b100"), Some(Bitrate::B100));
+        assert_eq!(strict_bitrate("b22_222"), Some(Bitrate::B22_222));
+        assert_eq!(strict_bitrate("b51"), None);
+        assert_eq!(strict_bitrate(""), None);
+    }
+
+    #[test]
+    fn hostnames() {
+        assert!(valid_hostname("CAN2MQTTBridge"));
+        assert!(valid_hostname("gw-1"));
+        assert!(!valid_hostname(""));
+        assert!(!valid_hostname("-gw"));
+        assert!(!valid_hostname("gw-"));
+        assert!(!valid_hostname("my gateway"));
+        assert!(!valid_hostname("gw.local"));
+        assert!(!valid_hostname(&"a".repeat(41)));
     }
 
     fn encode(bytes: &[u8]) -> std::string::String {

@@ -25,13 +25,14 @@ use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::tls::{self, Trust};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either3};
 use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpAddress;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use gateway_core::config::BrokerConfig;
 use gateway_core::config::MQTT_BROKERS;
@@ -72,6 +73,22 @@ pub const SECONDARY: usize = 1;
 /// [`mqtt_task`].
 static PUBLISH_QUEUES: [Channel<CriticalSectionRawMutex, Publication, 16>; MQTT_BROKERS] =
     [Channel::new(), Channel::new()];
+
+/// Set to make a slot's task drop its connection and connect again (with
+/// whatever configuration is stored by then), see [`reconnect`].
+static RECONNECT: [Signal<CriticalSectionRawMutex, ()>; MQTT_BROKERS] =
+    [Signal::new(), Signal::new()];
+
+/// Makes broker `slot`'s task reconnect, so that changed settings (or a
+/// requested certificate capture) take effect right away.
+pub fn reconnect(slot: usize) {
+    RECONNECT[slot].signal(());
+}
+
+/// Whether broker `slot` is connected and subscribed.
+pub fn is_connected(slot: usize) -> bool {
+    CONNECTED[slot].load(Ordering::Relaxed)
+}
 
 /// Whether each broker slot is connected and subscribed, i.e. worth queueing
 /// publishes for.
@@ -196,6 +213,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
         }
     }
 
+    // A reconnect requested while connecting is moot: the settings in use
+    // were read after it.
+    RECONNECT[slot].reset();
     // Anything queued while this broker wasn't connected is stale by now.
     while PUBLISH_QUEUES[slot].try_receive().is_ok() {}
     if slot == PRIMARY {
@@ -206,8 +226,14 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     // Drains this broker's publish queue while polling for incoming
     // messages, dispatching them into `crate::translate`.
     loop {
-        match select(PUBLISH_QUEUES[slot].receive(), client.poll()).await {
-            Either::First(publication) => {
+        match select3(
+            PUBLISH_QUEUES[slot].receive(),
+            client.poll(),
+            RECONNECT[slot].wait(),
+        )
+        .await
+        {
+            Either3::First(publication) => {
                 let Ok(topic_string) = MqttString::from_str(publication.topic.as_str()) else {
                     continue;
                 };
@@ -223,9 +249,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
                     break;
                 }
             }
-            Either::Second(Ok(Event::Publish(msg))) => dispatch_publish(&msg).await,
-            Either::Second(Ok(_)) => {}
-            Either::Second(Err(_)) => break,
+            Either3::Second(Ok(Event::Publish(msg))) => dispatch_publish(&msg).await,
+            Either3::Second(Ok(_)) => {}
+            Either3::Second(Err(_)) | Either3::Third(()) => break,
         }
     }
     CONNECTED[slot].store(false, Ordering::Relaxed);

@@ -74,6 +74,18 @@ pub async fn set_eth_clock_gpio(gpio: u8) -> Result<(), ()> {
     config().await.set_u8(ETH_CLOCK_KEY, gpio).await
 }
 
+/// The user name and password the web server asks for.
+pub async fn web_credentials() -> (heapless::String<30>, heapless::String<30>) {
+    let defaults = GatewayConfig::default();
+    let mut store = config().await;
+    let user = store.get_str(Key::WebUsername).await;
+    let password = store.get_str(Key::WebPassword).await;
+    (
+        user.unwrap_or(defaults.web_username),
+        password.unwrap_or(defaults.web_password),
+    )
+}
+
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than
 /// once.
 pub async fn init() {

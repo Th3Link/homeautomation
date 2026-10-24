@@ -1,7 +1,8 @@
 //! The error body every failing API route answers with:
 //! `{"error":"<code>","message":"<text>"}` and the matching status.
 
-use picoserve::response::{IntoResponse, Json, StatusCode};
+use super::json::with_status;
+use picoserve::response::{IntoResponse, StatusCode};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
@@ -44,12 +45,14 @@ impl IntoResponse for ApiError {
         connection: picoserve::response::Connection<'_, R>,
         response_writer: W,
     ) -> Result<picoserve::ResponseSent, W::Error> {
-        let response = Json(Body {
+        let body = Body {
             error: self.code,
             message: self.message,
-        })
-        .into_response()
-        .with_status_code(self.status);
-        response_writer.write_response(connection, response).await
+        };
+        match with_status(self.status, &body).await {
+            Ok(response) => response_writer.write_response(connection, response).await,
+            // Only if the message is absurdly long: the status says enough.
+            Err(_) => self.status.write_to(connection, response_writer).await,
+        }
     }
 }
