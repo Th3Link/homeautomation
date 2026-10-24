@@ -6,8 +6,12 @@
 //! The gateway serves up to [`MQTT_BROKERS`] brokers at the same time (e.g.
 //! Home Assistant's and a Cerbo's): one [`mqtt_task`] per configured broker
 //! slot, each with its own connection and publish queue. Commands are
-//! accepted from every broker and go onto the CAN bus the same way;
-//! everything the gateway publishes is sent to every connected broker.
+//! accepted from every broker and go onto the CAN bus the same way.
+//!
+//! The brokers aren't equal, though: slot [`PRIMARY`] is the one the gateway
+//! reports to — everything it publishes goes there ([`publish`]) — while
+//! slot [`SECONDARY`] only listens. Publishing to the secondary broker is
+//! an exception that has to be asked for explicitly ([`publish_secondary`]).
 //!
 //! Wire protocol note: the original used ESP-IDF's `esp-mqtt`, which
 //! speaks MQTT 3.1.1. The `rust-mqtt` crate used here only implements
@@ -59,6 +63,11 @@ pub struct Publication {
     pub body: String<BODY_CAP>,
 }
 
+/// The broker slot everything is published to.
+pub const PRIMARY: usize = 0;
+/// The broker slot that only receives, apart from explicit exceptions.
+pub const SECONDARY: usize = 1;
+
 /// Outgoing publishes, one queue per broker slot, drained by that slot's
 /// [`mqtt_task`].
 static PUBLISH_QUEUES: [Channel<CriticalSectionRawMutex, Publication, 16>; MQTT_BROKERS] =
@@ -78,21 +87,31 @@ fn publication(topic: &str, body: &str) -> Publication {
     p
 }
 
-/// Queues `topic`/`body` for publication on every connected broker.
-/// Silently dropped for a broker whose queue is full, and not queued at all
-/// for one that is disconnected — matches the original's `IMQTT::publish`
-/// being a silent no-op while disconnected.
+/// Queues `topic`/`body` for publication on the primary broker. Silently
+/// dropped if its queue is full, and not queued at all while it is
+/// disconnected — matches the original's `IMQTT::publish` being a silent
+/// no-op while disconnected.
 pub async fn publish(topic: &str, body: &str) {
-    for slot in 0..MQTT_BROKERS {
-        if CONNECTED[slot].load(Ordering::Relaxed) {
-            let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));
-        }
+    publish_if_connected(PRIMARY, topic, body);
+}
+
+/// Queues `topic`/`body` for publication on the secondary broker, which
+/// otherwise only receives. Nothing uses this yet; it is the one place to
+/// start from when a message has to reach the secondary broker too.
+#[allow(dead_code)]
+pub async fn publish_secondary(topic: &str, body: &str) {
+    publish_if_connected(SECONDARY, topic, body);
+}
+
+fn publish_if_connected(slot: usize, topic: &str, body: &str) {
+    if CONNECTED[slot].load(Ordering::Relaxed) {
+        let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));
     }
 }
 
-/// Queues `topic`/`body` for one broker only (used for what a broker should
-/// get right after it connected).
-pub async fn publish_to(slot: usize, topic: &str, body: &str) {
+/// Queues `topic`/`body` for a broker that is just being connected to (it
+/// isn't marked as connected yet).
+pub async fn publish_on_connect(slot: usize, topic: &str, body: &str) {
     let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));
 }
 
@@ -179,7 +198,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
 
     // Anything queued while this broker wasn't connected is stale by now.
     while PUBLISH_QUEUES[slot].try_receive().is_ok() {}
-    crate::translate::publish_self_available(slot).await;
+    if slot == PRIMARY {
+        crate::translate::publish_self_available(slot).await;
+    }
     CONNECTED[slot].store(true, Ordering::Relaxed);
 
     // Drains this broker's publish queue while polling for incoming
