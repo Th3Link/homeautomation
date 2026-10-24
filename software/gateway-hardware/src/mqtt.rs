@@ -19,6 +19,7 @@
 
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
+use crate::tls::{self, Trust};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::{select, Either};
 use embassy_net::dns::DnsQueryType;
@@ -28,8 +29,11 @@ use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
+use gateway_core::config::BrokerConfig;
 use gateway_core::config::MQTT_BROKERS;
+use gateway_core::helper::BrokerAddress;
 use heapless::String;
+use heapless::Vec;
 use rust_mqtt::buffer::BumpBuffer;
 use rust_mqtt::client::event::{Event, Publish};
 use rust_mqtt::client::options::{
@@ -222,6 +226,68 @@ async fn resolve(stack: Stack<'static>, host: &str) -> Option<IpAddress> {
     None
 }
 
+/// How long a TLS handshake may take (the key exchange and, for RSA, the
+/// signature check are slow on this CPU, so be generous).
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Slots whose broker certificate should be captured and pinned on the next
+/// connection (see [`request_trust`]).
+static TRUST_REQUESTED: [AtomicBool; MQTT_BROKERS] =
+    [AtomicBool::new(false), AtomicBool::new(false)];
+
+/// Asks broker `slot`'s task to take the certificate its broker presents on
+/// its next connection and pin it (`mqtt-trust`).
+pub fn request_trust(slot: usize) {
+    TRUST_REQUESTED[slot].store(true, Ordering::Relaxed);
+}
+
+/// Connects the MQTT client over `net` and serves the session until it ends.
+async fn session<N: Transport>(
+    net: N,
+    settings: &BrokerConfig,
+    slot: usize,
+    address: &BrokerAddress<'_>,
+) {
+    let broker = slot + 1;
+    let mut bump_storage = [0u8; 2048];
+    let mut buffer = BumpBuffer::new(&mut bump_storage);
+    // Const generics: SUBSCRIBE/RECEIVE/SEND_MAXIMUM bound in-flight
+    // un-acked packets of each kind (we only ever have one outstanding
+    // at a time, but leave a little headroom); the gateway uses none
+    // of subscription identifiers, user properties, or topic aliases.
+    let mut client: MqttClient<'_, '_, N> = Client::new(&mut buffer);
+
+    let mut connect_options = ConnectOptions::new().clean_start();
+    if !settings.user.is_empty() {
+        if let Ok(user) = MqttString::from_str(settings.user.as_str()) {
+            connect_options = connect_options.user_name(user);
+        }
+    }
+    if !settings.password.is_empty() {
+        if let Ok(pw) = MqttBinary::from_slice(settings.password.as_bytes()) {
+            connect_options = connect_options.password(pw);
+        }
+    }
+
+    let client_id = MqttString::from_str("gateway-hardware").ok();
+    if let Err(e) = client.connect(net, &connect_options, client_id).await {
+        console_log!("mqtt{broker}: connect failed: {e:?}");
+        Timer::after(Duration::from_secs(5)).await;
+        return;
+    }
+    console_log!(
+        "mqtt{broker}: connected to {}:{}{}",
+        address.host,
+        address.port,
+        if address.tls { " (TLS)" } else { "" }
+    );
+
+    serve(&mut client, slot).await;
+
+    console_log!("mqtt{broker}: disconnected, reconnecting");
+    Timer::after(Duration::from_secs(2)).await;
+}
+
 /// The connection to one broker (slot 0 or 1), kept up forever: connects,
 /// serves, and reconnects after a pause when the connection is lost or the
 /// configuration changes. A slot that isn't enabled just idles.
@@ -241,11 +307,33 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             Timer::after(Duration::from_secs(10)).await;
             continue;
         };
-        if address.tls {
-            console_log!("mqtt{broker}: mqtts:// is not supported yet");
-            Timer::after(Duration::from_secs(30)).await;
-            continue;
-        }
+
+        // What an `mqtts://` connection has to satisfy, decided before
+        // connecting at all.
+        let capturing = address.tls && TRUST_REQUESTED[slot].swap(false, Ordering::Relaxed);
+        let pinned = if address.tls && !capturing && !settings.tls_insecure {
+            let pinned = crate::config::pinned_certificate(slot).await;
+            if pinned.is_none() {
+                console_log!(
+                    "mqtt{broker}: no certificate pinned for {} - run mqtt{}-trust \
+                     (or turn mqtt{}-insecure on)",
+                    address.host,
+                    if slot == 0 { "" } else { "2" },
+                    if slot == 0 { "" } else { "2" },
+                );
+                // Wake up early if the user asks to pin the certificate now.
+                for _ in 0..30 {
+                    if TRUST_REQUESTED[slot].load(Ordering::Relaxed) {
+                        break;
+                    }
+                    Timer::after(Duration::from_secs(1)).await;
+                }
+                continue;
+            }
+            pinned
+        } else {
+            None
+        };
 
         let Some(addr) = resolve(stack, address.host).await else {
             console_log!("mqtt{broker}: could not resolve \"{}\"", address.host);
@@ -262,41 +350,63 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         }
 
-        let mut bump_storage = [0u8; 2048];
-        let mut buffer = BumpBuffer::new(&mut bump_storage);
-        // Const generics: SUBSCRIBE/RECEIVE/SEND_MAXIMUM bound in-flight
-        // un-acked packets of each kind (we only ever have one outstanding
-        // at a time, but leave a little headroom); the gateway uses none
-        // of subscription identifiers, user properties, or topic aliases.
-        let mut client: MqttClient<'_, '_, TcpSocket<'_>> = Client::new(&mut buffer);
-
-        let mut connect_options = ConnectOptions::new().clean_start();
-        if !settings.user.is_empty() {
-            if let Ok(user) = MqttString::from_str(settings.user.as_str()) {
-                connect_options = connect_options.user_name(user);
-            }
-        }
-        if !settings.password.is_empty() {
-            if let Ok(pw) = MqttBinary::from_slice(settings.password.as_bytes()) {
-                connect_options = connect_options.password(pw);
-            }
-        }
-
-        let client_id = MqttString::from_str("gateway-hardware").ok();
-        if let Err(e) = client.connect(socket, &connect_options, client_id).await {
-            console_log!("mqtt{broker}: connect failed: {e:?}");
-            Timer::after(Duration::from_secs(5)).await;
+        if !address.tls {
+            session(socket, settings, slot, &address).await;
             continue;
         }
-        console_log!(
-            "mqtt{broker}: connected to {}:{}",
-            address.host,
-            address.port
-        );
 
-        serve(&mut client, slot).await;
-
-        console_log!("mqtt{broker}: disconnected, reconnecting");
-        Timer::after(Duration::from_secs(2)).await;
+        let mut read_record = [0u8; tls::READ_RECORD_BYTES];
+        let mut write_record = [0u8; tls::WRITE_RECORD_BYTES];
+        let mut captured: Vec<u8, { tls::CERT_CAP }> = Vec::new();
+        let trust = if capturing {
+            Trust::Capture(&mut captured)
+        } else if let Some(certificate) = &pinned {
+            Trust::Pinned(certificate)
+        } else {
+            Trust::AnyCertificate
+        };
+        let opened = embassy_time::with_timeout(
+            TLS_HANDSHAKE_TIMEOUT,
+            tls::open(socket, &mut read_record, &mut write_record, trust),
+        )
+        .await;
+        match opened {
+            Ok(Ok(connection)) if capturing => {
+                drop(connection);
+                pin_captured(slot, &captured).await;
+                Timer::after(Duration::from_secs(1)).await;
+            }
+            Ok(Ok(connection)) => session(connection, settings, slot, &address).await,
+            Ok(Err(e)) => {
+                console_log!("mqtt{broker}: TLS handshake failed: {e:?}");
+                if pinned.is_some() {
+                    console_log!(
+                        "mqtt{broker}: the broker's certificate doesn't match the pinned one \
+                         (new key? run mqtt-trust again)"
+                    );
+                }
+                Timer::after(Duration::from_secs(10)).await;
+            }
+            Err(_) => {
+                console_log!("mqtt{broker}: TLS handshake timed out");
+                Timer::after(Duration::from_secs(10)).await;
+            }
+        }
     }
+}
+
+/// Stores the certificate a capturing connection saw and reports its
+/// fingerprint.
+async fn pin_captured(slot: usize, certificate: &[u8]) {
+    let broker = slot + 1;
+    let digest = tls::fingerprint(certificate);
+    let stored = crate::config::set_pinned_certificate(slot, certificate)
+        .await
+        .is_ok();
+    console_log!(
+        "mqtt{broker}: {} certificate ({} bytes), SHA-256 {:02x?}",
+        if stored { "pinned" } else { "COULD NOT STORE" },
+        certificate.len(),
+        digest
+    );
 }

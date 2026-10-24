@@ -16,5 +16,6 @@ pub mod device_list;
 pub mod echo;
 pub mod ethernet;
 pub mod mqtt;
+pub mod tls;
 pub mod translate;
 pub mod update;

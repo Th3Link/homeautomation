@@ -16,14 +16,41 @@ use gateway_core::config::{Bitrate, BrokerConfig, GatewayConfig};
 /// Matches the `nvs` entry in `partitions.csv`.
 pub const CONFIG_PARTITION: Range<u32> = 0x9000..0x4C000;
 
-// Sized for the largest single value (mqtt_uri/mqtt_user/mqtt_password,
-// each up to 60 bytes) plus sequential-storage's own per-item overhead.
-const BUF: usize = 128;
+// Sized for the largest single value — a pinned broker certificate, up to
+// `tls::CERT_CAP` bytes (the strings are at most 60) — plus
+// sequential-storage's own per-item overhead.
+const BUF: usize = 2048 + 64;
 
 /// The flash-backed config store, keyed by [`Key`].
 pub type Config = ConfigStore<BUF>;
 
 static CONFIG: ConfigCell<BUF> = ConfigCell::new();
+
+/// Flash key of the pinned server certificate of MQTT broker slot 0; slot
+/// `n` lives at `TRUST_KEY_BASE + n`. The value is the certificate in DER
+/// form; an empty value means nothing is pinned.
+const TRUST_KEY_BASE: u8 = 0x80;
+
+/// The server certificate pinned for MQTT broker `slot` (see
+/// [`crate::tls`]), if there is one.
+pub async fn pinned_certificate(
+    slot: usize,
+) -> Option<heapless::Vec<u8, { crate::tls::CERT_CAP }>> {
+    let cert = config()
+        .await
+        .get_bytes(TRUST_KEY_BASE + slot as u8)
+        .await?;
+    (!cert.is_empty()).then_some(cert)
+}
+
+/// Pins `certificate` (DER) for broker `slot`; an empty slice forgets the
+/// pinned one.
+pub async fn set_pinned_certificate(slot: usize, certificate: &[u8]) -> Result<(), ()> {
+    config()
+        .await
+        .set_bytes(TRUST_KEY_BASE + slot as u8, certificate)
+        .await
+}
 
 /// Flash key of the RMII clock pin setting (`u8`, 16 or 17). A raw key,
 /// clear of [`Key`]'s values: it describes how the board is wired, not the
