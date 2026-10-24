@@ -41,4 +41,5 @@ pub mod helper;
 pub mod lamp;
 pub mod relais;
 pub mod sensor;
+pub mod tls_pin;
 pub mod topics;

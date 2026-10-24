@@ -21,6 +21,14 @@ async fn main(spawner: Spawner) -> ! {
 
     console_log!("gateway-hardware booting");
 
+    // A small heap, for the RSA signature check of TLS and nothing else:
+    // everything else in this crate stays on heapless/static allocation.
+    esp_alloc::heap_allocator!(size: 32 * 1024);
+
+    // TLS needs unpredictable random numbers; without a radio the hardware
+    // generator only gets entropy from the ADC noise source.
+    gateway_hardware::tls::init_entropy(peripherals.RNG, peripherals.ADC1);
+
     flash::init(peripherals.FLASH);
     config::init().await;
     let cfg = config::config().await.load_or_init().await;

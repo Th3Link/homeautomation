@@ -99,6 +99,13 @@ enum Commands<'a> {
     /// (encrypted, but not authenticated) instead of the pinned one.
     #[set(one_of = ["on", "off"])]
     MqttInsecure(OnOff),
+    /// Pin the first broker's TLS certificate: the next connection to it
+    /// takes the certificate it presents (it must be self-signed) and
+    /// stores it; from then on only that certificate is accepted. Check the
+    /// SHA-256 fingerprint printed in the log against the broker's own.
+    MqttTrust,
+    /// Forget the first broker's pinned certificate.
+    MqttUntrust,
     /// Set the second MQTT broker's URI (see `mqtt-uri`).
     Mqtt2Uri(&'a str),
     /// Set the second MQTT broker's username.
@@ -112,6 +119,10 @@ enum Commands<'a> {
     /// With `mqtts://`, accept any certificate the second broker presents.
     #[set(one_of = ["on", "off"])]
     Mqtt2Insecure(OnOff),
+    /// Pin the second broker's TLS certificate (see `mqtt-trust`).
+    Mqtt2Trust,
+    /// Forget the second broker's pinned certificate.
+    Mqtt2Untrust,
     /// Set the web UI's Basic Auth username.
     WebUsername(&'a str),
     /// Set the web UI's Basic Auth password.
@@ -292,6 +303,10 @@ async fn handle_command(
         Commands::MqttInsecure(v) => {
             respond(writer, &cmd_mqtt_insecure(0, matches!(v, OnOff::On)).await).await
         }
+        Commands::MqttTrust => respond(writer, &cmd_mqtt_trust(0).await).await,
+        Commands::MqttUntrust => respond(writer, &cmd_mqtt_untrust(0).await).await,
+        Commands::Mqtt2Trust => respond(writer, &cmd_mqtt_trust(1).await).await,
+        Commands::Mqtt2Untrust => respond(writer, &cmd_mqtt_untrust(1).await).await,
         Commands::Mqtt2Uri(s) => respond(writer, &cmd_mqtt_uri(1, s).await).await,
         Commands::Mqtt2User(s) => {
             let keys = config::Key::broker(1);
@@ -379,18 +394,21 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         )
         .await?;
         if broker.uri.starts_with("mqtts://") {
-            respond(
-                writer,
-                &fmt_msg(format_args!(
-                    "{name}_tls: {}",
-                    if broker.tls_insecure {
-                        "insecure (any certificate)"
-                    } else {
-                        "pinned certificate"
-                    }
-                )),
-            )
-            .await?;
+            let pinned = crate::config::pinned_certificate(slot).await;
+            let line = if broker.tls_insecure {
+                fmt_msg(format_args!("{name}_tls: insecure (any certificate)"))
+            } else if let Some(certificate) = pinned {
+                let digest = crate::tls::fingerprint(&certificate);
+                fmt_msg(format_args!(
+                    "{name}_tls: pinned, SHA-256 {:02x}{:02x}{:02x}{:02x}...",
+                    digest[0], digest[1], digest[2], digest[3]
+                ))
+            } else {
+                fmt_msg(format_args!(
+                    "{name}_tls: NO certificate pinned (run {name}-trust)"
+                ))
+            };
+            respond(writer, &line).await?;
         }
     }
     respond(
@@ -536,6 +554,22 @@ async fn cmd_mqtt_enabled(slot: usize, enabled: bool) -> String<LINE_CAP> {
         return fmt_msg(format_args!("failed to persist {name}"));
     }
     fmt_msg(format_args!("{name} set to {enabled}"))
+}
+
+async fn cmd_mqtt_trust(slot: usize) -> String<LINE_CAP> {
+    crate::mqtt::request_trust(slot);
+    fmt_msg(format_args!(
+        "{}: the next connection pins the broker's certificate - watch the log for its fingerprint",
+        broker_name(slot)
+    ))
+}
+
+async fn cmd_mqtt_untrust(slot: usize) -> String<LINE_CAP> {
+    let name = broker_name(slot);
+    match config::set_pinned_certificate(slot, &[]).await {
+        Ok(()) => fmt_msg(format_args!("{name}: pinned certificate forgotten")),
+        Err(()) => fmt_msg(format_args!("{name}: failed to forget the certificate")),
+    }
 }
 
 async fn cmd_mqtt_insecure(slot: usize, insecure: bool) -> String<LINE_CAP> {

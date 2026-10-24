@@ -23,8 +23,9 @@ refuses more than four unconfirmed ones).
   `available` announcement) goes to every connected broker. Console
   commands `mqtt-…` configure the first slot, `mqtt2-…` the second; a slot
   that isn't enabled stays idle.
-- Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`). No
-  encryption for this scheme.
+- Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`,
+  unencrypted) or `mqtts://<host>[:<port>]` (port defaults to `8883`,
+  [encrypted](#encryption-mqtts)).
 - Credentials: optional per-broker username/password, sent as the MQTT
   CONNECT username/password if non-empty.
 - Client id: `"gateway-hardware"`, fixed (on each broker).
@@ -117,6 +118,31 @@ The original's `Logging` decorator mirrors sent/received CAN frames here
 when a runtime "MQTT logging" flag is enabled (toggled via the
 `mqtt_logging` `/control.json` verb). Reserved for parity; not yet wired
 into `gateway-hardware`'s CAN transport.
+
+### Encryption (`mqtts://`)
+
+`mqtts://` connections use TLS 1.3 (one cipher suite,
+`TLS_AES_128_GCM_SHA256`; every current Mosquitto/OpenSSL offers it).
+Brokers on a LAN mostly have self-signed certificates and the gateway has
+no clock, so instead of validating a certificate chain it *pins the
+broker's public key*:
+
+1. `mqtt-trust` (`mqtt2-trust` for the second broker) makes the next
+   connection a capture: the certificate the broker presents is stored in
+   flash and its SHA-256 fingerprint is logged, to compare with
+   `openssl x509 -in <cert> -noout -fingerprint -sha256`. The request is
+   not persisted; it is also lost on a restart.
+2. From then on the broker must present a certificate with that same
+   public key and sign the handshake with the matching private key, or the
+   connection is refused. A renewed certificate with the same key is
+   accepted; a new key needs `mqtt-trust` again.
+
+`mqtt-untrust` forgets the pinned certificate (a TLS broker without one
+isn't connected to), `mqtt-insecure on` accepts any certificate instead:
+encrypted, but a man in the middle isn't excluded.
+
+Limits: certificates with ECDSA P-256/P-384 or RSA keys (at most 2048
+bytes), and validity dates, the issuer and the host name are not checked.
 
 ## Command topics (broker → gateway)
 
