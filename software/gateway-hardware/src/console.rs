@@ -5,11 +5,12 @@
 //! module's doc comment for the session lifecycle.
 //!
 //! The command set covers what `ConsoleCommandDevice.cpp` exposed (device
-//! id/type/hwrev/custom-string/bitrate) plus the WiFi/MQTT/web-auth fields
-//! `Command::save_config` accepts over `/control.json` — unlike a
-//! `cancomponent-rs` node, this gateway needs WiFi/MQTT credentials before
-//! its own web UI is even reachable, so the serial console has to be able
-//! to bootstrap them too. The original's generic `nvs_set`/`nvs_get`
+//! id/type/hwrev/custom-string/bitrate) plus the hostname/MQTT/web-auth
+//! fields `Command::save_config` accepts over `/control.json` — unlike a
+//! `cancomponent-rs` node, this gateway needs MQTT credentials before it
+//! is useful, so the serial console has to be able to bootstrap them (the
+//! network side needs no setup: DHCPv4 plus IPv6 SLAAC on the wired
+//! link). The original's generic `nvs_set`/`nvs_get`
 //! passthrough (`cmd_nvs.c`) isn't reproduced — every value it could touch
 //! now has its own typed command here instead.
 
@@ -29,7 +30,7 @@ use esp_hal::gpio::{InputPin, OutputPin};
 use esp_hal::uart;
 use esp_hal::Async;
 use gateway_core::can_message_type::CanMessageType;
-use gateway_core::config::{Bitrate, WifiMode};
+use gateway_core::config::Bitrate;
 use gateway_core::device_type::DeviceType;
 use heapless::String;
 
@@ -77,16 +78,7 @@ enum Commands<'a> {
     /// Set the CAN bus bitrate.
     #[set(one_of = ["b22_222", "b25", "b50", "b100"])]
     Bitrate(BitrateArg),
-    /// Set the WiFi mode.
-    #[set(one_of = ["client", "ap", "off"])]
-    WifiMode(WifiModeArg),
-    /// Set the WiFi SSID (station or access-point mode).
-    WifiSsid(&'a str),
-    /// Set the WiFi password (station or access-point mode; under 8
-    /// characters forces access-point mode with the setup-AP fallback
-    /// credentials, same as the web UI).
-    WifiPassword(&'a str),
-    /// Set the DHCP/web hostname.
+    /// Set the hostname sent to the DHCP server (takes effect after restart).
     Hostname(&'a str),
     /// Set the MQTT broker URI, e.g. `mqtt://192.168.1.10:1883`.
     MqttUri(&'a str),
@@ -140,19 +132,6 @@ impl FromStr for BitrateArg {
             "b22_222" | "b25" | "b50" | "b100" => Bitrate::from_name(s),
             _ => return Err(()),
         }))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct WifiModeArg(WifiMode);
-
-impl FromStr for WifiModeArg {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "client" | "ap" | "off" => Ok(Self(WifiMode::from_name(s))),
-            _ => Err(()),
-        }
     }
 }
 
@@ -270,21 +249,6 @@ async fn handle_command(
         Commands::Hwrev(rev) => respond(writer, &cmd_hwrev(rev).await).await,
         Commands::CustomString(s) => respond(writer, &cmd_custom_string(s).await).await,
         Commands::Bitrate(b) => respond(writer, &cmd_bitrate(b.0).await).await,
-        Commands::WifiMode(m) => respond(writer, &cmd_wifi_mode(m.0).await).await,
-        Commands::WifiSsid(s) => {
-            respond(
-                writer,
-                &cmd_str_field(s, config::Key::WifiSsid, "wifi_ssid").await,
-            )
-            .await
-        }
-        Commands::WifiPassword(s) => {
-            respond(
-                writer,
-                &cmd_str_field(s, config::Key::WifiPassword, "wifi_password").await,
-            )
-            .await
-        }
         Commands::Hostname(s) => {
             respond(
                 writer,
@@ -360,16 +324,6 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     respond(
         writer,
         &fmt_msg(format_args!("can_bitrate: {}", cfg.can_bitrate.as_str())),
-    )
-    .await?;
-    respond(
-        writer,
-        &fmt_msg(format_args!("wifi_mode: {}", cfg.wifi_mode.as_str())),
-    )
-    .await?;
-    respond(
-        writer,
-        &fmt_msg(format_args!("wifi_ssid: {}", cfg.wifi_ssid)),
     )
     .await?;
     respond(writer, &fmt_msg(format_args!("hostname: {}", cfg.hostname))).await?;
@@ -466,21 +420,6 @@ async fn cmd_bitrate(bitrate: Bitrate) -> String<LINE_CAP> {
         return str_msg("failed to persist can_bitrate");
     }
     fmt_msg(format_args!("can_bitrate set to {}", bitrate.as_str()))
-}
-
-async fn cmd_wifi_mode(mode: WifiMode) -> String<LINE_CAP> {
-    if config()
-        .await
-        .set_str(config::Key::WifiMode, mode.as_str())
-        .await
-        .is_err()
-    {
-        return str_msg("failed to persist wifi_mode");
-    }
-    fmt_msg(format_args!(
-        "wifi_mode set to {} (takes effect after restart)",
-        mode.as_str()
-    ))
 }
 
 async fn cmd_str_field(value: &str, key: config::Key, name: &str) -> String<LINE_CAP> {

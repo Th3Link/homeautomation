@@ -35,6 +35,27 @@ pub fn hex_to_int(s: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
+/// Splits an MQTT broker URI of the form `mqtt://host[:port]` into
+/// `(host, port)`, defaulting the port to 1883. An IPv6 literal must be
+/// bracketed, as in any URI: `mqtt://[fd00::1]:1883` yields `"fd00::1"`
+/// (brackets stripped, ready for a resolver). Returns `None` for any other
+/// scheme or an unparsable port.
+pub fn parse_broker_uri(uri: &str) -> Option<(&str, u16)> {
+    let rest = uri.strip_prefix("mqtt://")?;
+    if let Some(bracketed) = rest.strip_prefix('[') {
+        let (host, after) = bracketed.split_once(']')?;
+        return match after.strip_prefix(':') {
+            Some(port) => Some((host, port.parse().ok()?)),
+            None if after.is_empty() => Some((host, 1883)),
+            None => None,
+        };
+    }
+    match rest.rsplit_once(':') {
+        Some((host, port)) => Some((host, port.parse().ok()?)),
+        None => Some((rest, 1883)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +100,37 @@ mod tests {
     fn hex_to_int_rejects_garbage() {
         assert_eq!(hex_to_int("not hex"), None);
         assert_eq!(hex_to_int(""), None);
+    }
+
+    #[test]
+    fn broker_uri_defaults_port_and_parses_host() {
+        assert_eq!(
+            parse_broker_uri("mqtt://broker.lan"),
+            Some(("broker.lan", 1883))
+        );
+        assert_eq!(
+            parse_broker_uri("mqtt://10.0.0.5:1884"),
+            Some(("10.0.0.5", 1884))
+        );
+    }
+
+    #[test]
+    fn broker_uri_accepts_bracketed_ipv6() {
+        assert_eq!(
+            parse_broker_uri("mqtt://[fd00::1]"),
+            Some(("fd00::1", 1883))
+        );
+        assert_eq!(
+            parse_broker_uri("mqtt://[fd00::1]:8883"),
+            Some(("fd00::1", 8883))
+        );
+    }
+
+    #[test]
+    fn broker_uri_rejects_bad_input() {
+        assert_eq!(parse_broker_uri("http://broker"), None);
+        assert_eq!(parse_broker_uri("mqtt://host:notaport"), None);
+        assert_eq!(parse_broker_uri("mqtt://[fd00::1"), None);
+        assert_eq!(parse_broker_uri("mqtt://[fd00::1]junk"), None);
     }
 }

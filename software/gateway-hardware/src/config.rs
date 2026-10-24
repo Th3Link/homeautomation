@@ -11,10 +11,10 @@
 use common_hardware::config_store::{ConfigCell, ConfigStore};
 use core::ops::Range;
 pub use gateway_core::config::Key;
-use gateway_core::config::{Bitrate, GatewayConfig, WifiMode};
+use gateway_core::config::{Bitrate, GatewayConfig};
 
 /// Matches the `nvs` entry in `partitions.csv`.
-pub const CONFIG_PARTITION: Range<u32> = 0x9000..0xFC000;
+pub const CONFIG_PARTITION: Range<u32> = 0x9000..0x4C000;
 
 // Sized for the largest single value (mqtt_uri/mqtt_user/mqtt_password,
 // each up to 60 bytes) plus sequential-storage's own per-item overhead.
@@ -92,16 +92,6 @@ impl LoadOrInit for Config {
             }};
         }
 
-        let wifi_mode = match self.get_str::<20>(Key::WifiMode).await {
-            Some(v) => WifiMode::from_name(v.as_str()),
-            None => {
-                let _ = self
-                    .set_str(Key::WifiMode, defaults.wifi_mode.as_str())
-                    .await;
-                defaults.wifi_mode
-            }
-        };
-
         let can_bitrate = match self.get_u8(Key::CanBitrate).await {
             Some(v) => Bitrate::from(v),
             None => {
@@ -121,9 +111,6 @@ impl LoadOrInit for Config {
         };
 
         GatewayConfig {
-            wifi_mode,
-            wifi_ssid: str_field!(Key::WifiSsid, defaults.wifi_ssid),
-            wifi_password: str_field!(Key::WifiPassword, defaults.wifi_password),
             hostname: str_field!(Key::Hostname, defaults.hostname),
             mqtt_enabled,
             mqtt_uri: str_field!(Key::MqttUri, defaults.mqtt_uri),

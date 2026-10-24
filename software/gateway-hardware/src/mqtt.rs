@@ -72,14 +72,6 @@ const SUBSCRIBE_TOPICS: &[&str] = &[
     "canbus/debug/#",
 ];
 
-fn parse_broker_uri(uri: &str) -> Option<(&str, u16)> {
-    let rest = uri.strip_prefix("mqtt://")?;
-    match rest.rsplit_once(':') {
-        Some((host, port)) => Some((host, port.parse().ok()?)),
-        None => Some((rest, 1883)),
-    }
-}
-
 #[embassy_executor::task]
 pub async fn mqtt_task(stack: Stack<'static>) {
     loop {
@@ -89,19 +81,24 @@ pub async fn mqtt_task(stack: Stack<'static>) {
             continue;
         }
 
-        let Some((host, port)) = parse_broker_uri(&cfg.mqtt_uri) else {
+        let Some((host, port)) = gateway_core::helper::parse_broker_uri(&cfg.mqtt_uri) else {
             console_log!("mqtt: invalid broker uri \"{}\"", cfg.mqtt_uri);
             Timer::after(Duration::from_secs(10)).await;
             continue;
         };
 
+        // IPv4 first, IPv6 (AAAA) as the fallback; IP literals of either
+        // family resolve to themselves.
         let addr = match stack.dns_query(host, DnsQueryType::A).await {
             Ok(addrs) if !addrs.is_empty() => addrs[0],
-            _ => {
-                console_log!("mqtt: could not resolve \"{host}\"");
-                Timer::after(Duration::from_secs(10)).await;
-                continue;
-            }
+            _ => match stack.dns_query(host, DnsQueryType::Aaaa).await {
+                Ok(addrs) if !addrs.is_empty() => addrs[0],
+                _ => {
+                    console_log!("mqtt: could not resolve \"{host}\"");
+                    Timer::after(Duration::from_secs(10)).await;
+                    continue;
+                }
+            },
         };
 
         let mut rx_buf = [0u8; 2048];

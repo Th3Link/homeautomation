@@ -1,6 +1,6 @@
 # ADR 0002: Ethernet is the primary network path, WiFi is a fallback, never both at once
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0013](0013-ethernet-only-no-wifi.md)
 
 ## Context
 

@@ -7,7 +7,7 @@
 The original C++ web server has two auth gaps, found while porting
 `Web.cpp`/`http_handler.cpp`:
 
-- `/state.json` (full status dump: WiFi/MQTT config including credential
+- `/state.json` (full status dump: MQTT config including credential
   fields, device list, counters) and `/update/data` (the firmware-upload
   endpoint) have **no authentication check at all**, regardless of
   configuration.
@@ -33,7 +33,7 @@ faithfully-reproducible quirk.
   original, where a device with no username configured yet was fully
   open. The default credentials
   (`CAN2MQTTSETUP`/`Can2MqttPass`, matching the original's own hardcoded
-  setup-AP fallback values) still apply out of the box, so this doesn't
+  setup values) still apply out of the box, so this doesn't
   actually block first-time setup, it just means setup always requires
   knowing those defaults rather than sometimes requiring no credentials
   at all.

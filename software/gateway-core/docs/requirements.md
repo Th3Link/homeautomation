@@ -41,7 +41,13 @@ specification this section summarizes.
   the same `can_all`/`can_by_type`/`can_selected`/`can_by_uid` targeting
   model. Known to need rework — see
   [`technical-debt.md`](technical-debt.md#the-controljson-rpc-api-is-not-good).
-- **Consolidated configuration**: WiFi/Ethernet, MQTT broker, web auth,
+- **Wired network, zero setup**: Ethernet is the only network path (no
+  WiFi — [ADR 0013](adr/0013-ethernet-only-no-wifi.md), a deliberate
+  deviation from the original). The gateway runs dual-stack (DHCPv4 plus IPv6
+  SLAAC), announcing its hostname over DHCP, handles the cable being
+  plugged in or swapped at runtime, and needs no network configuration
+  before it is reachable.
+- **Consolidated configuration**: hostname, MQTT broker, web auth,
   this gateway's own CAN identity, and CAN-OTA pacing — one typed schema,
   unlike the original's ~17 independently-defaulted NVS entries scattered
   across modules.
@@ -52,8 +58,8 @@ specification this section summarizes.
   [`technical-debt.md`](technical-debt.md#can-bus-ota-is-unreliable) and
   [ADR 0010](../../../docs/adr/0010-can-ota-rework-planned.md).
 - **Serial commissioning console**: device identity (id/type/hardware
-  revision/custom string/CAN bitrate), WiFi/MQTT/web-auth bootstrap
-  fields, and basic bring-up commands (ping, restart).
+  revision/custom string/CAN bitrate), hostname/MQTT/web-auth bootstrap
+  fields (the MQTT broker is set here on first setup), and basic bring-up commands (ping, restart).
 - **Web config UI**, authenticated — see
   [ADR 0008](adr/0008-mandatory-web-authentication.md) for the one
   deliberate behavioral difference from the original here (mandatory
@@ -66,10 +72,10 @@ specification this section summarizes.
   `cargo test` on a normal machine, with no hardware, emulator, or esp
   toolchain involved — see
   [ADR 0001](adr/0001-workspace-split-core-hardware.md).
-- **No heap allocation** outside of what a single third-party dependency
-  (WiFi, via `esp-radio`) requires internally — everything else in
-  `gateway-hardware`, and all of `gateway-core`, uses `heapless`/static
-  allocation.
+- **No heap allocation**: `gateway-hardware` and `gateway-core` use
+  `heapless`/static allocation throughout, with no global allocator at
+  all (the only thing that ever needed one was WiFi, removed in
+  [ADR 0013](adr/0013-ethernet-only-no-wifi.md)).
 - **Documented, typed configuration** with one schema and one set of
   defaults, replacing the original's per-module NVS scatter.
 - **No silent security regressions** relative to the original — see

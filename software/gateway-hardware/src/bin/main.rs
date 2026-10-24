@@ -6,20 +6,15 @@ use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
-use gateway_core::config::resolve_wifi_credentials;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
-use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update, wifi};
+use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz));
-
-    // WiFi (esp-radio) needs a real heap for its internal buffers —
-    // everything else in this crate stays on heapless/static allocation.
-    esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
@@ -53,11 +48,9 @@ async fn main(spawner: Spawner) -> ! {
 
     update::init().await;
 
-    // Ethernet is the primary network path in practice (the gateway is
-    // normally installed hardwired next to the CAN bus wiring) and, on
-    // this board, WiFi and Ethernet's APLL-derived RMII clock can't
-    // coexist safely (see ethernet.rs's module doc) — so WiFi is only
-    // ever brought up as a fallback when no Ethernet link shows up.
+    // Ethernet is the only network path (ADR 0013). A DHCP client, so
+    // nothing needs configuring before the gateway is reachable; the
+    // cable can be plugged in at any time.
     let stack = match ethernet::bring_up(EthernetPins {
         eth: peripherals.ETH,
         rxd0: peripherals.GPIO25,
@@ -73,27 +66,10 @@ async fn main(spawner: Spawner) -> ! {
     })
     .await
     {
-        Some(eth) => Some(ethernet::init_stack(eth, &spawner).await),
+        Some(eth) => Some(ethernet::init_stack(eth, &spawner, cfg.hostname.as_str()).await),
         None => {
-            let (mode, ssid, password) = resolve_wifi_credentials(
-                cfg.wifi_mode,
-                cfg.wifi_ssid.as_str(),
-                cfg.wifi_password.as_str(),
-            );
-
-            if let Some((outcome, controller)) =
-                wifi::bring_up(peripherals.WIFI, mode, ssid.as_str(), password.as_str()).await
-            {
-                let stack = wifi::init_stack(outcome, &spawner).await;
-                // `controller` must stay alive for as long as WiFi should
-                // keep running; leaking it here is deliberate — this
-                // device never turns WiFi back off once brought up.
-                core::mem::forget(controller);
-                Some(stack)
-            } else {
-                console_log!("wifi: disabled (wifi_mode = off) and no ethernet link");
-                None
-            }
+            console_log!("ethernet: PHY init failed, running without network");
+            None
         }
     };
 
