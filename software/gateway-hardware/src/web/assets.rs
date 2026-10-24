@@ -1,7 +1,7 @@
 //! The browser UI: the three files built by `gateway-web` (`npm run build`
 //! there), gzip'd and baked into the firmware.
 //!
-//! The UI routes by path (`/`, `/mqtt`, `/gateway`, `/devices/:device`), so
+//! The UI routes by path (`/`, `/sensors`, `/mqtt`, `/gateway`, `/devices/:device`), so
 //! each of those answers with the same `index.html`; the code then shows the
 //! page for the path it was loaded from.
 
@@ -18,6 +18,7 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     router
         .route("/", get(index))
         .route("/mqtt", get(index))
+        .route("/sensors", get(index))
         .route("/gateway", get(index))
         .route(
             ("/devices", parse_path_segment::<DeviceName>()),

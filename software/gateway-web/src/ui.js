@@ -107,6 +107,9 @@ export const Button = ({ children, kind, onClick, disabled }) => {
   return html`<button class=${kind || ''} disabled=${disabled || busy} onClick=${click}>${children}</button>`;
 };
 
+// A byte as `0x0a`.
+export const hex = (n) => '0x' + n.toString(16).padStart(2, '0');
+
 // Minutes as "3 min", "2 h", "1 d".
 export function ago(minutes) {
   if (minutes < 1) return 'now';

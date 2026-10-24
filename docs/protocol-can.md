@@ -102,8 +102,8 @@ intentional, not omissions:
 | 19 | `FlashWrite` | 160 | `HeatingTarget` |
 | 20 | `FlashVerify` | 161 | `HeatingEnergy` |
 | 21 | `FlashProgress` | 162 | `HeatingEmergency` |
-| 22 | `FlashComplete` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 30 | `ButtonEvent` | | |
+| 22 | `FlashComplete` | 163 | `HeatingManual` |
+| 30 | `ButtonEvent` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 31 | `TemperatureSensor` | | |
 | 41 | `HwRev` | | |
 | 42 | `ExtensionMode` | | |
@@ -216,8 +216,9 @@ ignored.
 | `HeatingTarget` (160) | `[flow_target i16][flags]` | Wanted flow temperature of the heating circuit. Flag bit 0: supply the circuit from the tank instead of directly from the heat pump. |
 | `HeatingEnergy` (161) | `[power i32 W][flags]` | Available (feed-in) power; negative while importing. Flag bit 0: the heating rod is released. |
 | `HeatingEmergency` (162) | `[stage u8][tank_target i16]` | Emergency operation: run the rod at `stage` (0-3) regardless of the available power, until the tank reaches `tank_target`. Stage 0 means no emergency. |
+| `HeatingManual` (163) | `[flags][relay u8][state]` | Commissioning: takes the relays 6-10 (valves, mixer, pump) out of the controller's hands. Flag bit 0: manual mode on (the relays all go off when it starts; without the flag the controller has them back). `relay` 6-10 (`0xFF` = none) is switched on/off by `state` (bit 0), in manual mode only and never both mixer directions at once. The rod (relays 0-5) can't be reached. Manual mode ends by itself after 10 minutes without a switch. Not part of the 30 s repeat rule. |
 
-Every message must be repeated at least every 30 s (the intended rate is 5
+Every message but `HeatingManual` must be repeated at least every 30 s (the intended rate is 5
 s); **30 s without one counts as the input being gone** — without
 `HeatingEnergy`/`HeatingEmergency` all rod stages switch off, without
 `HeatingTarget` the valves and the pump return to direct operation.

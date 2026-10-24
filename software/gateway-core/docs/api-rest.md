@@ -46,8 +46,8 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /config` | `hostname`, `can_bitrate` (`b22_222`, `b25`, `b50`, `b100`), `update_delay_ms`, `eth_clock` (16 or 17), `web_username`, `web_password_set` |
-| `PATCH /config` | any of those (+ `web_password`, at least 8 characters). Answers `{"restart_required": true}` when the hostname, bitrate or clock pin changed: they are read at boot |
+| `GET /config` | `hostname`, `can_bitrate` (`b22_222`, `b25`, `b50`, `b100`), `update_delay_ms`, `web_username`, `web_password_set` |
+| `PATCH /config` | any of those (+ `web_password`, at least 8 characters). Answers `{"restart_required": true}` when the hostname or bitrate changed: they are read at boot |
 
 | Route | |
 |---|---|
@@ -73,10 +73,19 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | `PUT /devices/:device/heating/target` | `{"flow_c": 45.5, "tank": true}` |
 | `PUT /devices/:device/heating/energy` | `{"power_w": 6200, "rod_enabled": true}` |
 | `PUT /devices/:device/heating/emergency` | `{"stage": 0-3, "tank_c": 55}` |
+| `PUT /devices/:device/heating/manual` | commissioning: `{"enabled": true}` takes the relays 6-10 (valves, mixer, pump) from the controller (they go off), `{"enabled": true, "relay": 8, "on": true}` switches one (6-10; the mixer directions exclude each other), `{"enabled": false}` hands them back. Ends by itself after 10 minutes without a switch. The rod can't be reached. Sent as `HeatingManual`, [`protocol-can.md`](../../../docs/protocol-can.md) |
 
 The heating bodies mean what the MQTT topics' do
 ([`protocol-mqtt.md`](protocol-mqtt.md)); the controller counts each as gone
 30 s after it last arrived.
+
+## Sensors
+
+| Route | |
+|---|---|
+| `GET /sensors` | every sensor seen on the bus and its latest reading, sixteen per page: `{"total", "offset", "sensors": [{"device", "device_key", "kind", "unit", "sensor_id", "value", "age_s"}]}`. `kind` is `temperature`, `humidity`, `pressure`, `co2`, `voc` or `air_quality`; `sensor_id` is the sensor's own id (the 1-Wire address of a DS18B20). `?offset=` continues, `?device=` (name or `0x…` key) filters |
+
+The list is kept in RAM (48 sensors; a full list drops the one that reported longest ago), so it is empty after a restart until the sensors report again.
 
 ## Firmware
 
@@ -94,7 +103,7 @@ package before sending.
 
 ## The browser UI
 
-`GET /`, `/mqtt`, `/gateway`, `/devices/:device` answer with `index.html`,
+`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/devices/:device` answer with `index.html`,
 `/assets/app.js` and `/assets/style.css` with the rest, all gzip'd and part
 of the firmware (`gateway-hardware/src/web/assets.rs`). Edit the sources in
 `software/gateway-web/src` and run `npm run build` there: the result in

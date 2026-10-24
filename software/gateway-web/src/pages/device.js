@@ -1,6 +1,7 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import * as api from '../api.js';
 import { FirmwareUpload } from '../firmware-upload.js';
+import { SensorTable } from './sensors.js';
 import { html, useLoad, run, notify, ago, Section, Loading, Field, Button } from '../ui.js';
 
 // Device types as the CAN protocol numbers them.
@@ -22,6 +23,8 @@ export function Device({ device }) {
     ${HAS_ROLLERSHUTTERS.includes(data.device_type) && html`<${Relays} d=${data} kind="rollershutter" />`}
     ${HAS_LAMPS.includes(data.device_type) && html`<${Lamps} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${Heating} d=${data} />`}
+    ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
+    <${Section} title="Sensors"><${SensorTable} device=${data.name || data.key} /><//>
     <${Settings} d=${data} reload=${reload} />
     <${Section} title="Firmware">
       <p class="muted">Sends a firmware image to this device over the CAN bus. It takes a few minutes.</p>
@@ -129,6 +132,68 @@ function Heating({ d }) {
         <${Field} label="Stage (0-3)"><input type="number" min="0" max="3" value=${stage} onInput=${(e) => setStage(+e.target.value)} /><//>
         <${Field} label="Tank (°C)"><input type="number" step="0.5" value=${tankC} onInput=${(e) => setTankC(+e.target.value)} /><//>
         <${Button} kind="danger" onClick=${() => run(() => api.devices.heating(id, 'emergency', { stage, tank_c: tankC }), 'Emergency sent')}>Send<//>
+      </div>
+    <//>`;
+}
+
+// The relays 6-10 of the controller, the ones manual mode hands over.
+const MANUAL_RELAYS = [
+  [6, 'Flow valve'],
+  [7, 'Return valve'],
+  [8, 'Mixer towards hot'],
+  [9, 'Mixer towards cold'],
+  [10, 'Circuit pump'],
+];
+const MANUAL_TIMEOUT_MS = 10 * 60 * 1000;
+
+function HeatingManual({ d }) {
+  const id = d.name || d.key;
+  const [manual, setManual] = useState(false);
+  const [on, setOn] = useState({});
+  const timer = useRef(null);
+
+  // The controller ends manual mode itself after 10 minutes without a
+  // switch, and never says so: this follows the same clock.
+  const rearm = () => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      setManual(false);
+      setOn({});
+    }, MANUAL_TIMEOUT_MS);
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const toggleMode = async () => {
+    const enable = !manual;
+    if (await run(() => api.devices.heatingManual(id, enable), enable ? 'Manual mode on: valves, mixer and pump are off' : 'Manual mode off: the controller has them back')) {
+      setManual(enable);
+      setOn({});
+      if (enable) rearm();
+      else clearTimeout(timer.current);
+    }
+  };
+
+  const toggle = (relay) => async () => {
+    const next = !on[relay];
+    if (await run(() => api.devices.heatingManual(id, true, relay, next), `Relay ${relay} ${next ? 'on' : 'off'}`)) {
+      setOn({ ...on, [relay]: next });
+      rearm();
+    }
+  };
+
+  // The two mixer directions must never be on together.
+  const blocked = (relay) => (relay === 8 && on[9]) || (relay === 9 && on[8]);
+
+  return html`
+    <${Section} title="Manual mode"
+      aside=${html`<${Button} kind=${manual ? 'danger' : ''} onClick=${toggleMode}>${manual ? 'End manual mode' : 'Start manual mode'}<//>`}>
+      <p class="muted">For commissioning: the controller leaves valves, mixer and pump alone (they all go off when this starts) and you switch them one by one. The heating rod is never switchable here. It ends by itself after 10 minutes without a switch, and the controller then has them back.</p>
+      <div class="manual">
+        ${MANUAL_RELAYS.map(
+          ([relay, label]) => html`<button key=${relay} class=${on[relay] ? 'primary' : ''} disabled=${!manual || blocked(relay)} onClick=${toggle(relay)}>
+            <span>${label}</span><small>relay ${relay}: ${on[relay] ? 'on' : 'off'}</small>
+          </button>`,
+        )}
       </div>
     <//>`;
 }

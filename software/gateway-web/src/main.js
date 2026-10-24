@@ -3,6 +3,7 @@ import { Device } from './pages/device.js';
 import { Devices } from './pages/devices.js';
 import { Gateway } from './pages/gateway.js';
 import { Mqtt } from './pages/mqtt.js';
+import { Sensors } from './pages/sensors.js';
 import { Link, match, usePath } from './router.js';
 import { html, Toasts } from './ui.js';
 
@@ -11,12 +12,14 @@ import { html, Toasts } from './ui.js';
 const routes = [
   { path: '/', title: 'Devices', page: Devices },
   { path: '/devices/:device', title: 'Device', page: Device },
+  { path: '/sensors', title: 'Sensors', page: Sensors },
   { path: '/mqtt', title: 'MQTT', page: Mqtt },
   { path: '/gateway', title: 'Gateway', page: Gateway },
 ];
 
 const nav = [
   ['/', 'Devices'],
+  ['/sensors', 'Sensors'],
   ['/mqtt', 'MQTT'],
   ['/gateway', 'Gateway'],
 ];

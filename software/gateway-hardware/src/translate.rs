@@ -88,6 +88,15 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
                 let _ = core::fmt::write(&mut body, format_args!("{value}"));
                 let key = id.device_key();
                 let msg_type = id.msg_type;
+                if let Some(kind) = gateway_core::sensor_table::SensorKind::from_message(msg_type) {
+                    crate::sensor_list::SENSOR_LIST.lock().await.observe(
+                        key,
+                        kind,
+                        reading.sub_id,
+                        value as f32,
+                        crate::sensor_list::now_seconds(),
+                    );
+                }
                 publish_with_custom_string(
                     key,
                     |cs| device::fixed_point_sensor_topic(msg_type, key, cs, reading.sub_id),
