@@ -197,6 +197,81 @@ pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
     }
 }
 
+/// How long the manual mode lasts after its last use.
+const MANUAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// When the manual mode runs out; `None` while the controller is in charge.
+static MANUAL_UNTIL: Shared<Cell<Option<Instant>>> = BlockingMutex::new(Cell::new(None));
+/// Which of the relays 6-10 the console has switched on in manual mode
+/// (index = relay - 6).
+static MANUAL_ON: Shared<Cell<[bool; 5]>> = BlockingMutex::new(Cell::new([false; 5]));
+/// First relay the manual mode may switch; 0-5 are the heating rod.
+const FIRST_MANUAL_RELAY: usize = 6;
+/// Last relay the manual mode may switch (relay 11 is never controlled).
+const LAST_MANUAL_RELAY: usize = 10;
+
+/// Whether the console has taken over the relays 6-10 (see
+/// [`set_manual`]).
+pub fn manual_active() -> bool {
+    MANUAL_UNTIL
+        .lock(Cell::get)
+        .is_some_and(|until| Instant::now() < until)
+}
+
+/// Seconds until the manual mode ends by itself, if it is on.
+pub fn manual_seconds_left() -> Option<u64> {
+    let until = MANUAL_UNTIL.lock(Cell::get)?;
+    until
+        .checked_duration_since(Instant::now())
+        .map(|left| left.as_secs())
+}
+
+/// Turns the manual (commissioning) mode on or off. While it is on the
+/// controller leaves the relays 6-10 alone — valves, mixer and pump — so
+/// they can be switched one by one with [`manual_relay`]; the heating rod
+/// (relays 0-5) stays under the controller's care, and its safety limits,
+/// all the time. Turning it off, or letting it time out after 10 minutes
+/// without a command, switches the relays 6-10 off and hands them back,
+/// with the mixer finding its position again.
+pub fn set_manual(enabled: bool) {
+    MANUAL_UNTIL.lock(|cell| cell.set(enabled.then(|| Instant::now() + MANUAL_TIMEOUT)));
+    MANUAL_ON.lock(|cell| cell.set([false; 5]));
+}
+
+/// Switches one of the relays 6-10 by hand. Only in manual mode, and never
+/// both mixer directions at once.
+pub async fn manual_relay(num: usize, on: bool) -> Result<(), &'static str> {
+    if !(FIRST_MANUAL_RELAY..=LAST_MANUAL_RELAY).contains(&num) {
+        return Err("only relays 6-10 can be switched by hand");
+    }
+    if !manual_active() {
+        return Err("the controller drives this relay; use `heating-manual on` first");
+    }
+    let index = num - FIRST_MANUAL_RELAY;
+    let mut states = MANUAL_ON.lock(Cell::get);
+    if on {
+        let opposite = match num {
+            MIXER_HOT_RELAY => Some(MIXER_COLD_RELAY),
+            MIXER_COLD_RELAY => Some(MIXER_HOT_RELAY),
+            _ => None,
+        };
+        if opposite.is_some_and(|other| states[other - FIRST_MANUAL_RELAY]) {
+            return Err("the other mixer direction is on; switch it off first");
+        }
+    }
+    states[index] = on;
+    MANUAL_ON.lock(|cell| cell.set(states));
+    MANUAL_UNTIL.lock(|cell| cell.set(Some(Instant::now() + MANUAL_TIMEOUT)));
+    send_relais_command(RelaisMessage {
+        num,
+        state: if on { State::On } else { State::Off },
+        duration: Duration::from_millis(0),
+        bank: 0,
+    })
+    .await;
+    Ok(())
+}
+
 /// What the controller did last, for the console.
 #[derive(Debug, Clone, Copy)]
 pub struct LiveStatus {
@@ -208,6 +283,8 @@ pub struct LiveStatus {
     pub target_age_s: Option<u64>,
     pub energy_age_s: Option<u64>,
     pub emergency_age_s: Option<u64>,
+    /// The relays 6-10 are under manual control (see [`set_manual`]).
+    pub manual: bool,
 }
 
 static LIVE: Shared<Cell<Option<LiveStatus>>> = BlockingMutex::new(Cell::new(None));
@@ -276,10 +353,15 @@ fn relay_states(outputs: &HeatingOutputs) -> [State; 11] {
 /// Sends the relays that differ from `applied` (all of them if `force`),
 /// switching things off before anything is switched on — so the two mixer
 /// directions can never be live together, even for an instant.
-async fn apply(applied: &mut [Option<State>; 11], wanted: [State; 11], force: bool) {
+///
+/// In `manual` mode the relays 6-10 are left alone.
+async fn apply(applied: &mut [Option<State>; 11], wanted: [State; 11], force: bool, manual: bool) {
     for pass_on in [false, true] {
         for (num, state) in wanted.iter().enumerate() {
             if (*state == State::On) != pass_on {
+                continue;
+            }
+            if manual && (FIRST_MANUAL_RELAY..=LAST_MANUAL_RELAY).contains(&num) {
                 continue;
             }
             if !force && applied[num] == Some(*state) {
@@ -330,8 +412,16 @@ async fn heating_task() {
     let mut previous_stage = 0u8;
     let mut ticker = Ticker::every(CONTROL_PERIOD);
 
+    let mut was_manual = false;
+
     // Whatever state the relays were in before: everything off first.
-    apply(&mut applied, relay_states(&HeatingOutputs::OFF), true).await;
+    apply(
+        &mut applied,
+        relay_states(&HeatingOutputs::OFF),
+        true,
+        false,
+    )
+    .await;
 
     loop {
         let now = Instant::now();
@@ -361,11 +451,33 @@ async fn heating_task() {
         );
         let status = controller.status();
 
-        let force = now.duration_since(last_resync) >= RESYNC_PERIOD;
+        let mut force = now.duration_since(last_resync) >= RESYNC_PERIOD;
+        let manual = manual_active();
+        if manual != was_manual {
+            if manual {
+                // Taking over: the relays 6-10 go to a known state, off. The
+                // rod relays keep what the controller wants for them.
+                console_log!("heating: manual mode, relays 6-10 under console control");
+                let mut wanted = relay_states(&outputs);
+                for state in wanted.iter_mut().skip(FIRST_MANUAL_RELAY) {
+                    *state = State::Off;
+                }
+                apply(&mut applied, wanted, true, false).await;
+            } else {
+                // Handing back: the mixer may be anywhere now, so it finds
+                // its way again. The first cycle's outputs below put the
+                // relays where the controller wants them.
+                console_log!("heating: automatic mode again");
+                MANUAL_UNTIL.lock(|cell| cell.set(None));
+                controller.restart_circuit();
+                force = true;
+            }
+            was_manual = manual;
+        }
         if force {
             last_resync = now;
         }
-        apply(&mut applied, relay_states(&outputs), force).await;
+        apply(&mut applied, relay_states(&outputs), force, manual).await;
 
         // A message can arrive between taking `now` and reading it.
         let age = |received: Option<Instant>| {
@@ -380,6 +492,7 @@ async fn heating_task() {
                 target_age_s: age(target.map(|t| t.received)),
                 energy_age_s: age(energy.map(|e| e.received)),
                 emergency_age_s: age(emergency.map(|e| e.received)),
+                manual,
             }))
         });
 

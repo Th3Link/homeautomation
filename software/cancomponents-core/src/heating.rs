@@ -750,6 +750,16 @@ impl HeatingController {
         }
     }
 
+    /// Starts the valve/pump sequencing and the mixer over, as after a
+    /// restart: the mixer finds its position again by driving to the cold
+    /// end. For use after the relays 6-10 were switched by hand (so the
+    /// mixer's position estimate is no longer true). The rod logic and its
+    /// dwell times are left alone.
+    pub fn restart_circuit(&mut self) {
+        self.circuit = CircuitController::new(Duration::from_secs(120));
+        self.mixer = MixerController::new(MixerConfig::new());
+    }
+
     pub fn status(&self) -> HeatingStatus {
         HeatingStatus {
             rod_reason: self.rod.reason(),
@@ -1565,6 +1575,35 @@ mod tests {
         assert!(cold_drive);
         assert_eq!(c.status().mixer_percent, 0);
         assert_eq!(last.rod_stage, 3);
+    }
+
+    #[test]
+    fn restarting_the_circuit_homes_the_mixer_again_but_keeps_the_rod() {
+        let mut c = HeatingController::new();
+        // A rod stage is running, the mixer is at the hot end.
+        let mut rod_stage = 0;
+        for now in 0..400 {
+            let mut i = inputs(now);
+            i.tank_temps_mc = [Some(40_500); TANK_SENSORS];
+            i.energy = energy(6_600, now);
+            rod_stage = c.step(t(now), &i).rod_stage;
+        }
+        assert_eq!(rod_stage, 2);
+        assert_eq!(c.status().mixer_percent, 100);
+        assert!(!c.status().mixer_homing);
+
+        c.restart_circuit();
+        assert!(c.status().mixer_homing);
+        let mut i = inputs(400);
+        i.tank_temps_mc = [Some(40_500); TANK_SENSORS];
+        i.energy = energy(6_600, 400);
+        let out = c.step(t(400), &i);
+        assert_eq!(out.mixer, MixerDrive::Cold);
+        // The rod didn't notice.
+        assert_eq!(out.rod_stage, 2);
+        // The pump delay starts over as well.
+        assert!(out.valves_tank);
+        assert!(!out.pump);
     }
 
     #[test]
