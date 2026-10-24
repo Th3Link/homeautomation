@@ -19,8 +19,13 @@ pub async fn restart_task() {
     esp_hal::system::software_reset();
 }
 
-pub async fn restart() -> impl IntoResponse {
+/// Restarts the gateway shortly.
+pub fn request_restart() {
     RESTART.signal(());
+}
+
+pub async fn restart() -> impl IntoResponse {
+    request_restart();
     StatusCode::ACCEPTED
 }
 

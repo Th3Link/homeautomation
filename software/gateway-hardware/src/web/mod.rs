@@ -8,6 +8,7 @@
 mod commands;
 mod devices;
 mod error;
+mod firmware;
 mod json;
 mod mqtt;
 mod settings;
@@ -70,6 +71,7 @@ fn app() -> Router<impl PathRouter> {
     let api = commands::routes(api);
     let api = settings::routes(api);
     let api = mqtt::routes(api);
+    let api = firmware::routes(api);
     Router::new().nest("/api/v1", api).layer(BasicAuth)
 }
 
