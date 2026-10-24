@@ -87,7 +87,7 @@ package before sending.
 
 | Route | |
 |---|---|
-| `PUT /firmware/gateway?crc32=…` | the gateway's own firmware (up to 1.75 MiB). Answers `{"bytes", "restarting": true}` once the image verified, then restarts into it; `422 verify` if size or CRC are wrong |
+| `PUT /firmware/gateway?crc32=…` | the gateway's own firmware (up to 7.75 MiB, the size of an OTA slot). Answers `{"bytes", "restarting": true}` once the image verified, then restarts into it; `422 verify` if size or CRC are wrong |
 | `PUT /devices/:device/firmware?crc32=…` | a CAN node, over CAN-OTA (up to 1 MiB); takes minutes, the bus sets the pace |
 | `PUT /device-types/:type/firmware?crc32=…` | every node of a type |
 | `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent`, `error` |
