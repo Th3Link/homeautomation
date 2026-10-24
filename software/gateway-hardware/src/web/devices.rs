@@ -1,6 +1,7 @@
 //! `/api/v1/devices`: the CAN nodes seen on the bus.
 
 use super::error::ApiError;
+use super::json::acquire;
 use crate::device_list::{now_minutes, DEVICE_LIST};
 use core::fmt::Write;
 use core::str::FromStr;
@@ -8,7 +9,7 @@ use gateway_core::device_list::DeviceListEntry;
 use gateway_core::device_type::DeviceType;
 use heapless::{String, Vec};
 use picoserve::extract::Query;
-use picoserve::response::Json;
+use picoserve::response::IntoResponse;
 use picoserve::routing::{get, parse_path_segment, PathRouter};
 use picoserve::Router;
 use serde::ser::SerializeStruct;
@@ -129,19 +130,24 @@ impl Serialize for DevicePage {
     }
 }
 
-async fn list(Query(query): Query<ListQuery>) -> Json<DevicePage> {
-    let table = DEVICE_LIST.lock().await;
-    let matching = || {
-        table
-            .iter()
-            .filter(|e| query.device_type.is_none_or(|t| (e.id >> 16) as u8 == t))
+async fn list(Query(query): Query<ListQuery>) -> Result<impl IntoResponse, ApiError> {
+    // The buffer first: waiting for it must not hold up the table.
+    let buffer = acquire().await;
+    let page = {
+        let table = DEVICE_LIST.lock().await;
+        let matching = || {
+            table
+                .iter()
+                .filter(|e| query.device_type.is_none_or(|t| (e.id >> 16) as u8 == t))
+        };
+        DevicePage {
+            total: matching().count(),
+            offset: query.offset,
+            now_minutes: now_minutes(),
+            devices: matching().skip(query.offset).take(PAGE).cloned().collect(),
+        }
     };
-    Json(DevicePage {
-        total: matching().count(),
-        offset: query.offset,
-        now_minutes: now_minutes(),
-        devices: matching().skip(query.offset).take(PAGE).cloned().collect(),
-    })
+    buffer.render(&page)
 }
 
 struct One {
@@ -159,14 +165,18 @@ impl Serialize for One {
     }
 }
 
-async fn one(DeviceName(name): DeviceName) -> Result<Json<One>, ApiError> {
-    let table = DEVICE_LIST.lock().await;
-    let entry = table
-        .resolve(name.as_str())
-        .and_then(|key| table.iter().find(|e| e.id == key))
-        .ok_or(ApiError::not_found("no such device"))?;
-    Ok(Json(One {
-        entry: entry.clone(),
+async fn one(DeviceName(name): DeviceName) -> Result<impl IntoResponse, ApiError> {
+    let buffer = acquire().await;
+    let entry = {
+        let table = DEVICE_LIST.lock().await;
+        table
+            .resolve(name.as_str())
+            .and_then(|key| table.iter().find(|e| e.id == key))
+            .cloned()
+            .ok_or(ApiError::not_found("no such device"))?
+    };
+    buffer.render(&One {
+        entry,
         now_minutes: now_minutes(),
-    }))
+    })
 }

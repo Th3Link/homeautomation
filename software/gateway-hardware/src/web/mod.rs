@@ -8,16 +8,19 @@
 mod commands;
 mod devices;
 mod error;
+mod json;
+mod mqtt;
+mod settings;
 mod system;
 
-use crate::config::{self, LoadOrInit};
+use crate::config;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::Duration;
 use gateway_core::web::{credentials_match, decode_basic_auth};
 use picoserve::io::Read;
 use picoserve::response::{IntoResponse, StatusCode};
-use picoserve::routing::{get, Layer, Next, PathRouter};
+use picoserve::routing::{get, post, Layer, Next, PathRouter};
 use picoserve::{Config, ResponseSent, Router, Timeouts};
 
 /// How many connections can be served at the same time.
@@ -34,6 +37,7 @@ static SERVER_CONFIG: Config = Config::new(Timeouts {
 
 /// Starts the web server tasks on `stack`.
 pub fn spawn(spawner: &Spawner, stack: Stack<'static>) {
+    spawner.spawn(system::restart_task().unwrap());
     for id in 0..TASKS {
         spawner.spawn(web_task(id, stack).unwrap());
     }
@@ -59,9 +63,13 @@ async fn serve(id: usize, stack: Stack<'static>) -> ! {
 }
 
 fn app() -> Router<impl PathRouter> {
-    let api = Router::new().route("/system", get(system::get_system));
+    let api = Router::new()
+        .route("/system", get(system::get_system))
+        .route("/system/restart", post(system::restart));
     let api = devices::routes(api);
     let api = commands::routes(api);
+    let api = settings::routes(api);
+    let api = mqtt::routes(api);
     Router::new().nest("/api/v1", api).layer(BasicAuth)
 }
 
@@ -93,8 +101,8 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
             .and_then(decode_basic_auth);
         let authorized = match given {
             Some(given) => {
-                let cfg = config::config().await.load_or_init().await;
-                credentials_match(&given, cfg.web_username.as_str(), cfg.web_password.as_str())
+                let (username, password) = config::web_credentials().await;
+                credentials_match(&given, username.as_str(), password.as_str())
             }
             None => false,
         };
