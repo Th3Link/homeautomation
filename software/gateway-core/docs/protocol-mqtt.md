@@ -16,11 +16,18 @@ refuses more than four unconfirmed ones).
 
 - Protocol version: **MQTT 5.0** (see [ADR 0007](adr/0007-mqtt5-client.md)
   for why this differs from the original's 3.1.1).
-- Broker address: `mqtt://<host>:<port>` (configured `mqtt_uri`; `<port>`
-  defaults to `1883` if omitted). No TLS.
-- Credentials: optional `mqtt_user`/`mqtt_password`, sent as the MQTT
+- **Two brokers** can be configured and served at the same time (say,
+  Home Assistant's and a Cerbo's), each in its own slot with its own
+  connection: commands are accepted from either and handled identically;
+  everything the gateway publishes (node states, sensor readings, its own
+  `available` announcement) goes to every connected broker. Console
+  commands `mqtt-…` configure the first slot, `mqtt2-…` the second; a slot
+  that isn't enabled stays idle.
+- Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`). No
+  encryption for this scheme.
+- Credentials: optional per-broker username/password, sent as the MQTT
   CONNECT username/password if non-empty.
-- Client id: `"gateway-hardware"`, fixed.
+- Client id: `"gateway-hardware"`, fixed (on each broker).
 - `clean_start` is set on every connect — no persisted session across
   reconnects.
 - On disconnect, the gateway reconnects with a fixed backoff and
