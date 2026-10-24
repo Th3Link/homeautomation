@@ -75,6 +75,10 @@ enum Commands<'a> {
     Hwrev(u8),
     /// Set an 8-byte identification string.
     CustomString(&'a str),
+    /// Set the GPIO the Ethernet PHY's 50 MHz RMII clock comes out on (16 or
+    /// 17, depending on the board revision; takes effect after a restart).
+    #[set(min = 16, max = 17)]
+    EthClock(u8),
     /// Set the CAN bus bitrate.
     #[set(one_of = ["b22_222", "b25", "b50", "b100"])]
     Bitrate(BitrateArg),
@@ -248,6 +252,7 @@ async fn handle_command(
         Commands::DeviceId(id) => respond(writer, &cmd_device_id(id).await).await,
         Commands::DeviceType(t) => respond(writer, &cmd_device_type(t.0).await).await,
         Commands::Hwrev(rev) => respond(writer, &cmd_hwrev(rev).await).await,
+        Commands::EthClock(gpio) => respond(writer, &cmd_eth_clock(gpio).await).await,
         Commands::CustomString(s) => respond(writer, &cmd_custom_string(s).await).await,
         Commands::Bitrate(b) => respond(writer, &cmd_bitrate(b.0).await).await,
         Commands::Hostname(s) => {
@@ -319,6 +324,14 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     respond(writer, &fmt_msg(format_args!("hwrev: {}", cfg.hw_rev))).await?;
     respond(
         writer,
+        &fmt_msg(format_args!(
+            "eth_clock: GPIO{}",
+            config::eth_clock_gpio().await
+        )),
+    )
+    .await?;
+    respond(
+        writer,
         &fmt_msg(format_args!("custom_string: {}", cfg.custom_string)),
     )
     .await?;
@@ -371,6 +384,15 @@ async fn cmd_device_type(t: DeviceType) -> String<LINE_CAP> {
     }
     DEVICE_TYPE.store(value, Ordering::Relaxed);
     fmt_msg(format_args!("device_type set to {}", t.name()))
+}
+
+async fn cmd_eth_clock(gpio: u8) -> String<LINE_CAP> {
+    match config::set_eth_clock_gpio(gpio).await {
+        Ok(()) => fmt_msg(format_args!(
+            "eth_clock set to GPIO{gpio} (takes effect after restart)"
+        )),
+        Err(()) => str_msg("eth_clock must be 16 or 17, or storing failed"),
+    }
 }
 
 async fn cmd_hwrev(rev: u8) -> String<LINE_CAP> {

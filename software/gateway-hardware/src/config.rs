@@ -25,6 +25,28 @@ pub type Config = ConfigStore<BUF>;
 
 static CONFIG: ConfigCell<BUF> = ConfigCell::new();
 
+/// Flash key of the RMII clock pin setting (`u8`, 16 or 17). A raw key,
+/// clear of [`Key`]'s values: it describes how the board is wired, not the
+/// user-facing schema [`GatewayConfig`] shares with the web UI.
+const ETH_CLOCK_KEY: u8 = 0x70;
+
+/// GPIO the RMII reference clock comes out on (see
+/// [`crate::ethernet`]): 17 (rev1 boards) unless set to 16 (rev2).
+pub async fn eth_clock_gpio() -> u8 {
+    match config().await.get_u8(ETH_CLOCK_KEY).await {
+        Some(16) => 16,
+        _ => 17,
+    }
+}
+
+/// Persists the RMII clock pin (16 or 17); takes effect after a restart.
+pub async fn set_eth_clock_gpio(gpio: u8) -> Result<(), ()> {
+    if gpio != 16 && gpio != 17 {
+        return Err(());
+    }
+    config().await.set_u8(ETH_CLOCK_KEY, gpio).await
+}
+
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than
 /// once.
 pub async fn init() {

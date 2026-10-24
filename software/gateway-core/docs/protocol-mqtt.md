@@ -10,6 +10,10 @@ how each of these relates to a CAN message, and
 
 ## Connection
 
+The gateway subscribes to its command topics one at a time, waiting for
+the broker's SUBACK of each before sending the next SUBSCRIBE (the client
+refuses more than four unconfirmed ones).
+
 - Protocol version: **MQTT 5.0** (see [ADR 0007](adr/0007-mqtt5-client.md)
   for why this differs from the original's 3.1.1).
 - Broker address: `mqtt://<host>:<port>` (configured `mqtt_uri`; `<port>`
@@ -171,7 +175,8 @@ frame limit), and sent verbatim as that CAN message's payload.
 ### `canbus/gateway/restart`
 
 Exact topic match (no wildcard segment, no device targeting). Any body.
-Restarts the gateway itself.
+Restarts the gateway itself. A retained message is ignored — it would
+restart the gateway again after every reconnect.
 
 ## Not covered by this document
 
