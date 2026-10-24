@@ -129,9 +129,81 @@ impl HeatingEmergency {
     }
 }
 
+/// Takes over the relays 6-10 (valves, mixer, pump) of the heating
+/// controller by hand, for commissioning:
+/// [`HeatingManual`](crate::can_message_type::CanMessageType::HeatingManual).
+///
+/// Wire layout (3 bytes): `[flags, relay, state]`. Flag bit 0 is the manual
+/// mode itself: with it set the controller leaves those relays alone (they
+/// all go off when it starts), without it the controller has them back.
+/// `relay` (6-10, or [`HeatingManual::NO_RELAY`]) and `state` (0 = off, 1 =
+/// on) switch one of them, in manual mode only. The heating rod (relays 0-5)
+/// is never reachable this way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeatingManual {
+    /// The manual mode is on.
+    pub enabled: bool,
+    /// The relay to switch, if any.
+    pub relay: Option<u8>,
+    /// Whether that relay is switched on.
+    pub relay_on: bool,
+}
+
+impl HeatingManual {
+    /// `relay` byte for "no relay, only the mode".
+    pub const NO_RELAY: u8 = 0xFF;
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, DecodeError> {
+        if data.len() < 3 {
+            return Err(DecodeError);
+        }
+        Ok(Self {
+            enabled: data[0] & 1 != 0,
+            relay: (data[1] != Self::NO_RELAY).then_some(data[1]),
+            relay_on: data[2] & 1 != 0,
+        })
+    }
+
+    pub fn to_bytes(&self) -> [u8; 3] {
+        [
+            u8::from(self.enabled),
+            self.relay.unwrap_or(Self::NO_RELAY),
+            u8::from(self.relay_on),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_roundtrips_and_pins_the_layout() {
+        let msg = HeatingManual {
+            enabled: true,
+            relay: Some(8),
+            relay_on: true,
+        };
+        assert_eq!(msg.to_bytes(), [1, 8, 1]);
+        assert_eq!(HeatingManual::from_bytes(&msg.to_bytes()), Ok(msg));
+        let mode_only = HeatingManual {
+            enabled: true,
+            relay: None,
+            relay_on: false,
+        };
+        assert_eq!(mode_only.to_bytes(), [1, 0xFF, 0]);
+        assert!(!HeatingManual::from_bytes(&[0, 0xFF, 0]).unwrap().enabled);
+    }
+
+    #[test]
+    fn manual_rejects_short_frames_and_ignores_extra_bytes() {
+        assert_eq!(HeatingManual::from_bytes(&[1, 8]), Err(DecodeError));
+        let msg = HeatingManual::from_bytes(&[0b11, 7, 0b11, 9, 9]).unwrap();
+        assert_eq!(
+            (msg.enabled, msg.relay, msg.relay_on),
+            (true, Some(7), true)
+        );
+    }
 
     #[test]
     fn target_roundtrips_and_pins_the_layout() {

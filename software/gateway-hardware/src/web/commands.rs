@@ -52,6 +52,7 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
             (DEVICES, device(), "/lamps", parse_path_segment::<u8>()),
             put(lamps),
         )
+        .route((DEVICES, device(), "/heating/manual"), put(heating_manual))
         .route((DEVICES, device(), "/heating/target"), put(heating_target))
         .route((DEVICES, device(), "/heating/energy"), put(heating_energy))
         .route(
@@ -236,6 +237,37 @@ async fn heating(
 ) -> Result<impl IntoResponse, ApiError> {
     let sends = command::targeted_sends(&target(&name).await?, msg_type, data, false);
     send_all(sends).await
+}
+
+#[derive(Deserialize)]
+struct HeatingManualBody {
+    /// Manual mode on (the relays 6-10 go off) or off (the controller has them back).
+    enabled: bool,
+    /// The relay to switch, 6-10.
+    relay: Option<u8>,
+    /// Whether that relay goes on.
+    #[serde(default)]
+    on: bool,
+}
+
+async fn heating_manual(
+    name: DeviceName,
+    Json(body): Json<HeatingManualBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    if body.relay.is_some_and(|relay| !(6..=10).contains(&relay)) {
+        return Err(ApiError::invalid(
+            "relay: only 6-10 can be switched by hand",
+        ));
+    }
+    if body.relay.is_some() && !body.enabled {
+        return Err(ApiError::invalid("relay: needs manual mode on"));
+    }
+    let msg = gateway_core::heating_message::HeatingManual {
+        enabled: body.enabled,
+        relay: body.relay,
+        relay_on: body.on,
+    };
+    heating(name, CanMessageType::HeatingManual, &msg.to_bytes()).await
 }
 
 async fn heating_target(

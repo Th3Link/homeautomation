@@ -38,7 +38,7 @@ function Settings() {
     if (Object.keys(changes).length === 0) return notify('Nothing changed');
     const result = await run(() => api.config.update(changes), 'Saved');
     if (result) {
-      if (result.restart_required) notify('Restart the gateway to apply the hostname, bitrate or clock pin.');
+      if (result.restart_required) notify('Restart the gateway to apply the hostname or bitrate.');
       setForm({});
       reload();
     }
@@ -52,9 +52,6 @@ function Settings() {
           ${['b22_222', 'b25', 'b50', 'b100'].map((b) => html`<option>${b}</option>`)}
         </select><//>
         <${Field} label="CAN update delay (ms)" hint="between frames while updating a device"><input type="number" min="1" max="10000" value=${value('update_delay_ms')} onInput=${set('update_delay_ms', true)} /><//>
-        <${Field} label="Ethernet clock pin" hint="GPIO 17 on rev. 1 boards, 16 on rev. 2"><select value=${value('eth_clock')} onChange=${set('eth_clock', true)}>
-          <option>16</option><option>17</option>
-        </select><//>
       </div>
       <h3>Web access</h3>
       <div class="row">

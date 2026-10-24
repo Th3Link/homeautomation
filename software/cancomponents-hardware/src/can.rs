@@ -115,7 +115,8 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         }
         CanMessageType::HeatingTarget
         | CanMessageType::HeatingEnergy
-        | CanMessageType::HeatingEmergency => {
+        | CanMessageType::HeatingEmergency
+        | CanMessageType::HeatingManual => {
             heating_handler(id, frame.data(), frame.is_remote_frame()).await
         }
         CanMessageType::RelaisMode => {

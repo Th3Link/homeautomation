@@ -28,10 +28,11 @@ use cancomponents_core::heating::{
     MIXER_HOT_RELAY, ROD_RELAYS, TANK_SENSORS, VALVE_RELAYS,
 };
 use cancomponents_core::heating_message::{
-    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingTarget,
+    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingManual, HeatingTarget,
 };
 use cancomponents_core::relais::{Message as RelaisMessage, State};
 use core::cell::Cell;
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
@@ -174,6 +175,30 @@ pub fn inject_emergency(message: HeatingEmergency) {
     });
 }
 
+/// Set once the controller task runs, i.e. on a `HeatingControl` node.
+static CONTROLLER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Carries out a `HeatingManual` message: the mode, then the relay. Turning
+/// the mode on when it is on already leaves it (and its relays) as it is,
+/// so that a client can repeat the message.
+async fn apply_manual(message: HeatingManual) -> Result<(), &'static str> {
+    // On any other kind of node the relays 6-10 are ordinary ones.
+    if !CONTROLLER_RUNNING.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    if !message.enabled {
+        set_manual(false);
+        return Ok(());
+    }
+    if !manual_active() {
+        set_manual(true);
+    }
+    match message.relay {
+        Some(relay) => manual_relay(usize::from(relay), message.relay_on).await,
+        None => Ok(()),
+    }
+}
+
 /// Handles the heating CAN messages. Malformed ones are reported and
 /// dropped, and leave the previous value to time out on its own.
 pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
@@ -183,6 +208,23 @@ pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
         CanMessageType::HeatingEmergency => {
             HeatingEmergency::from_bytes(data).map(inject_emergency)
         }
+        CanMessageType::HeatingManual => match HeatingManual::from_bytes(data) {
+            Ok(message) => {
+                if let Err(reason) = apply_manual(message).await {
+                    console_log!("heating: manual command refused: {reason}");
+                    report_error(
+                        Component::Heating,
+                        ErrorCode::InvalidData,
+                        Severity::Warning,
+                        id.msg_type as u8,
+                        &[message.relay.unwrap_or(HeatingManual::NO_RELAY)],
+                    )
+                    .await;
+                }
+                Ok(())
+            }
+            Err(e) => Err(e),
+        },
         _ => return,
     };
     if decoded.is_err() {
@@ -321,6 +363,7 @@ pub async fn init(spawner: &Spawner) {
     }
     update_settings(|s| *s = loaded);
     console_log!("heating: {loaded:?}");
+    CONTROLLER_RUNNING.store(true, Ordering::Relaxed);
     spawner.spawn(heating_task().unwrap());
 }
 

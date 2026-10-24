@@ -22,8 +22,6 @@ struct Config {
     hostname: String<40>,
     can_bitrate: &'static str,
     update_delay_ms: u32,
-    /// GPIO of the Ethernet PHY's RMII clock: 16 or 17.
-    eth_clock: u8,
     web_username: String<30>,
     web_password_set: bool,
 }
@@ -34,7 +32,6 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         hostname: cfg.hostname,
         can_bitrate: cfg.can_bitrate.as_str(),
         update_delay_ms: cfg.update_delay_ms,
-        eth_clock: config::eth_clock_gpio().await,
         web_username: cfg.web_username,
         web_password_set: !cfg.web_password.is_empty(),
     })
@@ -47,14 +44,13 @@ struct Update {
     hostname: Option<String<40>>,
     can_bitrate: Option<String<8>>,
     update_delay_ms: Option<u32>,
-    eth_clock: Option<u8>,
     web_username: Option<String<30>>,
     web_password: Option<String<30>>,
 }
 
 #[derive(Serialize)]
 struct Updated {
-    /// Hostname, bitrate and RMII clock are only read at boot.
+    /// Hostname and bitrate are only read at boot.
     restart_required: bool,
 }
 
@@ -77,11 +73,6 @@ async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError>
     if let Some(ms) = body.update_delay_ms {
         if !(1..=10_000).contains(&ms) {
             return Err(ApiError::invalid("update_delay_ms: 1-10000"));
-        }
-    }
-    if let Some(gpio) = body.eth_clock {
-        if gpio != 16 && gpio != 17 {
-            return Err(ApiError::invalid("eth_clock: 16 or 17"));
         }
     }
     if body.web_username.as_ref().is_some_and(|u| u.is_empty()) {
@@ -120,12 +111,6 @@ async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError>
             .await
             .map_err(|_| failed)?;
     }
-    drop(store);
-    if let Some(gpio) = body.eth_clock {
-        config::set_eth_clock_gpio(gpio).await.map_err(|_| failed)?;
-        restart_required = true;
-    }
-    let mut store = config().await;
     if let Some(user) = &body.web_username {
         store
             .set_str(config::Key::WebUsername, user)

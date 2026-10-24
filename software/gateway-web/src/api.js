@@ -88,10 +88,27 @@ export const devices = {
   lamps: (device, bank, value, bitmask) =>
     put(`/devices/${seg(device)}/lamps/${bank}`, { value, bitmask }),
   heating: (device, kind, body) => put(`/devices/${seg(device)}/heating/${kind}`, body),
+  // Manual (commissioning) mode of the heating controller's relays 6-10.
+  heatingManual: (device, enabled, relay, on) =>
+    put(`/devices/${seg(device)}/heating/manual`, relay === undefined ? { enabled } : { enabled, relay, on }),
+};
+
+export const sensors = {
+  // All pages; of one device if `device` is given.
+  async list(device) {
+    const all = [];
+    for (;;) {
+      const filter = device ? `&device=${seg(device)}` : '';
+      const page = await get(`/sensors?offset=${all.length}${filter}`);
+      all.push(...page.sensors);
+      if (page.sensors.length === 0 || all.length >= page.total) return all;
+    }
+  },
 };
 
 export const bus = {
   action: (action) => post(`/bus/${action}`),
+  silence: (on) => put('/bus/silence', { on }),
   typeAction: (type, action) => post(`/device-types/${type}/${action}`),
 };
 
