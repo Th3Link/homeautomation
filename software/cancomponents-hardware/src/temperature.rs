@@ -61,7 +61,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::watch::{Receiver, Watch};
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use esp_hal::delay::Delay;
 use esp_hal::gpio::{DriveMode, Flex, OutputConfig, Pin, Pull};
 use heapless::Vec;
 
@@ -203,10 +202,17 @@ pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
     spawner.spawn(temperature_task(BitBangBus::new(pin)).unwrap());
 }
 
+/// The CPU's free-running cycle counter (wraps after a few seconds, so only
+/// ever compared as a wrapping difference).
+fn cycle_count() -> u32 {
+    xtensa_lx::timer::get_cycle_count()
+}
+
 /// Open-drain bit-banged 1-Wire master on one GPIO.
 struct BitBangBus {
     pin: Flex<'static>,
-    delay: Delay,
+    /// CPU clock cycles per microsecond.
+    cycles_per_us: u32,
 }
 
 impl BitBangBus {
@@ -224,52 +230,71 @@ impl BitBangBus {
         pin.set_output_enable(true);
         Self {
             pin,
-            delay: Delay::new(),
+            cycles_per_us: esp_hal::clock::cpu_clock().as_mhz(),
         }
     }
 
-    fn wait_us(&self, us: u32) {
-        self.delay.delay_micros(us);
+    /// Busy-waits until `us` microseconds have passed since `start` (a
+    /// [`cycle_count`] reading).
+    ///
+    /// Slot timings are measured from the edge that opened the slot instead
+    /// of being summed up from separate delays, so they don't depend on how
+    /// fast the code around them runs (debug or release build). The CPU
+    /// cycle counter is used because it's a single register read: the
+    /// general-purpose `esp_hal::time::Instant` on the ESP32 has to latch a
+    /// timer first and can return a stale value when read too soon after,
+    /// which in a release build shifted the sample points far enough to read
+    /// every bit as 1.
+    fn wait_until(&self, start: u32, us: u32) {
+        let cycles = us * self.cycles_per_us;
+        while cycle_count().wrapping_sub(start) < cycles {}
     }
 }
 
 impl OneWireBus for BitBangBus {
     fn reset(&mut self) -> bool {
+        let start = cycle_count();
         self.pin.set_low();
-        self.wait_us(480);
-        // Release and look for the presence pulse 15-60 µs later.
-        let presence = critical_section::with(|_| {
+        self.wait_until(start, 480);
+        // Release and look for the presence pulse, which starts 15-60 µs
+        // later and lasts at least 60 µs.
+        let (presence, released) = critical_section::with(|_| {
+            let released = cycle_count();
             self.pin.set_high();
-            self.wait_us(70);
-            self.pin.is_low()
+            self.wait_until(released, 70);
+            (self.pin.is_low(), released)
         });
-        self.wait_us(410);
+        self.wait_until(released, 480);
         presence
     }
 
     fn write_bit(&mut self, bit: bool) {
         // A "1" is a short low pulse, a "0" a long one; the slot (>= 60 µs)
-        // is padded out after the line is released again.
+        // is then padded out with the line released.
         let low_us = if bit { 6 } else { 60 };
-        critical_section::with(|_| {
+        let start = critical_section::with(|_| {
+            let start = cycle_count();
             self.pin.set_low();
-            self.wait_us(low_us);
+            self.wait_until(start, low_us);
             self.pin.set_high();
+            start
         });
-        self.wait_us(if bit { 64 } else { 10 });
+        self.wait_until(start, 70);
     }
 
     fn read_bit(&mut self) -> bool {
         // The sensor holds the line low for a "0" until 15 µs after the
-        // falling edge, so sample just before that.
-        let bit = critical_section::with(|_| {
+        // falling edge, so sample just before that — but late enough for the
+        // pull-up to have brought the line back up after a "1".
+        let (bit, start) = critical_section::with(|_| {
+            let start = cycle_count();
             self.pin.set_low();
-            self.wait_us(2);
+            self.wait_until(start, 3);
             self.pin.set_high();
-            self.wait_us(8);
-            self.pin.is_high()
+            self.wait_until(start, 13);
+            (self.pin.is_high(), start)
         });
-        self.wait_us(55);
+        self.wait_until(start, 70);
         bit
     }
 }
