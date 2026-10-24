@@ -259,6 +259,15 @@ position it is compared with (default: the bottom one, position 6), and to
 see what the controller is doing and why. Until a reference sensor is
 assigned, the rod stays off.
 
+For commissioning, `heating-manual on` hands the relays 6-10 (valves, mixer,
+pump) over to the console: they all go off and `relais <6-10> on|off`
+switches them one at a time (the two mixer directions never both on). The
+heating rod, relays 0-5, always stays with the controller and its limits.
+`heating-manual off`, or 10 minutes without a `relais` command, switches
+the relays 6-10 off again and the controller takes over, with the mixer
+finding its position anew. Relay 11 can be switched with `relais 11` at any
+time.
+
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
 
 **Two different wire shapes exist for a *command*, depending on which

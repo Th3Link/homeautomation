@@ -155,6 +155,13 @@ enum Commands<'a> {
     /// device. On by default; turn it off for a device without a gateway.
     #[set(one_of = ["on", "off"])]
     EchoRestart(OnOffArg),
+    /// Heating controller commissioning: take over the relays 6-10 (valves,
+    /// mixer, pump) so `relais` can switch them one by one. They are all
+    /// off when it starts. The heating rod (relays 0-5) stays under the
+    /// controller's care with all its limits. `off` — or 10 minutes without
+    /// a `relais` command — hands the relays back to the controller.
+    #[set(one_of = ["on", "off"])]
+    HeatingManual(OnOffArg),
     /// Directly drive one relay/rollershutter channel, for bring-up testing
     /// without a CAN bus master.
     Relais {
@@ -421,6 +428,9 @@ async fn handle_command(
         }
         Commands::SimEmergency { stage, celsius } => {
             respond(writer, &cmd_sim_emergency(stage, celsius).await).await
+        }
+        Commands::HeatingManual(setting) => {
+            respond(writer, &cmd_heating_manual(setting == OnOffArg::On).await).await
         }
         Commands::EchoRestart(setting) => {
             respond(writer, &cmd_echo_restart(setting == OnOffArg::On).await).await
@@ -727,6 +737,18 @@ async fn cmd_heating(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     };
     let (out, status) = (live.outputs, live.status);
 
+    if live.manual {
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "MANUAL MODE: relays 6-10 are under console control ({} s left); \
+                 circuit and mixer below show what the controller would do",
+                heating::manual_seconds_left().unwrap_or(0)
+            )),
+        )
+        .await?;
+    }
+
     respond(
         writer,
         &fmt_msg(format_args!(
@@ -886,13 +908,46 @@ async fn cmd_sensor_interval(secs: u32) -> String<LINE_CAP> {
     }
 }
 
+async fn cmd_heating_manual(enabled: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::set_manual(enabled);
+    if enabled {
+        str_msg(
+            "manual mode: relays 6-10 are yours (all off now), `relais <6-10> on|off`; \
+             `heating-manual off` or 10 min idle hands them back",
+        )
+    } else {
+        str_msg("automatic mode: relays 6-10 off, the mixer homes again, then the controller takes over")
+    }
+}
+
 async fn cmd_relais(num: usize, state: RelaisStateArg) -> String<LINE_CAP> {
     if cancomponents_core::heating::is_controlled_relay(num)
         && heating::is_heating_controller().await
     {
-        return fmt_msg(format_args!(
-            "relay {num} belongs to the heating controller on this device"
-        ));
+        // Rod relays: only the controller, always. The others only in
+        // manual mode, one by one.
+        if num < 6 {
+            return fmt_msg(format_args!(
+                "relay {num} is part of the heating rod; only the controller switches it"
+            ));
+        }
+        let on = match state {
+            RelaisStateArg::On => true,
+            RelaisStateArg::Off => false,
+            RelaisStateArg::Up | RelaisStateArg::Down => {
+                return str_msg("use on or off for this relay");
+            }
+        };
+        return match heating::manual_relay(num, on).await {
+            Ok(()) => fmt_msg(format_args!(
+                "relay {num} -> {} (manual)",
+                if on { "on" } else { "off" }
+            )),
+            Err(reason) => str_msg(reason),
+        };
     }
     let state: State = state.into();
     send_relais_command(RelaisMessage {
