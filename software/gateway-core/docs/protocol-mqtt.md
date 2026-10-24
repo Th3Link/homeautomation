@@ -17,12 +17,15 @@ refuses more than four unconfirmed ones).
 - Protocol version: **MQTT 5.0** (see [ADR 0007](adr/0007-mqtt5-client.md)
   for why this differs from the original's 3.1.1).
 - **Two brokers** can be configured and served at the same time (say,
-  Home Assistant's and a Cerbo's), each in its own slot with its own
-  connection: commands are accepted from either and handled identically;
-  everything the gateway publishes (node states, sensor readings, its own
-  `available` announcement) goes to every connected broker. Console
-  commands `mqtt-…` configure the first slot, `mqtt2-…` the second; a slot
-  that isn't enabled stays idle.
+  Home Assistant's as the primary and a Cerbo's as the secondary), each in
+  its own slot with its own connection. Commands are accepted from either
+  and handled identically. Everything the gateway publishes (node states,
+  sensor readings, its own `available` announcement) goes to the
+  **primary** broker only; the secondary broker is receive-only, and
+  publishing something to it too is a deliberate exception that has to be
+  programmed per message (`mqtt::publish_secondary`; there is none yet).
+  Console commands `mqtt-…` configure the primary slot, `mqtt2-…` the
+  secondary; a slot that isn't enabled stays idle.
 - Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`,
   unencrypted) or `mqtts://<host>[:<port>]` (port defaults to `8883`,
   [encrypted](#encryption-mqtts)).
@@ -36,7 +39,8 @@ refuses more than four unconfirmed ones).
   (re)connect — subscriptions are not assumed to survive a reconnect, so
   this happens unconditionally every time, not just after the first
   connect.
-- On every successful (re)connect, the gateway also republishes its own
+- On every successful (re)connect to the primary broker, the gateway also
+  republishes its own
   [`canbus/available/<hex>`](#canbusavailable) self-announcement (see
   below) — this is the *only* case where an `Available` CAN message
   results in an MQTT publish; `Available` frames observed from *other*
