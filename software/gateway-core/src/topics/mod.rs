@@ -8,6 +8,7 @@
 pub mod button;
 pub mod debug;
 pub mod device;
+pub mod heating;
 pub mod lamp;
 pub mod relais;
 

@@ -222,6 +222,10 @@ s); **30 s without one counts as the input being gone** — without
 `HeatingEnergy`/`HeatingEmergency` all rod stages switch off, without
 `HeatingTarget` the valves and the pump return to direct operation.
 
+The gateway sends them on behalf of MQTT topics
+`canbus/heating_{target,energy,emergency}_command/<device>`; see
+[`protocol-mqtt.md`](protocol-mqtt.md).
+
 **Rod stages.** Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 =
 0-3, stage 3 = 0-5 (always in pairs). Normally the stage follows the
 available power (stage *n* starts at *n* × 3000 W + 300 W and keeps running down to *n* × 3000 W),

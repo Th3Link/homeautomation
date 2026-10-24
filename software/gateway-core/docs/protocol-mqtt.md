@@ -120,6 +120,30 @@ required. Encodes to the CAN `Relais`/`Rollershutter` message using the
 **MQTT-command wire shape**, distinct from the RPC path — see
 [`protocol-can.md`](../../../docs/protocol-can.md#relayrollershutter-relais--rollershutter--relaisstate--rollershutterstate).
 
+### `canbus/heating_target_command/<device>`, `canbus/heating_energy_command/<device>`, `canbus/heating_emergency_command/<device>`
+
+Commands for a `HeatingControl` node (new — the original has nothing like
+them). Each becomes the CAN message of the same name, see
+[`protocol-can.md`](../../../docs/protocol-can.md#heating-controller-heatingtarget--heatingenergy--heatingemergency).
+Bodies are `/`-separated; temperatures are decimal °C (`45`, `45.5`,
+`-3.25`, within -50…150), flags are `1`/`0` (or `true`/`false`,
+`on`/`off`):
+
+| Topic | Body | Example |
+|---|---|---|
+| `heating_target_command` | `<flow_target_°C>/<tank_mode>` | `45.5/1` — 45.5 °C flow, supplied from the tank |
+| `heating_energy_command` | `<power_W>/<rod_enabled>` | `6200/1` — 6.2 kW surplus, rod released (negative while importing) |
+| `heating_emergency_command` | `<stage 0-3>/<tank_target_°C>` | `2/60` — rod stage 2 until the tank is at 60 °C; stage `0` ends it |
+
+The node counts each of these as gone 30 s after it last arrived, and then
+switches the heating rod off (or the circuit back to direct operation) —
+so the publisher has to repeat them, about every 5 s. The gateway does not
+repeat anything itself. **Publish them without the retain flag:** a
+retained delivery (what a broker sends after a reconnect) is ignored, since
+an old value replayed that way would look fresh to the node. A body that
+doesn't parse, or a device that can't be resolved, is dropped silently like
+for the other command topics.
+
 ### `canbus/lamp_command/<device>`
 
 Body: `<value>/<bitmask>[/<bank>]` — `value` decimal, `bitmask`
