@@ -51,19 +51,24 @@ async fn main(spawner: Spawner) -> ! {
     // Ethernet is the only network path (ADR 0013). A DHCP client, so
     // nothing needs configuring before the gateway is reachable; the
     // cable can be plugged in at any time.
-    let stack = match ethernet::bring_up(EthernetPins {
-        eth: peripherals.ETH,
-        rxd0: peripherals.GPIO25,
-        rxd1: peripherals.GPIO26,
-        rx_dv: peripherals.GPIO27,
-        txd0: peripherals.GPIO19,
-        txd1: peripherals.GPIO22,
-        tx_en: peripherals.GPIO21,
-        mdc: peripherals.GPIO23,
-        mdio: peripherals.GPIO18,
-        clock: peripherals.GPIO17,
-        reset: peripherals.GPIO5,
-    })
+    let clock_gpio = config::eth_clock_gpio().await;
+    let stack = match ethernet::bring_up(
+        EthernetPins {
+            eth: peripherals.ETH,
+            rxd0: peripherals.GPIO25,
+            rxd1: peripherals.GPIO26,
+            rx_dv: peripherals.GPIO27,
+            txd0: peripherals.GPIO19,
+            txd1: peripherals.GPIO22,
+            tx_en: peripherals.GPIO21,
+            mdc: peripherals.GPIO23,
+            mdio: peripherals.GPIO18,
+            clock16: peripherals.GPIO16,
+            clock17: peripherals.GPIO17,
+            reset: peripherals.GPIO5,
+        },
+        clock_gpio,
+    )
     .await
     {
         Some(eth) => Some(ethernet::init_stack(eth, &spawner, cfg.hostname.as_str()).await),

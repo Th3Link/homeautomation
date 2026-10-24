@@ -22,12 +22,12 @@ use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use heapless::String;
 use rust_mqtt::buffer::BumpBuffer;
-use rust_mqtt::client::event::Event;
+use rust_mqtt::client::event::{Event, Publish};
 use rust_mqtt::client::options::{
     ConnectOptions, PublicationOptions, SubscriptionOptions, TopicReference,
 };
 use rust_mqtt::client::Client;
-use rust_mqtt::types::{MqttBinary, MqttString, TopicFilter, TopicName};
+use rust_mqtt::types::{MqttBinary, MqttString, PacketIdentifier, TopicFilter, TopicName};
 
 /// The gateway's client instantiation: a little headroom (4) for
 /// in-flight un-acked SUBSCRIBE/incoming-QoS/outgoing-QoS packets, and
@@ -73,7 +73,49 @@ const SUBSCRIBE_TOPICS: &[&str] = &[
     "canbus/heating_energy_command/#",
     "canbus/heating_emergency_command/#",
     "canbus/debug/#",
+    "canbus/gateway/restart",
 ];
+
+/// Hands one received PUBLISH to the CAN/MQTT translation.
+async fn dispatch_publish(msg: &Publish<'_, 0, 0>) {
+    if let TopicReference::Name(name) = &msg.topic {
+        if let Ok(body) = core::str::from_utf8(msg.message.as_bytes()) {
+            crate::translate::dispatch_mqtt(name.as_ref().as_str(), body, msg.retain).await;
+        }
+    }
+}
+
+/// Waits for the SUBACK of the SUBSCRIBE with packet identifier `pid`,
+/// still dispatching any message that arrives meanwhile (e.g. a retained
+/// one the broker sends right after subscribing). Returns false if the
+/// connection failed or the broker never answered.
+async fn wait_for_suback(
+    client: &mut MqttClient<'_, '_>,
+    pid: PacketIdentifier,
+    topic: &str,
+) -> bool {
+    let wait = async {
+        loop {
+            match client.poll().await {
+                Ok(Event::Suback(suback)) if suback.packet_identifier == pid => {
+                    if !suback.reason_code.is_success() {
+                        console_log!(
+                            "mqtt: subscription to {topic} refused: {:?}",
+                            suback.reason_code
+                        );
+                    }
+                    return true;
+                }
+                Ok(Event::Publish(msg)) => dispatch_publish(&msg).await,
+                Ok(_) => {}
+                Err(_) => return false,
+            }
+        }
+    };
+    embassy_time::with_timeout(Duration::from_secs(5), wait)
+        .await
+        .unwrap_or(false)
+}
 
 #[embassy_executor::task]
 pub async fn mqtt_task(stack: Stack<'static>) {
@@ -141,6 +183,11 @@ pub async fn mqtt_task(stack: Stack<'static>) {
         }
         console_log!("mqtt: connected to {host}:{port}");
 
+        // One subscription at a time, each confirmed before the next: the
+        // client only tracks `SUBSCRIBE_MAXIMUM` unconfirmed ones, and
+        // anything beyond that is refused (and was silently never
+        // subscribed to).
+        let mut subscribed = true;
         for topic in SUBSCRIBE_TOPICS {
             let Ok(filter_string) = MqttString::from_str(topic) else {
                 continue;
@@ -148,7 +195,20 @@ pub async fn mqtt_task(stack: Stack<'static>) {
             let Some(filter) = TopicFilter::new(filter_string) else {
                 continue;
             };
-            let _ = client.subscribe(filter, &SubscriptionOptions::new()).await;
+            match client.subscribe(filter, &SubscriptionOptions::new()).await {
+                Ok(pid) => {
+                    if !wait_for_suback(&mut client, pid, topic).await {
+                        subscribed = false;
+                        break;
+                    }
+                }
+                Err(e) => console_log!("mqtt: subscribe to {topic} failed: {e:?}"),
+            }
+        }
+        if !subscribed {
+            console_log!("mqtt: subscribing failed, reconnecting");
+            Timer::after(Duration::from_secs(2)).await;
+            continue;
         }
 
         crate::translate::publish_self_available().await;
@@ -174,18 +234,7 @@ pub async fn mqtt_task(stack: Stack<'static>) {
                         break;
                     }
                 }
-                Either::Second(Ok(Event::Publish(msg))) => {
-                    if let TopicReference::Name(name) = &msg.topic {
-                        if let Ok(body) = core::str::from_utf8(msg.message.as_bytes()) {
-                            crate::translate::dispatch_mqtt(
-                                name.as_ref().as_str(),
-                                body,
-                                msg.retain,
-                            )
-                            .await;
-                        }
-                    }
-                }
+                Either::Second(Ok(Event::Publish(msg))) => dispatch_publish(&msg).await,
                 Either::Second(Ok(_)) => {}
                 Either::Second(Err(_)) => break,
             }

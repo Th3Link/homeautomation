@@ -154,7 +154,12 @@ pub async fn publish_self_available() {
 /// because somebody just published it.
 pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
     if gateway_core::topics::is_gateway_restart_topic(topic) {
-        esp_hal::system::software_reset();
+        // A retained restart request would restart the gateway again after
+        // every reconnect, forever.
+        if !retained {
+            esp_hal::system::software_reset();
+        }
+        return;
     }
 
     if relais_topics::is_relais_command_topic(topic)
