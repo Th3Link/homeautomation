@@ -2,7 +2,7 @@
 //! ESP32 firmware for the MQTT<->CAN home-automation gateway
 //! ("gateway-hardware"). Wire format and hardware-independent translation
 //! logic live in the `gateway-core` crate; everything in here talks to
-//! actual peripherals (CAN/TWAI, WiFi, MQTT/HTTP sockets, flash-backed
+//! actual peripherals (CAN/TWAI, Ethernet, MQTT/HTTP sockets, flash-backed
 //! config storage, OTA, the commissioning console).
 /// Shared with `cancomponents-hardware` — see `common_hardware`'s own docs.
 pub use common_hardware::console_log;
@@ -18,4 +18,3 @@ pub mod ethernet;
 pub mod mqtt;
 pub mod translate;
 pub mod update;
-pub mod wifi;

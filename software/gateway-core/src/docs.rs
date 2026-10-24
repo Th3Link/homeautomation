@@ -64,6 +64,9 @@ pub mod adr {
 
     #[doc = include_str!("../../../docs/adr/0012-shared-common-crates.md")]
     pub mod adr_0012_shared_common_crates {}
+
+    #[doc = include_str!("../docs/adr/0013-ethernet-only-no-wifi.md")]
+    pub mod adr_0013_ethernet_only_no_wifi {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with

@@ -21,7 +21,7 @@ workspace under `software/`:
   both firmware lines.
 - [`gateway-core`](software/gateway-core) / [`gateway-hardware`](software/gateway-hardware)
   — the CAN↔MQTT bridge: web config UI, `/control.json` RPC, self- and
-  CAN-bus OTA update, over Ethernet (primary) or WiFi (fallback).
+  CAN-bus OTA update, over wired Ethernet (DHCPv4 + SLAAC, no WiFi).
 - [`cancomponents-core`](software/cancomponents-core) / [`cancomponents-hardware`](software/cancomponents-hardware)
   — the node firmware living on the bus: relays, rollershutters, buttons,
   lights.
