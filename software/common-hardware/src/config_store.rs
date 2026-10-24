@@ -91,27 +91,6 @@ impl<const BUF: usize> ConfigStore<BUF> {
             .map_err(|_| ())
     }
 
-    /// Reads a fixed-size byte array; `None` if the key is unset or stored
-    /// with a different length.
-    pub async fn get_array<const N: usize>(&mut self, key: impl Into<u8>) -> Option<[u8; N]> {
-        self.map
-            .fetch_item(&mut self.buffer, &key.into())
-            .await
-            .ok()
-            .flatten()
-    }
-
-    pub async fn set_array<const N: usize>(
-        &mut self,
-        key: impl Into<u8>,
-        value: [u8; N],
-    ) -> Result<(), ()> {
-        self.map
-            .store_item(&mut self.buffer, &key.into(), &value)
-            .await
-            .map_err(|_| ())
-    }
-
     pub async fn get_bool(&mut self, key: impl Into<u8>) -> Option<bool> {
         self.get_u8(key).await.map(|b| b != 0)
     }

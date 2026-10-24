@@ -403,12 +403,33 @@ pub struct HealthEvent {
     pub rom: RomCode,
 }
 
+/// Readings in a row that must agree before a sensor on probation is trusted.
+pub const PROBATION_CONSISTENT_READINGS: u8 = 3;
+/// How far (in 1/16 °C, i.e. 0.5 K) consecutive readings may differ and still
+/// count as agreeing.
+pub const PROBATION_TOLERANCE_RAW: i16 = 8;
+
 #[derive(Debug, Clone, Copy)]
 struct Health {
     rom: RomCode,
     failures: u8,
     lost: bool,
     cycles_since_report: u16,
+    /// Not trusted yet: a sensor that was just found or just came back
+    /// answers with its power-on value (+85 °C) until its first real
+    /// conversion, so its readings are only accepted once several in a row
+    /// agree.
+    on_probation: bool,
+    last_raw: Option<i16>,
+    consistent: u8,
+}
+
+impl Health {
+    fn start_probation(&mut self) {
+        self.on_probation = true;
+        self.last_raw = None;
+        self.consistent = 0;
+    }
 }
 
 /// Every sensor ever seen on the bus, in discovery order, and whether it's
@@ -443,6 +464,9 @@ impl<const N: usize> SensorHealth<N> {
                 failures: 0,
                 lost: false,
                 cycles_since_report: 0,
+                on_probation: true,
+                last_raw: None,
+                consistent: 0,
             })
             .map_err(|_| BankFull)?;
         Ok(true)
@@ -499,9 +523,39 @@ impl<const N: usize> SensorHealth<N> {
         } else if sensor.failures >= LOST_AFTER_FAILED_CYCLES {
             sensor.lost = true;
             sensor.cycles_since_report = 0;
+            // Whatever it says when it comes back can't be trusted at first.
+            sensor.start_probation();
             return Some(event(HealthEventKind::Lost));
         }
         None
+    }
+
+    /// Judges a reading of `rom`. Returns whether it can be used: always for
+    /// a trusted sensor; for one on probation (new, or back after having
+    /// been lost) only once [`PROBATION_CONSISTENT_READINGS`] readings in a
+    /// row agree within [`PROBATION_TOLERANCE_RAW`] — which also weeds out
+    /// the power-on +85 °C.
+    pub fn vet(&mut self, rom: &RomCode, temperature: Temperature) -> bool {
+        let Some(sensor) = self.sensors.iter_mut().find(|s| &s.rom == rom) else {
+            return false;
+        };
+        if !sensor.on_probation {
+            return true;
+        }
+        let raw = temperature.raw();
+        let agrees = sensor.last_raw.is_some_and(|last| {
+            (i32::from(raw) - i32::from(last)).abs() <= i32::from(PROBATION_TOLERANCE_RAW)
+        });
+        sensor.consistent = if agrees { sensor.consistent + 1 } else { 1 };
+        sensor.last_raw = Some(raw);
+        if sensor.consistent >= PROBATION_CONSISTENT_READINGS {
+            sensor.on_probation = false;
+        }
+        !sensor.on_probation
+    }
+
+    pub fn is_on_probation(&self, rom: &RomCode) -> bool {
+        self.sensors.iter().any(|s| &s.rom == rom && s.on_probation)
     }
 
     /// Stops tracking every lost sensor (for sensors that were removed on
@@ -1016,5 +1070,69 @@ mod tests {
         bank.remove(&health_rom(1));
         assert_eq!(bank.len(), 1);
         assert!(bank.get(&health_rom(2)).is_some());
+    }
+
+    fn vet_all(
+        health: &mut SensorHealth<4>,
+        rom: &RomCode,
+        raws: &[i16],
+    ) -> heapless::Vec<bool, 16> {
+        raws.iter()
+            .map(|raw| health.vet(rom, Temperature::from_raw(*raw)))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_sensor_is_trusted_after_three_agreeing_readings() {
+        let (mut health, rom) = health_with(1);
+        assert!(health.is_on_probation(&rom));
+        let verdicts = vet_all(&mut health, &rom, &[352, 353, 352, 352]);
+        assert_eq!(verdicts.as_slice(), &[false, false, true, true]);
+        assert!(!health.is_on_probation(&rom));
+    }
+
+    #[test]
+    fn the_power_on_85_degrees_never_gets_through() {
+        let (mut health, rom) = health_with(1);
+        // 85 °C = 0x0550 = 1360, then the real 22 °C.
+        let verdicts = vet_all(&mut health, &rom, &[1360, 352, 352, 352]);
+        assert_eq!(verdicts.as_slice(), &[false, false, false, true]);
+    }
+
+    #[test]
+    fn a_sensor_that_keeps_jumping_stays_on_probation() {
+        let (mut health, rom) = health_with(1);
+        let verdicts = vet_all(&mut health, &rom, &[352, 400, 352, 400, 352, 400]);
+        assert!(verdicts.iter().all(|v| !v));
+        assert!(health.is_on_probation(&rom));
+    }
+
+    #[test]
+    fn a_trusted_sensor_may_change_quickly() {
+        let (mut health, rom) = health_with(1);
+        vet_all(&mut health, &rom, &[352, 352, 352]);
+        // A real temperature step (e.g. hot water arriving) is accepted.
+        let verdicts = vet_all(&mut health, &rom, &[352, 900, 1100]);
+        assert_eq!(verdicts.as_slice(), &[true, true, true]);
+    }
+
+    #[test]
+    fn a_sensor_that_comes_back_after_being_lost_is_on_probation_again() {
+        let (mut health, rom) = health_with(1);
+        vet_all(&mut health, &rom, &[352, 352, 352]);
+        for _ in 0..3 {
+            health.record(&rom, false);
+        }
+        assert!(health.is_lost(&rom));
+        assert!(health.is_on_probation(&rom));
+        // Plugged back in: first an 85 °C, then the real values.
+        let verdicts = vet_all(&mut health, &rom, &[1360, 352, 352, 352]);
+        assert_eq!(verdicts.as_slice(), &[false, false, false, true]);
+    }
+
+    #[test]
+    fn vetting_an_unknown_sensor_rejects_it() {
+        let mut health = SensorHealth::<4>::new();
+        assert!(!health.vet(&health_rom(9), Temperature::from_raw(352)));
     }
 }
