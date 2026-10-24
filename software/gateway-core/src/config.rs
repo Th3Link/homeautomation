@@ -37,6 +37,78 @@ pub enum Key {
     HwRev = 14,
     CustomString = 15,
     UpdateDelay = 16,
+    /// The second MQTT broker (the first one's keys are `MqttEnabled`…
+    /// `MqttPassword` above). See [`Key::broker`].
+    Mqtt2Enabled = 17,
+    Mqtt2Uri = 18,
+    Mqtt2User = 19,
+    Mqtt2Password = 20,
+    /// Accept any server certificate on an `mqtts://` connection (encrypted,
+    /// but not authenticated), per broker.
+    MqttTlsInsecure = 21,
+    Mqtt2TlsInsecure = 22,
+}
+
+/// How many MQTT brokers the gateway talks to at the same time.
+pub const MQTT_BROKERS: usize = 2;
+
+/// The storage keys of one MQTT broker slot.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BrokerKeys {
+    pub enabled: Key,
+    pub uri: Key,
+    pub user: Key,
+    pub password: Key,
+    pub tls_insecure: Key,
+}
+
+impl Key {
+    /// The keys of MQTT broker slot `slot` (0 or 1; anything else is treated
+    /// as the second slot).
+    pub fn broker(slot: usize) -> BrokerKeys {
+        if slot == 0 {
+            BrokerKeys {
+                enabled: Key::MqttEnabled,
+                uri: Key::MqttUri,
+                user: Key::MqttUser,
+                password: Key::MqttPassword,
+                tls_insecure: Key::MqttTlsInsecure,
+            }
+        } else {
+            BrokerKeys {
+                enabled: Key::Mqtt2Enabled,
+                uri: Key::Mqtt2Uri,
+                user: Key::Mqtt2User,
+                password: Key::Mqtt2Password,
+                tls_insecure: Key::Mqtt2TlsInsecure,
+            }
+        }
+    }
+}
+
+/// One MQTT broker the gateway connects to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrokerConfig {
+    pub enabled: bool,
+    /// `mqtt://host[:port]` or, with TLS, `mqtts://host[:port]`.
+    pub uri: String<60>,
+    pub user: String<60>,
+    pub password: String<60>,
+    /// For `mqtts://`: accept whatever certificate the broker presents
+    /// instead of requiring the pinned one.
+    pub tls_insecure: bool,
+}
+
+impl Default for BrokerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            uri: heapless_str("mqtt://IP:1883"),
+            user: heapless_str(""),
+            password: heapless_str(""),
+            tls_insecure: false,
+        }
+    }
 }
 
 /// `ICAN::BITRATE_t`.
@@ -89,10 +161,9 @@ impl Bitrate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GatewayConfig {
     pub hostname: String<40>,
-    pub mqtt_enabled: bool,
-    pub mqtt_uri: String<60>,
-    pub mqtt_user: String<60>,
-    pub mqtt_password: String<60>,
+    /// The MQTT brokers, all served at the same time: commands are accepted
+    /// from each, and everything the gateway publishes goes to each.
+    pub brokers: [BrokerConfig; MQTT_BROKERS],
     pub web_username: String<30>,
     pub web_password: String<30>,
     /// `0xFF` is the "not yet configured" sentinel, matching `CAN::CAN()`'s
@@ -111,10 +182,7 @@ impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             hostname: heapless_str("CAN2MQTTBridge"),
-            mqtt_enabled: false,
-            mqtt_uri: heapless_str("mqtt://IP:1883"),
-            mqtt_user: heapless_str(""),
-            mqtt_password: heapless_str(""),
+            brokers: [BrokerConfig::default(), BrokerConfig::default()],
             web_username: heapless_str("CAN2MQTTSETUP"),
             web_password: heapless_str("Can2MqttPass"),
             can_id: 0xFF,
@@ -141,8 +209,11 @@ mod tests {
     fn defaults_match_original_hardcoded_values() {
         let cfg = GatewayConfig::default();
         assert_eq!(cfg.hostname.as_str(), "CAN2MQTTBridge");
-        assert!(!cfg.mqtt_enabled);
-        assert_eq!(cfg.mqtt_uri.as_str(), "mqtt://IP:1883");
+        for broker in &cfg.brokers {
+            assert!(!broker.enabled);
+            assert_eq!(broker.uri.as_str(), "mqtt://IP:1883");
+            assert!(!broker.tls_insecure);
+        }
         assert_eq!(cfg.web_username.as_str(), "CAN2MQTTSETUP");
         assert_eq!(cfg.web_password.as_str(), "Can2MqttPass");
         assert_eq!(cfg.can_id, 0xFF);
@@ -163,5 +234,29 @@ mod tests {
     fn key_discriminants_are_stable() {
         assert_eq!(u8::from(Key::Hostname), 4);
         assert_eq!(u8::from(Key::UpdateDelay), 16);
+        assert_eq!(u8::from(Key::Mqtt2Enabled), 17);
+        assert_eq!(u8::from(Key::Mqtt2Uri), 18);
+        assert_eq!(u8::from(Key::Mqtt2User), 19);
+        assert_eq!(u8::from(Key::Mqtt2Password), 20);
+        assert_eq!(u8::from(Key::MqttTlsInsecure), 21);
+        assert_eq!(u8::from(Key::Mqtt2TlsInsecure), 22);
+    }
+
+    #[test]
+    fn broker_slots_use_their_own_keys() {
+        let first = Key::broker(0);
+        let second = Key::broker(1);
+        assert_eq!(first.uri, Key::MqttUri);
+        assert_eq!(second.uri, Key::Mqtt2Uri);
+        // No key is shared between the slots.
+        for (a, b) in [
+            (first.enabled, second.enabled),
+            (first.uri, second.uri),
+            (first.user, second.user),
+            (first.password, second.password),
+            (first.tls_insecure, second.tls_insecure),
+        ] {
+            assert_ne!(u8::from(a), u8::from(b));
+        }
     }
 }

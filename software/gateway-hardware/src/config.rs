@@ -11,7 +11,7 @@
 use common_hardware::config_store::{ConfigCell, ConfigStore};
 use core::ops::Range;
 pub use gateway_core::config::Key;
-use gateway_core::config::{Bitrate, GatewayConfig};
+use gateway_core::config::{Bitrate, BrokerConfig, GatewayConfig};
 
 /// Matches the `nvs` entry in `partitions.csv`.
 pub const CONFIG_PARTITION: Range<u32> = 0x9000..0x4C000;
@@ -124,20 +124,32 @@ impl LoadOrInit for Config {
             }
         };
 
-        let mqtt_enabled = match self.get_bool(Key::MqttEnabled).await {
-            Some(v) => v,
-            None => {
-                let _ = self.set_bool(Key::MqttEnabled, defaults.mqtt_enabled).await;
-                defaults.mqtt_enabled
-            }
-        };
+        let mut brokers = defaults.brokers.clone();
+        for (slot, broker) in brokers.iter_mut().enumerate() {
+            let keys = Key::broker(slot);
+            let default = BrokerConfig::default();
+            broker.enabled = match self.get_bool(keys.enabled).await {
+                Some(v) => v,
+                None => {
+                    let _ = self.set_bool(keys.enabled, default.enabled).await;
+                    default.enabled
+                }
+            };
+            broker.uri = str_field!(keys.uri, default.uri);
+            broker.user = str_field!(keys.user, default.user);
+            broker.password = str_field!(keys.password, default.password);
+            broker.tls_insecure = match self.get_bool(keys.tls_insecure).await {
+                Some(v) => v,
+                None => {
+                    let _ = self.set_bool(keys.tls_insecure, default.tls_insecure).await;
+                    default.tls_insecure
+                }
+            };
+        }
 
         GatewayConfig {
             hostname: str_field!(Key::Hostname, defaults.hostname),
-            mqtt_enabled,
-            mqtt_uri: str_field!(Key::MqttUri, defaults.mqtt_uri),
-            mqtt_user: str_field!(Key::MqttUser, defaults.mqtt_user),
-            mqtt_password: str_field!(Key::MqttPassword, defaults.mqtt_password),
+            brokers,
             web_username: str_field!(Key::WebUsername, defaults.web_username),
             web_password: str_field!(Key::WebPassword, defaults.web_password),
             can_id: u8_field!(Key::CanId, defaults.can_id),

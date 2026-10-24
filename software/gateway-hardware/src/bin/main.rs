@@ -79,7 +79,10 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     if let Some(stack) = stack {
-        spawner.spawn(mqtt::mqtt_task(stack).unwrap());
+        // One session per broker slot; a slot that isn't enabled idles.
+        for slot in 0..gateway_core::config::MQTT_BROKERS {
+            spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
+        }
     }
 
     can::send_can_message(

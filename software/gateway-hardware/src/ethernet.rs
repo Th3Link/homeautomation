@@ -53,7 +53,7 @@ type EthDriver = Ethernet<'static, Async, GenericPhy>;
 
 static DMA_STORAGE: StaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     StaticCell::new();
-static NET_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
 
 /// Peripherals/pins Ethernet needs from `main.rs` — grouped since there are
 /// nine of them and they're always passed together.
