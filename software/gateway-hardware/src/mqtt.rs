@@ -69,6 +69,9 @@ const SUBSCRIBE_TOPICS: &[&str] = &[
     "canbus/rollershutter_command/#",
     "canbus/lamp_command/#",
     "canbus/nightlight_command/#",
+    "canbus/heating_target_command/#",
+    "canbus/heating_energy_command/#",
+    "canbus/heating_emergency_command/#",
     "canbus/debug/#",
 ];
 
@@ -174,7 +177,12 @@ pub async fn mqtt_task(stack: Stack<'static>) {
                 Either::Second(Ok(Event::Publish(msg))) => {
                     if let TopicReference::Name(name) = &msg.topic {
                         if let Ok(body) = core::str::from_utf8(msg.message.as_bytes()) {
-                            crate::translate::dispatch_mqtt(name.as_ref().as_str(), body).await;
+                            crate::translate::dispatch_mqtt(
+                                name.as_ref().as_str(),
+                                body,
+                                msg.retain,
+                            )
+                            .await;
                         }
                     }
                 }

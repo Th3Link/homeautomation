@@ -9,7 +9,9 @@ use gateway_core::can_message_type::CanMessageType;
 use gateway_core::device_message::encode_id_type;
 use gateway_core::relais::{self, RelaisMsg};
 use gateway_core::sensor::{decode_ambient_light, FixedPointReading};
-use gateway_core::topics::{button, debug, device, lamp, relais as relais_topics};
+use gateway_core::topics::{
+    button, debug, device, heating as heating_topics, lamp, relais as relais_topics,
+};
 use heapless::String as HString;
 
 /// Routes one received CAN frame to whichever handler cares about its
@@ -147,8 +149,10 @@ pub async fn publish_self_available() {
 }
 
 /// Routes one received MQTT message to whichever bridge's command topic it
-/// matches. Called from [`crate::mqtt`]'s session loop.
-pub async fn dispatch_mqtt(topic: &str, body: &str) {
+/// matches. Called from [`crate::mqtt`]'s session loop. `retained` is set
+/// when the broker delivers the message from its retained store rather than
+/// because somebody just published it.
+pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
     if gateway_core::topics::is_gateway_restart_topic(topic) {
         esp_hal::system::software_reset();
     }
@@ -202,10 +206,45 @@ pub async fn dispatch_mqtt(topic: &str, body: &str) {
         return;
     }
 
+    if heating_topics::is_heating_target_command_topic(topic)
+        || heating_topics::is_heating_energy_command_topic(topic)
+        || heating_topics::is_heating_emergency_command_topic(topic)
+    {
+        // The heating controller treats these as live values and switches
+        // its heating rod off when they stop coming, so an old one replayed
+        // from the broker after a reconnect must not look like a fresh one.
+        if retained {
+            return;
+        }
+        dispatch_heating_command(topic, body).await;
+        return;
+    }
+
     if debug::is_debug_topic(topic) {
         if let Ok((target_id, bytes)) = debug::parse_debug_command(topic, body) {
             crate::can::send_raw(target_id, &bytes, false).await;
         }
+    }
+}
+
+/// Parses a `canbus/heating_*_command/<device>` body and sends the
+/// matching CAN message to the device. A body that doesn't parse, or a
+/// device that can't be resolved, is dropped silently like for the other
+/// command topics.
+async fn dispatch_heating_command(topic: &str, body: &str) {
+    let Some(target) = resolve_target(topic).await else {
+        return;
+    };
+    if heating_topics::is_heating_target_command_topic(topic) {
+        if let Ok(msg) = heating_topics::parse_target_body(body) {
+            send_command(target, CanMessageType::HeatingTarget, &msg.to_bytes()).await;
+        }
+    } else if heating_topics::is_heating_energy_command_topic(topic) {
+        if let Ok(msg) = heating_topics::parse_energy_body(body) {
+            send_command(target, CanMessageType::HeatingEnergy, &msg.to_bytes()).await;
+        }
+    } else if let Ok(msg) = heating_topics::parse_emergency_body(body) {
+        send_command(target, CanMessageType::HeatingEmergency, &msg.to_bytes()).await;
     }
 }
 
