@@ -86,6 +86,7 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .toolbar .uid { width: 12rem; }
 
 .upload { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.muted.wide { flex-basis: 100%; margin: 0; }
 .upload input { width: auto; flex: 1 1 14rem; }
 progress { width: 100%; height: 0.6rem; }
 

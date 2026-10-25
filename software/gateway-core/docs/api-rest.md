@@ -103,9 +103,9 @@ package before sending.
 | Route | |
 |---|---|
 | `PUT /firmware/gateway?crc32=…` | the gateway's own firmware (up to 7.75 MiB, the size of an OTA slot). Answers `{"bytes", "restarting": true}` once the image verified, then restarts into it; `422 verify` if size or CRC are wrong |
-| `PUT /devices/:device/firmware?crc32=…` | a CAN node, over CAN-OTA (up to 1 MiB); takes minutes, the bus sets the pace |
-| `PUT /device-types/:type/firmware?crc32=…` | every node of a type |
-| `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent`, `error` |
+| `PUT /devices/:device/firmware?crc32=…` | a CAN node (up to 1 MiB), in acknowledged blocks (ADR 0017); a node that does not know the block protocol yet is sent the old way once. Takes minutes, the bus sets the pace |
+| `PUT /device-types/:type/firmware?crc32=…` | every node of a type at once, with the old streaming protocol (no acknowledgement). The web UI sends an image to the devices of a type one after the other through the per-device route instead |
+| `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent` (for a device: the bytes it has acknowledged), `protocol` (`blocks`, `legacy`), `retries` (blocks sent again), `error` |
 
 ## The browser UI
 

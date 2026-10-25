@@ -78,6 +78,12 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
             }
         }
         CanMessageType::SensorConfig if !request => dispatch_sensor_config(id, data).await,
+        // The answers of a node to a firmware update.
+        CanMessageType::OtaControl if !request => {
+            if let Ok(control) = gateway_core::ota::OtaControl::from_bytes(data) {
+                crate::can_update::reply(id.device_key(), control);
+            }
+        }
         CanMessageType::TemperatureSensor
         | CanMessageType::PressureSensor
         | CanMessageType::HumiditySensor

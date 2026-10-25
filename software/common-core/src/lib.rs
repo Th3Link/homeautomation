@@ -63,4 +63,9 @@ pub mod can_message_type;
 pub mod device_message;
 pub mod device_type;
 pub mod heating_message;
+pub mod ota;
+#[cfg(test)]
+mod ota_loopback;
+pub mod ota_receiver;
+pub mod ota_sender;
 pub mod sensor_config;
