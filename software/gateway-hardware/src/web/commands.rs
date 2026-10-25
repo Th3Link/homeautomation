@@ -13,6 +13,9 @@ use super::json::{json, with_status};
 use crate::device_list::DEVICE_LIST;
 use gateway_core::can_message_type::CanMessageType;
 use gateway_core::command::{self, CanSend, SaveDeviceFields, Target, MAX_SENDS};
+use gateway_core::heating_message::{
+    HeatingCommand, HeatingEmergency, HeatingEnergy, HeatingManual, HeatingState, HeatingTarget,
+};
 use gateway_core::lamp::LampMsg;
 use gateway_core::relais::RelaisMsg;
 use gateway_core::web::{
@@ -88,7 +91,9 @@ struct Sent {
     sent: usize,
 }
 
-async fn send_all(sends: Vec<CanSend, MAX_SENDS>) -> Result<impl IntoResponse, ApiError> {
+pub(super) async fn send_all(
+    sends: Vec<CanSend, MAX_SENDS>,
+) -> Result<impl IntoResponse, ApiError> {
     let sent = sends.len();
     for send in sends {
         crate::can::send_raw(send.can_id, &send.data, send.request).await;
@@ -96,7 +101,7 @@ async fn send_all(sends: Vec<CanSend, MAX_SENDS>) -> Result<impl IntoResponse, A
     with_status(StatusCode::ACCEPTED, &Sent { sent }).await
 }
 
-async fn device_key(name: &DeviceName) -> Result<u32, ApiError> {
+pub(super) async fn device_key(name: &DeviceName) -> Result<u32, ApiError> {
     DEVICE_LIST
         .lock()
         .await
@@ -233,12 +238,17 @@ struct HeatingEmergencyBody {
     tank_c: f32,
 }
 
-async fn heating(
-    name: DeviceName,
-    msg_type: CanMessageType,
-    data: &[u8],
-) -> Result<impl IntoResponse, ApiError> {
-    let sends = command::targeted_sends(&target(&name).await?, msg_type, data, false);
+/// Sends a command to the heating controller of `name`.
+async fn heating(name: DeviceName, command: HeatingCommand) -> Result<impl IntoResponse, ApiError> {
+    let payload = command
+        .to_payload()
+        .map_err(|_| ApiError::invalid("a value does not fit the message"))?;
+    let sends = command::targeted_sends(
+        &target(&name).await?,
+        CanMessageType::HeatingCommand,
+        payload.as_slice(),
+        false,
+    );
     send_all(sends).await
 }
 
@@ -250,25 +260,32 @@ struct ManualState {
     relays: Vec<u8, 5>,
 }
 
-/// What the controller says about its manual mode; off if it says nothing.
+/// Asks the controller of `name` for its state.
+async fn controller_state(name: &DeviceName) -> Result<Option<HeatingState>, ApiError> {
+    Ok(crate::heating_state::query(device_key(name).await?).await)
+}
+
+/// What the controller reports about its manual mode: asked for just now.
 async fn heating_manual_state(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    let status = crate::heating_state::manual_status(device_key(&name).await?).await;
+    let state = controller_state(&name).await?.ok_or(ApiError::new(
+        StatusCode::GATEWAY_TIMEOUT,
+        "no_answer",
+        "the heating controller did not answer",
+    ))?;
     let relays = (6..=10u8)
-        .filter(|relay| status.relays_on & (1 << (relay - 6)) != 0)
+        .filter(|relay| state.manual_relays_on & (1 << (relay - 6)) != 0)
         .collect();
     json(&ManualState {
-        enabled: status.enabled,
+        enabled: state.manual,
         relays,
     })
     .await
 }
 
-/// A heating in manual mode takes no commands but the manual ones.
+/// A heating in manual mode takes no commands but the manual ones. (One
+/// that doesn't answer is sent the command anyway.)
 async fn not_in_manual_mode(name: &DeviceName) -> Result<(), ApiError> {
-    if crate::heating_state::manual_status(device_key(name).await?)
-        .await
-        .enabled
-    {
+    if controller_state(name).await?.is_some_and(|s| s.manual) {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "manual_mode",
@@ -301,12 +318,15 @@ async fn heating_manual(
     if body.relay.is_some() && !body.enabled {
         return Err(ApiError::invalid("relay: needs manual mode on"));
     }
-    let msg = gateway_core::heating_message::HeatingManual {
-        enabled: body.enabled,
-        relay: body.relay,
-        relay_on: body.on,
-    };
-    heating(name, CanMessageType::HeatingManual, &msg.to_bytes()).await
+    heating(
+        name,
+        HeatingCommand::Manual(HeatingManual {
+            enabled: body.enabled,
+            relay: body.relay,
+            relay_on: body.on,
+        }),
+    )
+    .await
 }
 
 async fn heating_target(
@@ -315,11 +335,14 @@ async fn heating_target(
 ) -> Result<impl IntoResponse, ApiError> {
     not_in_manual_mode(&name).await?;
     let raw = celsius_to_raw(body.flow_c).ok_or(ApiError::invalid("flow_c must be -50…150"))?;
-    let msg = gateway_core::heating_message::HeatingTarget {
-        flow_target_raw: raw,
-        tank_mode: body.tank,
-    };
-    heating(name, CanMessageType::HeatingTarget, &msg.to_bytes()).await
+    heating(
+        name,
+        HeatingCommand::Target(HeatingTarget {
+            flow_target_raw: raw,
+            tank_mode: body.tank,
+        }),
+    )
+    .await
 }
 
 async fn heating_energy(
@@ -327,11 +350,14 @@ async fn heating_energy(
     Json(body): Json<HeatingEnergyBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     not_in_manual_mode(&name).await?;
-    let msg = gateway_core::heating_message::HeatingEnergy {
-        power_w: body.power_w,
-        rod_enabled: body.rod_enabled,
-    };
-    heating(name, CanMessageType::HeatingEnergy, &msg.to_bytes()).await
+    heating(
+        name,
+        HeatingCommand::Energy(HeatingEnergy {
+            power_w: body.power_w,
+            rod_enabled: body.rod_enabled,
+        }),
+    )
+    .await
 }
 
 async fn heating_emergency(
@@ -343,11 +369,14 @@ async fn heating_emergency(
         return Err(ApiError::invalid("stage must be 0…3"));
     }
     let raw = celsius_to_raw(body.tank_c).ok_or(ApiError::invalid("tank_c must be -50…150"))?;
-    let msg = gateway_core::heating_message::HeatingEmergency {
-        stage: body.stage,
-        tank_target_raw: raw,
-    };
-    heating(name, CanMessageType::HeatingEmergency, &msg.to_bytes()).await
+    heating(
+        name,
+        HeatingCommand::Emergency(HeatingEmergency {
+            stage: body.stage,
+            tank_target_raw: raw,
+        }),
+    )
+    .await
 }
 
 // ---- device settings -----------------------------------------------------

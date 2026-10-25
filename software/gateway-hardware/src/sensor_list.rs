@@ -7,9 +7,18 @@ use embassy_sync::mutex::Mutex;
 use gateway_core::sensor_table::SensorTable;
 
 pub const SENSOR_LIST_SIZE: usize = 48;
+/// Nodes with temperature sensors that are expected on one bus.
+const SENSOR_NODES: usize = 8;
 
 pub static SENSOR_LIST: Mutex<CriticalSectionRawMutex, SensorTable<SENSOR_LIST_SIZE>> =
     Mutex::new(SensorTable::new());
+
+/// What the nodes say about their sensors: slots, names, roles
+/// ([`gateway_core::sensor_info`]).
+pub static SENSOR_INFO: Mutex<
+    CriticalSectionRawMutex,
+    gateway_core::sensor_info::SensorInfoTable<SENSOR_LIST_SIZE, SENSOR_NODES>,
+> = Mutex::new(gateway_core::sensor_info::SensorInfoTable::new());
 
 /// "Now", in seconds, for the readings' age.
 pub fn now_seconds() -> u32 {

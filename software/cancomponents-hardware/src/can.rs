@@ -113,10 +113,10 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         CanMessageType::Rollershutter => {
             relais_handler(id, frame.data(), frame.is_remote_frame()).await
         }
-        CanMessageType::HeatingTarget
-        | CanMessageType::HeatingEnergy
-        | CanMessageType::HeatingEmergency
-        | CanMessageType::HeatingManual => {
+        CanMessageType::SensorConfig => {
+            crate::sensor_config::handler(id, frame.data(), frame.is_remote_frame()).await
+        }
+        CanMessageType::HeatingCommand | CanMessageType::HeatingState => {
             heating_handler(id, frame.data(), frame.is_remote_frame()).await
         }
         CanMessageType::RelaisMode => {

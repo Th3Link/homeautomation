@@ -1,29 +1,55 @@
-//! The heating controllers' manual mode as the bus reports it, see
-//! [`gateway_core::heating_manual`]. Fed by [`crate::translate`], read by the
-//! web server and by the MQTT command dispatch.
+//! Asking a heating controller for its state: an R frame on
+//! [`CanMessageType::HeatingState`], answered by a data frame of the same
+//! type ([`gateway_core::heating_message::HeatingState`]). The controller
+//! never sends it by itself.
+//!
+//! [`translate`](crate::translate) feeds the answers in, [`query`] is for the
+//! web server.
 
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use gateway_core::heating_manual::{ManualStatus, ManualTable};
+use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Timer};
+use gateway_core::can_message_type::CanMessageType;
+use gateway_core::heating_message::HeatingState;
 
-/// More heating controllers than this on one bus are not expected.
-const CONTROLLERS: usize = 4;
+/// How long a controller has to answer.
+const ANSWER_WITHIN: Duration = Duration::from_millis(400);
 
-static MANUAL: Mutex<CriticalSectionRawMutex, ManualTable<CONTROLLERS>> =
-    Mutex::new(ManualTable::new());
+/// The last state frame that arrived, and from which device.
+static LATEST: Mutex<CriticalSectionRawMutex, Option<(u32, HeatingState)>> = Mutex::new(None);
+static ARRIVED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+/// One question at a time: there is one signal for the answers.
+static ONE_AT_A_TIME: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
-pub async fn observe(device_key: u32, state: gateway_core::heating_message::HeatingManualState) {
-    MANUAL
-        .lock()
-        .await
-        .observe(device_key, state, crate::sensor_list::now_seconds());
+/// A state frame came in from `device_key`.
+pub async fn observe(device_key: u32, state: HeatingState) {
+    *LATEST.lock().await = Some((device_key, state));
+    ARRIVED.signal(());
 }
 
-/// Whether `device_key`'s controller is in manual mode, and with which
-/// relays on.
-pub async fn manual_status(device_key: u32) -> ManualStatus {
-    MANUAL
-        .lock()
-        .await
-        .status(device_key, crate::sensor_list::now_seconds())
+/// Asks `device_key` for its state. `None` if it does not answer in time (an
+/// older firmware, or not a heating controller).
+pub async fn query(device_key: u32) -> Option<HeatingState> {
+    let _guard = ONE_AT_A_TIME.lock().await;
+    *LATEST.lock().await = None;
+    ARRIVED.reset();
+    let id = device_key + u32::from(u8::from(CanMessageType::HeatingState));
+    crate::can::send_raw(id, &[], true).await;
+
+    let answer = async {
+        loop {
+            ARRIVED.wait().await;
+            if let Some((key, state)) = *LATEST.lock().await {
+                if key == device_key {
+                    return state;
+                }
+            }
+        }
+    };
+    match select(answer, Timer::after(ANSWER_WITHIN)).await {
+        Either::First(state) => Some(state),
+        Either::Second(()) => None,
+    }
 }

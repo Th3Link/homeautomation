@@ -28,7 +28,9 @@ pub use common_core::DecodeError;
 /// (`cancomponents-core`) — re-exported from [`common_core`] so existing
 /// `crate::can_id`/`crate::can_message_type`/`crate::device_type`/
 /// `crate::device_message` paths keep working unchanged.
-pub use common_core::{can_id, can_message_type, device_message, device_type, heating_message};
+pub use common_core::{
+    can_id, can_message_type, device_message, device_type, heating_message, sensor_config,
+};
 
 pub mod button;
 pub mod can_ota;
@@ -37,11 +39,11 @@ pub mod config;
 pub mod device_list;
 pub mod docs;
 pub mod error;
-pub mod heating_manual;
 pub mod helper;
 pub mod lamp;
 pub mod relais;
 pub mod sensor;
+pub mod sensor_info;
 pub mod sensor_table;
 pub mod tls_pin;
 pub mod topics;

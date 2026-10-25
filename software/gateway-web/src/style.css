@@ -77,6 +77,11 @@ button:disabled { opacity: 0.5; cursor: progress; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--bad); border-color: var(--bad); }
 
+.inline { width: 8rem; }
+.actions { white-space: nowrap; text-align: right; }
+.actions button { padding: 0.25rem 0.6rem; }
+.roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem 1rem; }
+
 .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.9rem; }
 .toolbar .uid { width: 12rem; }
 

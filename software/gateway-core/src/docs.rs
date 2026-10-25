@@ -73,6 +73,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0015-mqtt-tls-pinned-public-key.md")]
     pub mod adr_0015_mqtt_tls_pinned_public_key {}
+
+    #[doc = include_str!("../docs/adr/0016-op-coded-heating-and-sensor-messages.md")]
+    pub mod adr_0016_op_coded_heating_and_sensor_messages {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with
