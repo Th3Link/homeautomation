@@ -70,6 +70,11 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
                 .await;
             }
         }
+        CanMessageType::HeatingManualState => {
+            if let Ok(state) = gateway_core::heating_message::HeatingManualState::from_bytes(data) {
+                crate::heating_state::observe(id.device_key(), state).await;
+            }
+        }
         CanMessageType::TemperatureSensor
         | CanMessageType::PressureSensor
         | CanMessageType::HumiditySensor
@@ -248,6 +253,10 @@ async fn dispatch_heating_command(topic: &str, body: &str) {
     let Some(target) = resolve_target(topic).await else {
         return;
     };
+    // A heating in manual mode takes no orders from anywhere.
+    if crate::heating_state::manual_status(target).await.enabled {
+        return;
+    }
     if heating_topics::is_heating_target_command_topic(topic) {
         if let Ok(msg) = heating_topics::parse_target_body(body) {
             send_command(target, CanMessageType::HeatingTarget, &msg.to_bytes()).await;

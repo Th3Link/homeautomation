@@ -73,7 +73,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | `PUT /devices/:device/heating/target` | `{"flow_c": 45.5, "tank": true}` |
 | `PUT /devices/:device/heating/energy` | `{"power_w": 6200, "rod_enabled": true}` |
 | `PUT /devices/:device/heating/emergency` | `{"stage": 0-3, "tank_c": 55}` |
-| `PUT /devices/:device/heating/manual` | commissioning: `{"enabled": true}` takes the relays 6-10 (valves, mixer, pump) from the controller (they go off), `{"enabled": true, "relay": 8, "on": true}` switches one (6-10; the mixer directions exclude each other), `{"enabled": false}` hands them back. Ends by itself after 10 minutes without a switch. The rod can't be reached. Sent as `HeatingManual`, [`protocol-can.md`](../../../docs/protocol-can.md) |
+| `PUT /devices/:device/heating/manual` | commissioning: `{"enabled": true}` takes the relays 6-10 (valves, mixer, pump) from the controller (they go off), `{"enabled": true, "relay": 8, "on": true}` switches one (6-10; the mixer directions exclude each other), `{"enabled": false}` hands them back. There is no time limit: it stays on until it is ended (or the controller restarts); while it is, the controller drops `target`/`energy`/`emergency` commands, from MQTT too, and those routes answer `409 manual_mode`. The rod can't be reached. `GET` of the same path says what the controller reports: `{"enabled": true, "relays": [8, 10]}`. Sent as `HeatingManual`, [`protocol-can.md`](../../../docs/protocol-can.md) |
 
 The heating bodies mean what the MQTT topics' do
 ([`protocol-mqtt.md`](protocol-mqtt.md)); the controller counts each as gone

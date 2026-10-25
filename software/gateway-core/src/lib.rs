@@ -37,6 +37,7 @@ pub mod config;
 pub mod device_list;
 pub mod docs;
 pub mod error;
+pub mod heating_manual;
 pub mod helper;
 pub mod lamp;
 pub mod relais;

@@ -741,9 +741,8 @@ async fn cmd_heating(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         respond(
             writer,
             &fmt_msg(format_args!(
-                "MANUAL MODE: relays 6-10 are under console control ({} s left); \
-                 circuit and mixer below show what the controller would do",
-                heating::manual_seconds_left().unwrap_or(0)
+                "MANUAL MODE: relays 6-10 are under manual control until it is turned off; \
+                 circuit and mixer below show what the controller would do"
             )),
         )
         .await?;
@@ -916,7 +915,7 @@ async fn cmd_heating_manual(enabled: bool) -> String<LINE_CAP> {
     if enabled {
         str_msg(
             "manual mode: relays 6-10 are yours (all off now), `relais <6-10> on|off`; \
-             `heating-manual off` or 10 min idle hands them back",
+             it stays on until `heating-manual off` (a restart ends it as well)",
         )
     } else {
         str_msg("automatic mode: relays 6-10 off, the mixer homes again, then the controller takes over")
