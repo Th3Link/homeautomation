@@ -102,9 +102,9 @@ intentional, not omissions:
 | 19 | `FlashWrite` | 165 | `HeatingCommand` |
 | 20 | `FlashVerify` | 166 | `HeatingState` |
 | 21 | `FlashProgress` | 167 | `SensorConfig` |
-| 22 | `FlashComplete` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 30 | `ButtonEvent` | | |
-| 31 | `TemperatureSensor` | | |
+| 22 | `FlashComplete` | 168 | `OtaControl` |
+| 30 | `ButtonEvent` | 169 | `OtaData` |
+| 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 41 | `HwRev` | | |
 | 42 | `ExtensionMode` | | |
 
@@ -477,13 +477,47 @@ byte:  0..3
       └──────────┘
 ```
 
-## OTA (`FlashStart`/`FlashWrite`/.../`FlashComplete`)
+## Firmware update in blocks (`OtaControl` / `OtaData`)
 
-The sequence a bus master (this gateway, as `CANUpdate`) drives to push
-firmware to a target node or type-broadcast. **Known to be unreliable —
-see [`technical-debt.md`](technical-debt.md#can-bus-ota-is-unreliable) and
-[ADR 0010](adr/0010-can-ota-rework-planned.md).** Documented here exactly
-as currently implemented, as the baseline for that rework.
+The way the `cancomponents` nodes are updated; the nodes know no other. Design
+and reasons: [ADR 0017](../software/gateway-core/docs/adr/0017-block-ota.md).
+The image goes over in **blocks** of 1 KiB (`BLOCK_SIZE`, a constant: a multiple of
+256 that divides the 4 KiB flash sector). A block is announced by a header
+frame and followed by its bytes in `OtaData` (169) frames, 8 bytes each (the last
+one zero-padded), sent back to back with no pause. All control frames are
+`OtaControl` (168), the operation in the low 4 bits of byte 0:
+
+| Op | Frame | Direction | Layout |
+|---|---|---|---|
+| 0 | Begin | to the node | byte 0 high nibble: block size / 256 − 1; bytes 1-3 image size (u24); bytes 4-7 image CRC-32 |
+| 1 | Block | to the node | bytes 1-2 index (u16); bytes 3-4 length (u16, ≤ block size, only the last block is shorter); bytes 5-6 CRC-16/CCITT-FALSE of the block |
+| 2 | End | to the node | – (verify the whole image and switch to it) |
+| 3 | Abort | to the node | – |
+| 4 | Ack | from the node | bytes 1-2: the block expected next (cumulative); `Ack 0` answers `Begin` |
+| 5 | Nak | from the node | bytes 1-2 block index; byte 3 reason: 1 frames missing, 2 bad CRC, 3 flash failed, 4 bad header, 5 out of order (the index is the one expected) |
+| 6 | Done | from the node | – (the image verified; the node restarts about a second later) |
+| 7 | Error | from the node | byte 1: 1 bad `Begin`, 2 image too large, 3 not started, 4 verify failed, 5 flash failed, 6 `End` before the last block |
+
+The node acknowledges a block when its length and CRC-16 are right and it is
+safely in its sector buffer; the block that completes a 4 KiB sector is
+acknowledged after the sector was written. A block that does not come out
+right is answered with a `Nak`; a block that stops (300 ms without a frame) is
+asked for again by a `Nak`; the sender repeats a refused or unanswered block
+(1 s) up to 8 times, then gives the update up with `Abort`. A repeated block
+whose ack was lost is acknowledged again and not taken twice. `Begin` is
+answered within 10 s, `End` within 15 s. The node silences itself for the
+update (the update messages are exempt from `UpdateSilence`), and a new image is
+only kept once the node has been heard on the bus (its first `Echo` answered).
+
+## Legacy OTA (`FlashStart`/`FlashWrite`/.../`FlashComplete`)
+
+The original streaming protocol, kept for the old STM32 nodes and as the
+gateway's fallback and for updates by type; the `cancomponents` nodes no longer
+implement it. **Known to be unreliable**, see
+[`technical-debt.md`](technical-debt.md#can-bus-ota-legacy-streaming-protocol).
+Documented here as implemented in the gateway (`gateway_core::can_ota`): the
+sequence a bus master (this gateway, as `CANUpdate`) drives to push firmware to
+a target node or type-broadcast.
 
 Start sequence (`filesize`, `crc` known up front):
 

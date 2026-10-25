@@ -27,9 +27,21 @@ export function Device({ device }) {
     ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
     <${Section} title="Sensors"><${SensorTable} device=${data.name || data.key} /><//>
     <${Settings} d=${data} reload=${reload} />
+    <${DeviceFirmware} d=${data} />`;
+}
+
+// Sends a firmware image over the CAN bus: to this device, or one after the
+// other to every device of its type.
+function DeviceFirmware({ d }) {
+  const id = d.name || d.key;
+  const { data: devices } = useLoad(api.devices.list);
+  const others = (devices || [])
+    .filter((o) => o.device_type === d.device_type && o.key !== d.key)
+    .map((o) => ({ name: o.name || o.key, target: 'devices/' + encodeURIComponent(o.name || o.key) }));
+  return html`
     <${Section} title="Firmware">
-      <p class="muted">Sends a firmware image to this device over the CAN bus. It takes a few minutes.</p>
-      <${FirmwareUpload} target=${'devices/' + encodeURIComponent(data.name || data.key)} label="Send to device" />
+      <p class="muted">Sends a firmware image to this device over the CAN bus: in blocks that the device acknowledges and the gateway repeats if the bus lost frames, so it takes a few minutes and does not depend on timing. The device restarts into the new image and keeps it once it was heard on the bus; if it does not come back, it returns to the old one.</p>
+      <${FirmwareUpload} target=${'devices/' + encodeURIComponent(id)} label="Send to this device" others=${others} />
     <//>`;
 }
 

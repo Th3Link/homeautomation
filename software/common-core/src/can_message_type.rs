@@ -69,6 +69,11 @@ pub enum CanMessageType {
     /// Sensor management of a node: names, roles, the list. Selected by an
     /// operation code, see [`crate::sensor_config`].
     SensorConfig = 167,
+    /// Firmware update in blocks (control side): begin, block header, end,
+    /// abort and the node's acks. See [`crate::ota`].
+    OtaControl = 168,
+    /// Firmware update in blocks (data side): 8 image bytes per frame.
+    OtaData = 169,
     /// Not part of the wire protocol. The original C++'s `switch` on
     /// `MSG_ID_t` silently drops unrecognized bytes; representing that as a
     /// typed fallback (rather than refusing to build a [`CanMessageType`]
@@ -134,6 +139,8 @@ mod tests {
             (CanMessageType::HeatingCommand, 165),
             (CanMessageType::HeatingState, 166),
             (CanMessageType::SensorConfig, 167),
+            (CanMessageType::OtaControl, 168),
+            (CanMessageType::OtaData, 169),
         ];
 
         for &(variant, byte) in known {

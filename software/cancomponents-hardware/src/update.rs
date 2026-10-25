@@ -1,26 +1,33 @@
-//! OTA firmware update over CAN (`FlashStart`/`FlashWrite`/`FlashComplete`/...).
+//! OTA firmware update over CAN, in blocks (`OtaControl`/`OtaData`, see
+//! [`cancomponents_core::ota`]): the image comes in blocks that are CRC-checked
+//! and acknowledged one by one, a block that went wrong is sent again, flash is
+//! only written while the sender waits for the answer. The state machine is
+//! [`cancomponents_core::ota_receiver::OtaReceiver`]; this module carries out
+//! what it asks for.
 //!
-//! Wire protocol is fixed and mirrors what a bus master (e.g. a flashing
-//! tool) expects: `start` carries a CRC32 + size, `write` streams raw
-//! firmware bytes buffered until a chunk boundary or `FlashComplete`, at
-//! which point the image is verified and the device reboots into it.
+//! The node does **not** speak the original streaming protocol
+//! (`FlashStart`/`FlashWrite`/…) any more: the gateway still can (for the old
+//! STM32 nodes and for a node whose firmware is older than this), the nodes
+//! only know the block protocol.
+//!
+//! A new image is only *pending* after the flash: it has to prove itself, see
+//! [`confirm`].
+use crate::can::{send_can_message, SILENCE};
 use crate::console_log;
+use crate::echo_guard::{disable_echo, ECHO_CHANNEL};
 use crate::error::{report_error, Component, ErrorCode, Severity};
 use crate::flash::SharedFlash;
-use cancomponents_core::can_id::CanId;
+use cancomponents_core::can_message_type::CanMessageType;
+use cancomponents_core::ota::OtaControl;
+use cancomponents_core::ota_receiver::{Effect, OtaReceiver};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal_ota::Ota;
-use heapless::Vec;
 use num_enum::FromPrimitive;
 
-const OTA_BUFFER_SIZE: usize = 4096;
-/// Bytes received via `FlashWrite` accumulate here until a full chunk (or
-/// `FlashComplete`) triggers `ota_write_chunk`.
-static CURRENT_BUFFER: Mutex<CriticalSectionRawMutex, Vec<u8, OTA_BUFFER_SIZE>> =
-    Mutex::new(Vec::new());
-static UPDATE: Mutex<CriticalSectionRawMutex, Option<Update>> = Mutex::new(None);
 static OTA: Mutex<CriticalSectionRawMutex, Option<Ota<SharedFlash>>> = Mutex::new(None);
 
 /// `local_code` values reported alongside `Component::Ota`/`Component::Update`
@@ -38,165 +45,248 @@ pub enum UpdateErrorCode {
     VerifyFailed = 6,
 }
 
-/// Marks the currently-running app partition valid (confirming a prior OTA
-/// update didn't need a rollback) and prepares the `Update` singleton.
-pub async fn init(_spawner: &Spawner) {
-    let mut update_guard = UPDATE.lock().await;
+/// How long a node whose echo guard may not restart it waits before it
+/// confirms the running image anyway (see [`confirm`]).
+const CONFIRM_GRACE: Duration = Duration::from_secs(120);
 
-    if update_guard.is_none() {
-        let update = Update {};
-        *update_guard = Some(update);
+static CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+/// Starts the tasks of the block update.
+///
+/// A freshly flashed image is *pending*: if the node resets before the image
+/// confirmed itself (see [`confirm`]) the bootloader goes back to the old one.
+pub async fn init(spawner: &Spawner) {
+    if Ota::new(SharedFlash).is_err() {
+        report_error(
+            Component::Ota,
+            ErrorCode::Unknown,
+            Severity::RecoverableError,
+            UpdateErrorCode::Init as u8,
+            &[0u8, 0u8, 0u8],
+        )
+        .await;
     }
+    spawner.spawn(ota_tick_task().unwrap());
+    spawner.spawn(confirm_task().unwrap());
+}
 
+/// Marks the running image as good, once: from then on the bootloader keeps
+/// it. Done when the node has been *seen working on the bus* — the first
+/// `Echo` it gets answered ([`crate::echo_guard`]) — and not merely at the
+/// start of the boot, so that an image that starts but cannot talk is not
+/// kept. A node whose echo guard may not restart it (a device on the bench
+/// without a gateway) confirms after [`CONFIRM_GRACE`] instead; one whose
+/// guard may restart it and hears nothing resets itself and the old image
+/// comes back.
+pub async fn confirm() {
+    if CONFIRMED.swap(true, Ordering::Relaxed) {
+        return;
+    }
     match Ota::new(SharedFlash) {
         Ok(mut ota) => {
             ota.ota_mark_app_valid().ok();
+            console_log!("update: the running image is confirmed");
         }
         Err(_) => {
-            report_error(
-                Component::Ota,
-                ErrorCode::Unknown,
-                Severity::RecoverableError,
-                UpdateErrorCode::Init as u8,
-                &[0u8, 0u8, 0u8],
-            )
-            .await;
+            // Try again at the next echo.
+            CONFIRMED.store(false, Ordering::Relaxed);
         }
     }
 }
 
-pub async fn update(
-) -> embassy_sync::mutex::MappedMutexGuard<'static, CriticalSectionRawMutex, Update> {
-    let guard = UPDATE.lock().await;
-    embassy_sync::mutex::MutexGuard::map(guard, |opt| opt.as_mut().expect("Update not initialized"))
+#[embassy_executor::task]
+async fn confirm_task() {
+    Timer::after(CONFIRM_GRACE).await;
+    if !crate::echo_guard::restart_enabled() {
+        confirm().await;
+    }
 }
 
-pub struct Update {}
+// ---- the block update ------------------------------------------------------
 
-impl Update {
-    /// Handles `FlashStart`: payload is `[crc32(be), size(be)]` (8 bytes),
-    /// begins an OTA write to the inactive partition.
-    pub async fn start(&mut self, id: CanId, data: &[u8], _remote_request: bool) {
-        if data.len() < 8 {
-            report_error(
-                Component::Update,
-                ErrorCode::InvalidData,
-                Severity::Warning,
-                UpdateErrorCode::InvalidData as u8,
-                &[id.msg_type as u8, data.len() as u8, 0u8],
-            )
-            .await;
-            return;
-        }
+static RECEIVER: Mutex<CriticalSectionRawMutex, OtaReceiver> = Mutex::new(OtaReceiver::new());
 
-        let size = u32::from_be_bytes(data[4..8].try_into().unwrap());
-        let crc = u32::from_be_bytes(data[0..4].try_into().unwrap());
-        console_log!("start update: crc {crc} size {size}");
+/// How often a block whose frames have stopped is looked at.
+const TICK: Duration = Duration::from_millis(50);
+/// The node restarts this long after it said `Done`, so that the frame gets out.
+const RESTART_DELAY: Duration = Duration::from_millis(1000);
 
-        match Ota::new(SharedFlash) {
-            Ok(mut ota) => {
-                if ota.ota_begin(size, crc).is_ok() {
-                    let next_ota = ota.get_next_ota_partition();
-                    console_log!("next ota part: {next_ota:?}");
-                    *OTA.lock().await = Some(ota);
-                } else {
-                    // ota_begin fehlgeschlagen
-                    report_error(
-                        Component::Ota,
-                        ErrorCode::Unknown,
-                        Severity::RecoverableError,
-                        UpdateErrorCode::Begin as u8,
-                        &[0u8, 0u8, 0u8],
-                    )
-                    .await;
-                    *OTA.lock().await = None;
-                }
-            }
-            Err(_) => {
-                report_error(
-                    Component::Ota,
-                    ErrorCode::Unknown,
-                    Severity::RecoverableError,
-                    UpdateErrorCode::Init as u8,
-                    &[0u8, 0u8, 0u8],
-                )
-                .await;
-                // OTA-Initialisierung fehlgeschlagen
+fn now_ms() -> u64 {
+    Instant::now().as_millis()
+}
+
+/// During an update the node keeps quiet — no sensor readings, no `Echo`
+/// probes (their missing answers must not restart the node half way) — and
+/// talks again afterwards.
+async fn quiet(on: bool) {
+    if on {
+        *SILENCE.lock().await = true;
+        disable_echo().await;
+    } else {
+        *SILENCE.lock().await = false;
+        ECHO_CHANNEL.send(true).await;
+    }
+}
+
+/// When the last update frame came in, in ms since boot (wrapping, which is
+/// fine for comparing against a short time).
+static LAST_FRAME_MS: AtomicU32 = AtomicU32::new(0);
+/// An update whose sender has been silent this long is given up.
+const IDLE_ABORT_MS: u32 = 30_000;
+
+/// Handles an `OtaControl` frame.
+pub async fn ota_control(data: &[u8], remote_request: bool) {
+    if remote_request {
+        return;
+    }
+    let Ok(frame) = OtaControl::from_bytes(data) else {
+        report_error(
+            Component::Update,
+            ErrorCode::InvalidData,
+            Severity::Warning,
+            UpdateErrorCode::InvalidData as u8,
+            &[CanMessageType::OtaControl as u8, data.len() as u8, 0u8],
+        )
+        .await;
+        return;
+    };
+    let mut receiver = RECEIVER.lock().await;
+    let now = now_ms();
+    LAST_FRAME_MS.store(now as u32, Ordering::Relaxed);
+    carry_out(&mut receiver, |r| r.control(frame, now)).await;
+    if frame == OtaControl::Abort {
+        *OTA.lock().await = None;
+        quiet(false).await;
+    }
+}
+
+/// Handles an `OtaData` frame: 8 bytes of the block being received.
+pub async fn ota_data(data: &[u8], remote_request: bool) {
+    if remote_request {
+        return;
+    }
+    let mut receiver = RECEIVER.lock().await;
+    let now = now_ms();
+    LAST_FRAME_MS.store(now as u32, Ordering::Relaxed);
+    carry_out(&mut receiver, |r| r.data(data, now)).await;
+}
+
+/// A block whose frames stopped coming is asked for again.
+#[embassy_executor::task]
+async fn ota_tick_task() {
+    loop {
+        Timer::after(TICK).await;
+        let mut receiver = RECEIVER.lock().await;
+        if receiver.active() {
+            let now = now_ms();
+            carry_out(&mut receiver, |r| r.tick(now)).await;
+            // A sender that has gone away leaves nothing behind.
+            if (now as u32).wrapping_sub(LAST_FRAME_MS.load(Ordering::Relaxed)) > IDLE_ABORT_MS {
+                console_log!("update: nobody sends any more, giving up");
+                carry_out(&mut receiver, |r| r.control(OtaControl::Abort, now)).await;
                 *OTA.lock().await = None;
+                quiet(false).await;
             }
         }
     }
-    /// Handles `FlashWrite`/`FlashComplete`: buffers raw firmware bytes and
-    /// flushes to flash once `OTA_BUFFER_SIZE` is reached or `force_flush`
-    /// (i.e. this is the final `FlashComplete` chunk) is set — at which
-    /// point the image is verified and, on success, the device reboots
-    /// into it.
-    pub async fn write(
-        &mut self,
-        _id: CanId,
-        data: &[u8],
-        _remote_request: bool,
-        force_flush: bool,
-    ) {
-        let mut buffer = CURRENT_BUFFER.lock().await;
-        let should_flush = {
-            if buffer.extend_from_slice(data).is_err() {
-                true // Buffer voll -> sofort flushen
-            } else {
-                force_flush || buffer.len() == OTA_BUFFER_SIZE
+}
+
+/// Does what the receiver asks for until it has nothing more to say.
+async fn carry_out(
+    receiver: &mut OtaReceiver,
+    first: impl for<'a> FnOnce(&'a mut OtaReceiver) -> Effect<'a>,
+) {
+    let mut effect = first(receiver);
+    loop {
+        effect = match effect {
+            Effect::None => return,
+            Effect::Reply(reply) => {
+                reply_with(reply).await;
+                return;
+            }
+            Effect::Begin { size, crc32 } => {
+                let ok = begin_flash(size, crc32).await;
+                receiver.begun(ok)
+            }
+            Effect::WriteSector { offset, data } => {
+                let ok = write_sector(offset, data).await;
+                receiver.sector_written(ok)
+            }
+            Effect::Verify => {
+                let ok = finish_flash().await;
+                receiver.verified(ok)
             }
         };
+    }
+}
 
-        if should_flush {
-            console_log!("write chunk");
-            let mut ota_guard = OTA.lock().await;
-            if let Some(ref mut ota) = *ota_guard {
-                match ota.ota_write_chunk(&buffer) {
-                    Ok(true) => {
-                        console_log!("last chunk");
-                        if ota
-                            .ota_flush(true, true)
-                            .inspect_err(|e| {
-                                console_log!("{e:?}");
-                            })
-                            .is_err()
-                        {
-                            report_error(
-                                Component::Update,
-                                ErrorCode::InvalidData,
-                                Severity::Warning,
-                                UpdateErrorCode::VerifyFailed as u8,
-                                &[0u8, 0u8, 0u8],
-                            )
-                            .await;
-                        } else {
-                            esp_hal::system::software_reset();
-                        }
-                    }
-                    Ok(false) => {
-                        // continue writing
-                    }
-                    Err(e) => {
-                        console_log!("Write failed: {:?}", e);
-                        report_error(
-                            Component::Ota,
-                            ErrorCode::Unknown,
-                            Severity::RecoverableError,
-                            UpdateErrorCode::Write as u8,
-                            &[0u8, 0u8, 0u8],
-                        )
-                        .await;
-                    }
-                }
+/// Sends `reply` and takes care of what it means for the rest of the node.
+async fn reply_with(reply: OtaControl) {
+    match reply {
+        // The update is on: the node keeps quiet but for the update.
+        OtaControl::Ack { next: 0 } => quiet(true).await,
+        OtaControl::Error(code) => {
+            console_log!("update: failed ({code:?})");
+            *OTA.lock().await = None;
+            quiet(false).await;
+        }
+        _ => {}
+    }
+    if let Ok(payload) = reply.to_payload() {
+        send_can_message(CanMessageType::OtaControl, payload.as_slice(), false).await;
+    }
+    if reply == OtaControl::Done {
+        console_log!("update: done, restarting");
+        Timer::after(RESTART_DELAY).await;
+        esp_hal::system::software_reset();
+    }
+}
+
+async fn begin_flash(size: u32, crc: u32) -> bool {
+    console_log!("update: begin, {size} bytes, crc {crc:#x}");
+    match Ota::new(SharedFlash) {
+        Ok(mut ota) => {
+            if ota.ota_begin(size, crc).is_ok() {
+                *OTA.lock().await = Some(ota);
+                true
+            } else {
+                *OTA.lock().await = None;
+                false
             }
-
-            buffer.clear();
+        }
+        Err(_) => {
+            *OTA.lock().await = None;
+            false
         }
     }
+}
 
-    pub async fn progress(&mut self, _id: CanId, _data: &[u8], _remote_request: bool) {}
-    pub async fn select(&mut self, _id: CanId, _data: &[u8], _remote_request: bool) {}
-    pub async fn erase(&mut self, _id: CanId, _data: &[u8], _remote_request: bool) {}
-    pub async fn read(&mut self, _id: CanId, _data: &[u8], _remote_request: bool) {}
-    pub async fn verify(&mut self, _id: CanId, _data: &[u8], _remote_request: bool) {}
+/// Writes the next sector of the image. The blocks arrive in order, so this
+/// is always the place right after the last one.
+async fn write_sector(_offset: u32, data: &[u8]) -> bool {
+    match OTA.lock().await.as_mut() {
+        Some(ota) => match ota.ota_write_chunk(data) {
+            Ok(_) => true,
+            Err(e) => {
+                console_log!("update: write failed: {e:?}");
+                false
+            }
+        },
+        None => false,
+    }
+}
+
+/// Verifies the whole image (size, CRC-32, read back from flash) and makes it
+/// the one to boot — as a *pending* image, see [`confirm`].
+async fn finish_flash() -> bool {
+    match OTA.lock().await.as_mut() {
+        Some(ota) => match ota.ota_flush(true, true) {
+            Ok(()) => true,
+            Err(e) => {
+                console_log!("update: verify failed: {e:?}");
+                false
+            }
+        },
+        None => false,
+    }
 }

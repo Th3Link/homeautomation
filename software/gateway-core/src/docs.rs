@@ -76,6 +76,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0016-op-coded-heating-and-sensor-messages.md")]
     pub mod adr_0016_op_coded_heating_and_sensor_messages {}
+
+    #[doc = include_str!("../docs/adr/0017-block-ota.md")]
+    pub mod adr_0017_block_ota {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with

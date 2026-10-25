@@ -7,7 +7,6 @@ use crate::device::device;
 use crate::echo_guard::{disable_echo, dispatch_echo};
 use crate::heating::heating_handler;
 use crate::relais::relais_handler;
-use crate::update::update;
 use cancomponents_core::can_id::{filter_code_mask, CanId};
 use cancomponents_core::can_message_type::CanMessageType;
 use core::fmt::Write;
@@ -205,53 +204,11 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
                 .restart(id, frame.data(), frame.is_remote_frame())
                 .await
         }
-        CanMessageType::FlashStart => {
-            update()
-                .await
-                .start(id, frame.data(), frame.is_remote_frame())
-                .await
+        CanMessageType::OtaControl => {
+            crate::update::ota_control(frame.data(), frame.is_remote_frame()).await
         }
-        CanMessageType::FlashProgress => {
-            update()
-                .await
-                .progress(id, frame.data(), frame.is_remote_frame())
-                .await
-        }
-        CanMessageType::FlashSelect => {
-            update()
-                .await
-                .select(id, frame.data(), frame.is_remote_frame())
-                .await
-        }
-        CanMessageType::FlashRead => {
-            update()
-                .await
-                .read(id, frame.data(), frame.is_remote_frame())
-                .await
-        }
-        CanMessageType::FlashWrite => {
-            update()
-                .await
-                .write(id, frame.data(), frame.is_remote_frame(), false)
-                .await
-        }
-        CanMessageType::FlashComplete => {
-            update()
-                .await
-                .write(id, frame.data(), frame.is_remote_frame(), true)
-                .await
-        }
-        CanMessageType::FlashVerify => {
-            update()
-                .await
-                .verify(id, frame.data(), frame.is_remote_frame())
-                .await
-        }
-        CanMessageType::FlashErase => {
-            update()
-                .await
-                .erase(id, frame.data(), frame.is_remote_frame())
-                .await
+        CanMessageType::OtaData => {
+            crate::update::ota_data(frame.data(), frame.is_remote_frame()).await
         }
         CanMessageType::UpdateSilence => silence(frame).await,
         CanMessageType::Ping => ping(id).await,
@@ -300,7 +257,10 @@ async fn unknown_handler(frame: &EspTwaiFrame) {
 /// no-op while [`SILENCE`] is set. `data` must be 8 bytes or fewer (CAN
 /// frame limit) — this is not validated here and will panic otherwise.
 pub async fn send_can_message(msg_id: CanMessageType, data: &[u8], rtr: bool) {
-    if *SILENCE.lock().await {
+    // An update talks while the node is otherwise silent: its answers must
+    // get through.
+    let update = matches!(msg_id, CanMessageType::OtaControl | CanMessageType::OtaData);
+    if !update && *SILENCE.lock().await {
         return;
     }
     let device_type = *DEVICE_TYPE.lock().await;
