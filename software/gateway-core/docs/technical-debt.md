@@ -5,29 +5,21 @@ item below either has, or points to, the ADR tracking its planned
 resolution — this document is the "what's wrong and why it matters" side;
 the ADRs are the "what we've decided to do about it" side.
 
-## CAN-bus OTA is unreliable
+## CAN-bus OTA (legacy streaming protocol)
 
-Pushing firmware to a node over the CAN bus fails often in practice. The
-current implementation (both in the original C++ and this port, which
-faithfully reproduces it — see
-[`protocol-can.md`](../../../docs/protocol-can.md#ota-flashstartflashwritecomplete))
-streams the image as a flat sequence of `FlashWrite` frames with no
-per-chunk checksum, no sequence numbering, and no acknowledgement:
+The original streaming OTA (`FlashStart`/`FlashWrite`/…, faithfully reproduced
+in `gateway_core::can_ota` and used by the gateway for the old STM32 nodes and
+as a fallback) is unreliable: no acknowledgement, no checksum, pacing by fixed
+delays, and a receiver that writes flash inline loses frames (see
+[ADR 0017](adr/0017-block-ota.md)). The `cancomponents` nodes no longer speak
+it: they take the block protocol, which acknowledges and repeats blocks. What
+is left of the problem is only the legacy path of the gateway:
 
-- A dropped frame (bus contention from other live traffic, electrical
-  noise, a busy receiver) is invisible to the sender — nothing detects
-  it, nothing retransmits it. The transfer just continues, and the
-  target's flash ends up with a gap.
-- A corrupted-but-received frame is written to flash as-is — there's no
-  per-chunk checksum to catch it before it's committed.
-- Pacing is a fixed delay (`update_delay_ms` between frames, plus a pause
-  every 4096 bytes) tuned by feel, not backed by any actual flow-control
-  signal from the receiver.
-
-**Planned fix:** [ADR 0010](../../../docs/adr/0010-can-ota-rework-planned.md) — rework
-into a chunked protocol with per-chunk sequence numbers, checksums,
-write-before-ack, and sender-side retransmission on a missing ack or
-timeout. Not yet designed in detail or implemented.
+- updating the old STM32 nodes, and updating **all devices of a type at once**
+  (a broadcast cannot be acknowledged by one sender), still stream without
+  acknowledgement;
+- a node whose firmware predates the block protocol is detected by a missing
+  answer to `Begin` and updated the old way once; after that it takes blocks.
 
 ## The `/control.json` RPC API is not good
 

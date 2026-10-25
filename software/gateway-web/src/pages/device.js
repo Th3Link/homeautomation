@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import * as api from '../api.js';
 import { FirmwareUpload } from '../firmware-upload.js';
-import { SensorTable } from './sensors.js';
+import { SensorTable, ROLES, roleLabel, useSensors } from './sensors.js';
 import { html, useLoad, run, notify, ago, Section, Loading, Field, Button } from '../ui.js';
 
 // Device types as the CAN protocol numbers them.
@@ -23,12 +23,25 @@ export function Device({ device }) {
     ${HAS_ROLLERSHUTTERS.includes(data.device_type) && html`<${Relays} d=${data} kind="rollershutter" />`}
     ${HAS_LAMPS.includes(data.device_type) && html`<${Lamps} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${Heating} d=${data} />`}
+    ${IS_HEATING.includes(data.device_type) && html`<${SensorAssignment} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
     <${Section} title="Sensors"><${SensorTable} device=${data.name || data.key} /><//>
     <${Settings} d=${data} reload=${reload} />
+    <${DeviceFirmware} d=${data} />`;
+}
+
+// Sends a firmware image over the CAN bus: to this device, or one after the
+// other to every device of its type.
+function DeviceFirmware({ d }) {
+  const id = d.name || d.key;
+  const { data: devices } = useLoad(api.devices.list);
+  const others = (devices || [])
+    .filter((o) => o.device_type === d.device_type && o.key !== d.key)
+    .map((o) => ({ name: o.name || o.key, target: 'devices/' + encodeURIComponent(o.name || o.key) }));
+  return html`
     <${Section} title="Firmware">
-      <p class="muted">Sends a firmware image to this device over the CAN bus. It takes a few minutes.</p>
-      <${FirmwareUpload} target=${'devices/' + encodeURIComponent(data.name || data.key)} label="Send to device" />
+      <p class="muted">Sends a firmware image to this device over the CAN bus: in blocks that the device acknowledges and the gateway repeats if the bus lost frames, so it takes a few minutes and does not depend on timing. The device restarts into the new image and keeps it once it was heard on the bus; if it does not come back, it returns to the old one.</p>
+      <${FirmwareUpload} target=${'devices/' + encodeURIComponent(id)} label="Send to this device" others=${others} />
     <//>`;
 }
 
@@ -145,10 +158,55 @@ const MANUAL_RELAYS = [
   [9, 'Mixer towards cold'],
   [10, 'Circuit pump'],
 ];
+// Which sensor has which role in the heating controller. The sensors are named
+// below in the sensor table; the slots they are called by are the node's own
+// and temporary, the gateway handles that.
+function SensorAssignment({ d }) {
+  const id = d.name || d.key;
+  const { data, error, reload, ask } = useSensors(id);
+  if (!data) return html`<${Section} title="Sensor assignment"><${Loading} error=${error} /><//>`;
+
+  const temperatures = data.filter((s) => s.kind === 'temperature');
+  const holder = (role) => temperatures.find((s) => s.role === role);
+  const label = (s) => (s.name ? `${s.name} (${s.sensor_id})` : s.sensor_id);
+  const known = temperatures.every((s) => s.slot !== null);
+
+  const assign = (role) => async (e) => {
+    const chosen = e.target.value;
+    let ok;
+    if (chosen === '') {
+      const current = holder(role);
+      if (!current) return;
+      ok = await run(() => api.sensors.update(id, current.slot, { role: 'none' }), `${roleLabel(role)} cleared`);
+    } else {
+      const sensor = temperatures.find((s) => s.sensor_id === chosen);
+      ok = await run(() => api.sensors.update(id, sensor.slot, { role }), `${label(sensor)} is ${roleLabel(role)} now`);
+    }
+    if (ok) setTimeout(reload, 1500);
+  };
+
+  return html`
+    <${Section} title="Sensor assignment" aside=${html`<${Button} onClick=${ask}>Reload from the device<//>`}>
+      <p class="muted">Which temperature sensor is the tank at each height, and which one measures the flow. The heating needs them to run the rod and the circuit.</p>
+      ${!known && html`<p class="muted">Some sensors have not reported their slot yet; "Reload from the device" asks for it.</p>`}
+      <div class="roles">
+        ${ROLES.filter((r) => r !== 'none').map(
+          (role) => html`<label key=${role} class="field">
+            <span>${roleLabel(role)}</span>
+            <select value=${(holder(role) || {}).sensor_id || ''} onChange=${assign(role)} disabled=${!known}>
+              <option value="">(none)</option>
+              ${temperatures.map((s) => html`<option value=${s.sensor_id}>${label(s)}</option>`)}
+            </select>
+          </label>`,
+        )}
+      </div>
+    <//>`;
+}
+
 function HeatingManual({ d }) {
   const id = d.name || d.key;
   // What the controller says: it reports its manual mode every few seconds.
-  const { data, reload } = useLoad(() => api.devices.heatingManualState(id), 3000);
+  const { data, error, reload } = useLoad(() => api.devices.heatingManualState(id), 3000);
   const manual = !!(data && data.enabled);
   const on = (relay) => !!(data && data.relays.includes(relay));
 
@@ -172,6 +230,7 @@ function HeatingManual({ d }) {
     <${Section} title="Manual mode"
       aside=${html`<${Button} kind=${manual ? 'danger' : ''} disabled=${!data} onClick=${toggleMode}>${manual ? 'End manual mode' : 'Start manual mode'}<//>`}>
       <p class="muted">For commissioning, venting and the like: the controller leaves valves, mixer and pump alone (they all go off when this starts) and you switch them one by one. It stays on until you end it, however long that takes — only a restart of the controller ends it too. While it is on, commands for the heating (from MQTT, too) are dropped, so the heating rod goes off. The rod is never switchable here.</p>
+      ${error && html`<p class="error">The controller does not answer: ${error.message}</p>`}
       ${manual && html`<p class="badge warn">Manual mode is on</p>`}
       <div class="manual">
         ${MANUAL_RELAYS.map(

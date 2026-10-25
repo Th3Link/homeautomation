@@ -56,6 +56,8 @@ pub async fn set_restart_enabled(enabled: bool) -> Result<(), ()> {
 
 /// Signals that `Echo` traffic was observed, resetting the miss counter.
 pub async fn dispatch_echo() {
+    // The node has been heard on the bus: the running image works.
+    crate::update::confirm().await;
     ECHO_CHANNEL.send(true).await;
 }
 

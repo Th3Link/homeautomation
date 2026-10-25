@@ -31,8 +31,8 @@ use cancomponents_core::heating_manual::{
     is_manual_relay, ManualMode, FIRST_MANUAL_RELAY, LAST_MANUAL_RELAY,
 };
 use cancomponents_core::heating_message::{
-    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingManual, HeatingManualState,
-    HeatingTarget,
+    millicelsius_to_raw, HeatingCommand, HeatingEmergency, HeatingEnergy, HeatingManual,
+    HeatingState, HeatingTarget,
 };
 use cancomponents_core::relais::{Message as RelaisMessage, State};
 use core::cell::Cell;
@@ -49,8 +49,6 @@ pub const CONTROL_PERIOD: Duration = Duration::from_millis(500);
 const MAX_READING_AGE: Duration = Duration::from_secs(25);
 /// The relay states are sent again this often, in case one was lost.
 const RESYNC_PERIOD: Duration = Duration::from_secs(10);
-/// While manual mode is on, its state goes out this often.
-const MANUAL_STATE_PERIOD: Duration = Duration::from_secs(5);
 /// A condition that persists is reported again after this long.
 const REPORT_REPEAT: Duration = Duration::from_secs(60);
 
@@ -205,55 +203,81 @@ async fn apply_manual(message: HeatingManual) -> Result<(), &'static str> {
     }
 }
 
-/// Handles the heating CAN messages. Malformed ones are reported and
-/// dropped, and leave the previous value to time out on its own.
-pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
-    // In manual mode nobody else tells the heating what to do.
-    if manual_active()
-        && matches!(
-            id.msg_type,
-            CanMessageType::HeatingTarget
-                | CanMessageType::HeatingEnergy
-                | CanMessageType::HeatingEmergency
-        )
-    {
-        return;
-    }
-    let decoded = match id.msg_type {
-        CanMessageType::HeatingTarget => HeatingTarget::from_bytes(data).map(inject_target),
-        CanMessageType::HeatingEnergy => HeatingEnergy::from_bytes(data).map(inject_energy),
-        CanMessageType::HeatingEmergency => {
-            HeatingEmergency::from_bytes(data).map(inject_emergency)
+/// Inputs older than this count as gone, as in the controller.
+const INPUT_ALIVE_S: u64 = 30;
+
+/// Handles the heating CAN messages: a command (target, energy, emergency or
+/// manual mode) and the R frame that asks for the state. A command that is
+/// malformed is reported and dropped, and leaves the previous value to time
+/// out on its own.
+pub async fn heating_handler(id: CanId, data: &[u8], remote_request: bool) {
+    match id.msg_type {
+        CanMessageType::HeatingState => {
+            if remote_request {
+                send_state().await;
+            }
         }
-        CanMessageType::HeatingManual => match HeatingManual::from_bytes(data) {
-            Ok(message) => {
-                if let Err(reason) = apply_manual(message).await {
-                    console_log!("heating: manual command refused: {reason}");
+        CanMessageType::HeatingCommand if !remote_request => {
+            match HeatingCommand::from_bytes(data) {
+                Ok(HeatingCommand::Manual(message)) => {
+                    if let Err(reason) = apply_manual(message).await {
+                        console_log!("heating: manual command refused: {reason}");
+                        report_error(
+                            Component::Heating,
+                            ErrorCode::InvalidData,
+                            Severity::Warning,
+                            id.msg_type as u8,
+                            &[message.relay.unwrap_or(0)],
+                        )
+                        .await;
+                    }
+                }
+                // In manual mode nobody else tells the heating what to do.
+                Ok(_) if manual_active() => {}
+                Ok(HeatingCommand::Target(message)) => inject_target(message),
+                Ok(HeatingCommand::Energy(message)) => inject_energy(message),
+                Ok(HeatingCommand::Emergency(message)) => inject_emergency(message),
+                Err(_) => {
                     report_error(
                         Component::Heating,
                         ErrorCode::InvalidData,
                         Severity::Warning,
                         id.msg_type as u8,
-                        &[message.relay.unwrap_or(HeatingManual::NO_RELAY)],
+                        &[data.len() as u8, data.first().copied().unwrap_or(0)],
                     )
                     .await;
                 }
-                Ok(())
             }
-            Err(e) => Err(e),
-        },
-        _ => return,
-    };
-    if decoded.is_err() {
-        report_error(
-            Component::Heating,
-            ErrorCode::InvalidData,
-            Severity::Warning,
-            id.msg_type as u8,
-            &[data.len() as u8],
-        )
-        .await;
+        }
+        _ => {}
     }
+}
+
+/// Answers an R frame with the controller's state.
+async fn send_state() {
+    if !CONTROLLER_RUNNING.load(Ordering::Relaxed) {
+        return;
+    }
+    let mode = MANUAL.lock(Cell::get);
+    let live = live_status();
+    let alive = |age: fn(&LiveStatus) -> Option<u64>| {
+        live.is_some_and(|live| age(&live).is_some_and(|age| age < INPUT_ALIVE_S))
+    };
+    let state = HeatingState {
+        manual: mode.enabled(),
+        target_alive: alive(|l| l.target_age_s),
+        energy_alive: alive(|l| l.energy_age_s),
+        emergency_alive: alive(|l| l.emergency_age_s),
+        over_temperature: live.is_some_and(|l| l.status.over_temperature),
+        rod_stage: live.map_or(0, |l| l.outputs.rod_stage),
+        manual_relays_on: mode.relays_on_mask(),
+    };
+    send_can_message(
+        CanMessageType::HeatingState,
+        state.to_payload().as_slice(),
+        false,
+    )
+    .await;
 }
 
 /// The manual (commissioning) mode, see [`ManualMode`]: it stays on until it
@@ -308,15 +332,6 @@ pub async fn manual_relay(num: usize, on: bool) -> Result<(), &'static str> {
     })
     .await;
     Ok(())
-}
-
-/// What `HeatingManualState` says right now.
-fn manual_state() -> HeatingManualState {
-    let mode = MANUAL.lock(Cell::get);
-    HeatingManualState {
-        enabled: mode.enabled(),
-        relays_on: mode.relays_on_mask(),
-    }
 }
 
 /// What the controller did last, for the console.
@@ -461,9 +476,6 @@ async fn heating_task() {
     let mut ticker = Ticker::every(CONTROL_PERIOD);
 
     let mut was_manual = false;
-    // What the bus was last told about the manual mode.
-    let mut told_manual: Option<HeatingManualState> = None;
-    let mut told_manual_at = Instant::now();
 
     // Whatever state the relays were in before: everything off first.
     apply(
@@ -542,17 +554,6 @@ async fn heating_task() {
             last_resync = now;
         }
 
-        // Tell the bus about the manual mode when it changes, and while it is
-        // on every few seconds, so that the gateway (and a browser) can show
-        // it and notices when it is gone.
-        let state = manual_state();
-        if told_manual != Some(state)
-            || (state.enabled && now.duration_since(told_manual_at) >= MANUAL_STATE_PERIOD)
-        {
-            send_can_message(CanMessageType::HeatingManualState, &state.to_bytes(), false).await;
-            told_manual = Some(state);
-            told_manual_at = now;
-        }
         apply(&mut applied, relay_states(&outputs), force, manual).await;
 
         // A message can arrive between taking `now` and reading it.

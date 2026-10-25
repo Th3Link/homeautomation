@@ -73,7 +73,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | `PUT /devices/:device/heating/target` | `{"flow_c": 45.5, "tank": true}` |
 | `PUT /devices/:device/heating/energy` | `{"power_w": 6200, "rod_enabled": true}` |
 | `PUT /devices/:device/heating/emergency` | `{"stage": 0-3, "tank_c": 55}` |
-| `PUT /devices/:device/heating/manual` | commissioning: `{"enabled": true}` takes the relays 6-10 (valves, mixer, pump) from the controller (they go off), `{"enabled": true, "relay": 8, "on": true}` switches one (6-10; the mixer directions exclude each other), `{"enabled": false}` hands them back. There is no time limit: it stays on until it is ended (or the controller restarts); while it is, the controller drops `target`/`energy`/`emergency` commands, from MQTT too, and those routes answer `409 manual_mode`. The rod can't be reached. `GET` of the same path says what the controller reports: `{"enabled": true, "relays": [8, 10]}`. Sent as `HeatingManual`, [`protocol-can.md`](../../../docs/protocol-can.md) |
+| `PUT /devices/:device/heating/manual` | commissioning: `{"enabled": true}` takes the relays 6-10 (valves, mixer, pump) from the controller (they go off), `{"enabled": true, "relay": 8, "on": true}` switches one (6-10; the mixer directions exclude each other), `{"enabled": false}` hands them back. There is no time limit: it stays on until it is ended (or the controller restarts); while it is, the controller drops `target`/`energy`/`emergency` commands, from MQTT too, and those routes answer `409 manual_mode`. The rod can't be reached. `GET` of the same path asks the controller (R frame) and answers `{"enabled": true, "relays": [8, 10]}`, or `504 no_answer` if it doesn't answer in time. Sent as a `HeatingCommand`, [`protocol-can.md`](../../../docs/protocol-can.md) |
 
 The heating bodies mean what the MQTT topics' do
 ([`protocol-mqtt.md`](protocol-mqtt.md)); the controller counts each as gone
@@ -83,9 +83,15 @@ The heating bodies mean what the MQTT topics' do
 
 | Route | |
 |---|---|
-| `GET /sensors` | every sensor seen on the bus and its latest reading, sixteen per page: `{"total", "offset", "sensors": [{"device", "device_key", "kind", "unit", "sensor_id", "value", "age_s"}]}`. `kind` is `temperature`, `humidity`, `pressure`, `co2`, `voc` or `air_quality`; `sensor_id` is the sensor's own id (the 1-Wire address of a DS18B20). `?offset=` continues, `?device=` (name or `0x…` key) filters |
+| `GET /sensors` | every sensor seen on the bus, its latest reading and what its node says about it, sixteen per page: `{"total", "offset", "sensors": [{"device", "device_key", "kind", "unit", "sensor_id", "slot", "name", "role", "lost", "value", "age_s"}]}`. `kind` is `temperature`, `humidity`, `pressure`, `co2`, `voc` or `air_quality`; `sensor_id` is the sensor's own id (the 1-Wire address of a DS18B20). `slot`, `name` and `role` (`none`, `tank0` … `tank6`, `flow`) are `null` until the node has told (the gateway asks for them the first time it sees a sensor). `?offset=` continues, `?device=` (name or `0x…` key) filters |
+| `PUT /devices/:device/sensors/:slot` | `{"name": "TANK-O1"}` (1-7 characters of `A-Z a-z 0-9 - _`, unique on the node) and/or `{"role": "tank2"}` (`none`, `tank0` … `tank6`, `flow`; the heating controller only). The slot has to be one the node reported (`409 unknown_slot` otherwise — refresh first); the gateway sends the sensor's serial along as a guard, so that a slot that moved is refused by the node instead of renaming or assigning the wrong sensor |
+| `POST /devices/:device/sensors/refresh` | asks the node for its list again (R frame); the answer shows in `GET /sensors` a moment later |
+| `POST /devices/:device/sensors/forget` | the node forgets the sensors that are lost |
 
-The list is kept in RAM (48 sensors; a full list drops the one that reported longest ago), so it is empty after a restart until the sensors report again.
+Slots are the node's own numbers, temporary: they change with a restart or
+when sensors come and go. Names stay with the sensor. The sensor lists are kept
+in RAM (48 sensors; a full list drops the one that reported longest ago), so
+they are empty after a restart until the sensors report again.
 
 ## Firmware
 
@@ -97,9 +103,9 @@ package before sending.
 | Route | |
 |---|---|
 | `PUT /firmware/gateway?crc32=…` | the gateway's own firmware (up to 7.75 MiB, the size of an OTA slot). Answers `{"bytes", "restarting": true}` once the image verified, then restarts into it; `422 verify` if size or CRC are wrong |
-| `PUT /devices/:device/firmware?crc32=…` | a CAN node, over CAN-OTA (up to 1 MiB); takes minutes, the bus sets the pace |
-| `PUT /device-types/:type/firmware?crc32=…` | every node of a type |
-| `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent`, `error` |
+| `PUT /devices/:device/firmware?crc32=…` | a CAN node (up to 1 MiB), in acknowledged blocks (ADR 0017); a node that does not know the block protocol yet is sent the old way once. Takes minutes, the bus sets the pace |
+| `PUT /device-types/:type/firmware?crc32=…` | every node of a type at once, with the old streaming protocol (no acknowledgement). The web UI sends an image to the devices of a type one after the other through the per-device route instead |
+| `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent` (for a device: the bytes it has acknowledged), `protocol` (`blocks`, `legacy`), `retries` (blocks sent again), `error` |
 
 ## The browser UI
 

@@ -189,6 +189,7 @@ pub async fn set_send_interval_secs(secs: u32) -> Result<u32, ()> {
 
 /// Starts measuring the DS18B20 sensors on `pin`.
 pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
+    crate::sensor_config::init(spawner).await;
     if let Some(secs) = config()
         .await
         .get_u32(config::Key::SensorSendInterval)
