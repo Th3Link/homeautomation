@@ -12,7 +12,9 @@ use cancomponents::echo_guard;
 use cancomponents::extension::Extension;
 use cancomponents::flash;
 use cancomponents::gpio_interrupt;
+use cancomponents::heating;
 use cancomponents::relais::Relais;
+use cancomponents::temperature;
 use cancomponents::update;
 use cancomponents_core::can_message_type::CanMessageType;
 use cancomponents_core::device_type::DeviceType;
@@ -67,7 +69,7 @@ async fn main(spawner: Spawner) -> ! {
     console_log!("device_type: {device_type:?}");
     console_log!("hwrev: {hwrev:?}");
     match (device_type, hwrev) {
-        (Some(DeviceType::Relais), Some(2)) => {
+        (Some(DeviceType::Relais | DeviceType::HeatingControl), Some(2)) => {
             Relais::init(
                 peripherals.I2C0,
                 peripherals.GPIO21,
@@ -76,6 +78,11 @@ async fn main(spawner: Spawner) -> ! {
                 &spawner,
             )
             .await;
+            // DS18B20 sensors on the 1-wire header (IO4, module pin 26).
+            temperature::init(peripherals.GPIO4, &spawner).await;
+            if device_type == Some(DeviceType::HeatingControl) {
+                heating::init(&spawner).await;
+            }
             Extension::init(
                 peripherals.I2C1,
                 peripherals.GPIO25.degrade(),
@@ -87,7 +94,7 @@ async fn main(spawner: Spawner) -> ! {
             )
             .await;
         }
-        (Some(DeviceType::Relais), Some(1)) => {
+        (Some(DeviceType::Relais | DeviceType::HeatingControl), Some(1)) => {
             Relais::init(
                 peripherals.I2C0,
                 peripherals.GPIO21,
@@ -96,6 +103,11 @@ async fn main(spawner: Spawner) -> ! {
                 &spawner,
             )
             .await;
+            // DS18B20 sensors on the 1-wire header (IO4, module pin 26).
+            temperature::init(peripherals.GPIO4, &spawner).await;
+            if device_type == Some(DeviceType::HeatingControl) {
+                heating::init(&spawner).await;
+            }
             Extension::init(
                 peripherals.I2C1,
                 peripherals.GPIO15.degrade(),

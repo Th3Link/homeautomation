@@ -75,21 +75,54 @@ enum Commands<'a> {
     Hwrev(u8),
     /// Set an 8-byte identification string.
     CustomString(&'a str),
+    /// Set the GPIO the Ethernet PHY's 50 MHz RMII clock comes out on (16 or
+    /// 17, depending on the board revision; takes effect after a restart).
+    #[set(min = 16, max = 17)]
+    EthClock(u8),
     /// Set the CAN bus bitrate.
     #[set(one_of = ["b22_222", "b25", "b50", "b100"])]
     Bitrate(BitrateArg),
     /// Set the hostname sent to the DHCP server (takes effect after restart).
     Hostname(&'a str),
-    /// Set the MQTT broker URI, e.g. `mqtt://192.168.1.10:1883`.
+    /// Set the first MQTT broker's URI, e.g. `mqtt://192.168.1.10:1883`;
+    /// `mqtts://host[:port]` encrypts the connection with TLS.
     MqttUri(&'a str),
-    /// Set the MQTT username.
+    /// Set the first MQTT broker's username.
     MqttUser(&'a str),
-    /// Set the MQTT password (under 8 characters is rejected, same as the
-    /// web UI).
+    /// Set the first MQTT broker's password (under 8 characters is
+    /// rejected, same as the web UI).
     MqttPassword(&'a str),
-    /// Enable/disable MQTT.
+    /// Enable/disable the first MQTT broker.
     #[set(one_of = ["on", "off"])]
     MqttEnabled(OnOff),
+    /// With `mqtts://`, accept any certificate the first broker presents
+    /// (encrypted, but not authenticated) instead of the pinned one.
+    #[set(one_of = ["on", "off"])]
+    MqttInsecure(OnOff),
+    /// Pin the first broker's TLS certificate: the next connection to it
+    /// takes the certificate it presents (it must be self-signed) and
+    /// stores it; from then on only that certificate is accepted. Check the
+    /// SHA-256 fingerprint printed in the log against the broker's own.
+    MqttTrust,
+    /// Forget the first broker's pinned certificate.
+    MqttUntrust,
+    /// Set the second MQTT broker's URI (see `mqtt-uri`).
+    Mqtt2Uri(&'a str),
+    /// Set the second MQTT broker's username.
+    Mqtt2User(&'a str),
+    /// Set the second MQTT broker's password (under 8 characters is
+    /// rejected).
+    Mqtt2Password(&'a str),
+    /// Enable/disable the second MQTT broker.
+    #[set(one_of = ["on", "off"])]
+    Mqtt2Enabled(OnOff),
+    /// With `mqtts://`, accept any certificate the second broker presents.
+    #[set(one_of = ["on", "off"])]
+    Mqtt2Insecure(OnOff),
+    /// Pin the second broker's TLS certificate (see `mqtt-trust`).
+    Mqtt2Trust,
+    /// Forget the second broker's pinned certificate.
+    Mqtt2Untrust,
     /// Set the web UI's Basic Auth username.
     WebUsername(&'a str),
     /// Set the web UI's Basic Auth password.
@@ -117,6 +150,7 @@ impl FromStr for DeviceTypeArg {
             "gateway" => DeviceType::Gateway,
             "rollershutter" => DeviceType::Rollershutter,
             "ssr" => DeviceType::SSR,
+            "heatingcontrol" => DeviceType::HeatingControl,
             _ => return Err(()),
         }))
     }
@@ -247,6 +281,7 @@ async fn handle_command(
         Commands::DeviceId(id) => respond(writer, &cmd_device_id(id).await).await,
         Commands::DeviceType(t) => respond(writer, &cmd_device_type(t.0).await).await,
         Commands::Hwrev(rev) => respond(writer, &cmd_hwrev(rev).await).await,
+        Commands::EthClock(gpio) => respond(writer, &cmd_eth_clock(gpio).await).await,
         Commands::CustomString(s) => respond(writer, &cmd_custom_string(s).await).await,
         Commands::Bitrate(b) => respond(writer, &cmd_bitrate(b.0).await).await,
         Commands::Hostname(s) => {
@@ -256,23 +291,33 @@ async fn handle_command(
             )
             .await
         }
-        Commands::MqttUri(s) => {
-            respond(
-                writer,
-                &cmd_str_field(s, config::Key::MqttUri, "mqtt_uri").await,
-            )
-            .await
-        }
+        Commands::MqttUri(s) => respond(writer, &cmd_mqtt_uri(0, s).await).await,
         Commands::MqttUser(s) => {
-            respond(
-                writer,
-                &cmd_str_field(s, config::Key::MqttUser, "mqtt_user").await,
-            )
-            .await
+            let keys = config::Key::broker(0);
+            respond(writer, &cmd_str_field(s, keys.user, "mqtt_user").await).await
         }
-        Commands::MqttPassword(s) => respond(writer, &cmd_mqtt_password(s).await).await,
+        Commands::MqttPassword(s) => respond(writer, &cmd_mqtt_password(0, s).await).await,
         Commands::MqttEnabled(v) => {
-            respond(writer, &cmd_mqtt_enabled(matches!(v, OnOff::On)).await).await
+            respond(writer, &cmd_mqtt_enabled(0, matches!(v, OnOff::On)).await).await
+        }
+        Commands::MqttInsecure(v) => {
+            respond(writer, &cmd_mqtt_insecure(0, matches!(v, OnOff::On)).await).await
+        }
+        Commands::MqttTrust => respond(writer, &cmd_mqtt_trust(0).await).await,
+        Commands::MqttUntrust => respond(writer, &cmd_mqtt_untrust(0).await).await,
+        Commands::Mqtt2Trust => respond(writer, &cmd_mqtt_trust(1).await).await,
+        Commands::Mqtt2Untrust => respond(writer, &cmd_mqtt_untrust(1).await).await,
+        Commands::Mqtt2Uri(s) => respond(writer, &cmd_mqtt_uri(1, s).await).await,
+        Commands::Mqtt2User(s) => {
+            let keys = config::Key::broker(1);
+            respond(writer, &cmd_str_field(s, keys.user, "mqtt2_user").await).await
+        }
+        Commands::Mqtt2Password(s) => respond(writer, &cmd_mqtt_password(1, s).await).await,
+        Commands::Mqtt2Enabled(v) => {
+            respond(writer, &cmd_mqtt_enabled(1, matches!(v, OnOff::On)).await).await
+        }
+        Commands::Mqtt2Insecure(v) => {
+            respond(writer, &cmd_mqtt_insecure(1, matches!(v, OnOff::On)).await).await
         }
         Commands::WebUsername(s) => {
             respond(
@@ -318,6 +363,14 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     respond(writer, &fmt_msg(format_args!("hwrev: {}", cfg.hw_rev))).await?;
     respond(
         writer,
+        &fmt_msg(format_args!(
+            "eth_clock: GPIO{}",
+            config::eth_clock_gpio().await
+        )),
+    )
+    .await?;
+    respond(
+        writer,
         &fmt_msg(format_args!("custom_string: {}", cfg.custom_string)),
     )
     .await?;
@@ -327,17 +380,37 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     )
     .await?;
     respond(writer, &fmt_msg(format_args!("hostname: {}", cfg.hostname))).await?;
-    respond(
-        writer,
-        &fmt_msg(format_args!("mqtt_enabled: {}", cfg.mqtt_enabled)),
-    )
-    .await?;
-    respond(writer, &fmt_msg(format_args!("mqtt_uri: {}", cfg.mqtt_uri))).await?;
-    respond(
-        writer,
-        &fmt_msg(format_args!("mqtt_user: {}", cfg.mqtt_user)),
-    )
-    .await?;
+    for (slot, broker) in cfg.brokers.iter().enumerate() {
+        let name = if slot == 0 { "mqtt" } else { "mqtt2" };
+        respond(
+            writer,
+            &fmt_msg(format_args!("{name}_enabled: {}", broker.enabled)),
+        )
+        .await?;
+        respond(writer, &fmt_msg(format_args!("{name}_uri: {}", broker.uri))).await?;
+        respond(
+            writer,
+            &fmt_msg(format_args!("{name}_user: {}", broker.user)),
+        )
+        .await?;
+        if broker.uri.starts_with("mqtts://") {
+            let pinned = crate::config::pinned_certificate(slot).await;
+            let line = if broker.tls_insecure {
+                fmt_msg(format_args!("{name}_tls: insecure (any certificate)"))
+            } else if let Some(certificate) = pinned {
+                let digest = crate::tls::fingerprint(&certificate);
+                fmt_msg(format_args!(
+                    "{name}_tls: pinned, SHA-256 {:02x}{:02x}{:02x}{:02x}...",
+                    digest[0], digest[1], digest[2], digest[3]
+                ))
+            } else {
+                fmt_msg(format_args!(
+                    "{name}_tls: NO certificate pinned (run {name}-trust)"
+                ))
+            };
+            respond(writer, &line).await?;
+        }
+    }
     respond(
         writer,
         &fmt_msg(format_args!("web_username: {}", cfg.web_username)),
@@ -370,6 +443,15 @@ async fn cmd_device_type(t: DeviceType) -> String<LINE_CAP> {
     }
     DEVICE_TYPE.store(value, Ordering::Relaxed);
     fmt_msg(format_args!("device_type set to {}", t.name()))
+}
+
+async fn cmd_eth_clock(gpio: u8) -> String<LINE_CAP> {
+    match config::set_eth_clock_gpio(gpio).await {
+        Ok(()) => fmt_msg(format_args!(
+            "eth_clock set to GPIO{gpio} (takes effect after restart)"
+        )),
+        Err(()) => str_msg("eth_clock must be 16 or 17, or storing failed"),
+    }
 }
 
 async fn cmd_hwrev(rev: u8) -> String<LINE_CAP> {
@@ -429,21 +511,72 @@ async fn cmd_str_field(value: &str, key: config::Key, name: &str) -> String<LINE
     fmt_msg(format_args!("{name} set to \"{value}\""))
 }
 
-async fn cmd_mqtt_password(value: &str) -> String<LINE_CAP> {
-    if !gateway_core::command::should_apply_mqtt_password(value) {
-        return str_msg("mqtt_password rejected: must be at least 8 characters");
+/// `mqtt` for the first broker slot, `mqtt2` for the second.
+fn broker_name(slot: usize) -> &'static str {
+    if slot == 0 {
+        "mqtt"
+    } else {
+        "mqtt2"
     }
-    cmd_str_field(value, config::Key::MqttPassword, "mqtt_password").await
 }
 
-async fn cmd_mqtt_enabled(enabled: bool) -> String<LINE_CAP> {
-    if config()
-        .await
-        .set_bool(config::Key::MqttEnabled, enabled)
-        .await
-        .is_err()
-    {
-        return str_msg("failed to persist mqtt_enabled");
+async fn cmd_mqtt_uri(slot: usize, value: &str) -> String<LINE_CAP> {
+    if gateway_core::helper::parse_broker_uri(value).is_none() {
+        return str_msg("uri must look like mqtt://host[:port] or mqtts://host[:port]");
     }
-    fmt_msg(format_args!("mqtt_enabled set to {enabled}"))
+    let name = broker_name(slot);
+    let key = config::Key::broker(slot).uri;
+    let mut message = cmd_str_field(value, key, &format_name(name, "uri")).await;
+    if value.starts_with("mqtts://") {
+        let _ = message.push_str(" - run mqtt-trust once to pin its certificate");
+    }
+    message
+}
+
+fn format_name(name: &str, field: &str) -> String<16> {
+    let mut out = String::new();
+    let _ = write!(out, "{name}_{field}");
+    out
+}
+
+async fn cmd_mqtt_password(slot: usize, value: &str) -> String<LINE_CAP> {
+    if !gateway_core::command::should_apply_mqtt_password(value) {
+        return str_msg("mqtt password rejected: must be at least 8 characters");
+    }
+    let key = config::Key::broker(slot).password;
+    cmd_str_field(value, key, &format_name(broker_name(slot), "password")).await
+}
+
+async fn cmd_mqtt_enabled(slot: usize, enabled: bool) -> String<LINE_CAP> {
+    let name = format_name(broker_name(slot), "enabled");
+    let key = config::Key::broker(slot).enabled;
+    if config().await.set_bool(key, enabled).await.is_err() {
+        return fmt_msg(format_args!("failed to persist {name}"));
+    }
+    fmt_msg(format_args!("{name} set to {enabled}"))
+}
+
+async fn cmd_mqtt_trust(slot: usize) -> String<LINE_CAP> {
+    crate::mqtt::request_trust(slot);
+    fmt_msg(format_args!(
+        "{}: the next connection pins the broker's certificate - watch the log for its fingerprint",
+        broker_name(slot)
+    ))
+}
+
+async fn cmd_mqtt_untrust(slot: usize) -> String<LINE_CAP> {
+    let name = broker_name(slot);
+    match config::set_pinned_certificate(slot, &[]).await {
+        Ok(()) => fmt_msg(format_args!("{name}: pinned certificate forgotten")),
+        Err(()) => fmt_msg(format_args!("{name}: failed to forget the certificate")),
+    }
+}
+
+async fn cmd_mqtt_insecure(slot: usize, insecure: bool) -> String<LINE_CAP> {
+    let name = format_name(broker_name(slot), "insecure");
+    let key = config::Key::broker(slot).tls_insecure;
+    if config().await.set_bool(key, insecure).await.is_err() {
+        return fmt_msg(format_args!("failed to persist {name}"));
+    }
+    fmt_msg(format_args!("{name} set to {insecure}"))
 }

@@ -70,11 +70,12 @@ discriminants, gaps included:
 | 6 | `Gateway` (this device's own type, when it addresses itself) |
 | 7 | `Rollershutter` |
 | 8 | `SSR` |
+| 9 | `HeatingControl` |
 
 ## Message types
 
 `ICAN::MSG_ID_t` / `gateway_core::can_message_type::CanMessageType`. Fixed
-discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159–254) are
+discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159, 163–254) are
 intentional, not omissions:
 
 | Value | Name | Value | Name |
@@ -98,12 +99,12 @@ intentional, not omissions:
 | 16 | `FlashSelect` | 156 | `Ping` |
 | 17 | `FlashErase` | 157 | `PingDisable` |
 | 18 | `FlashRead` | 158 | `Echo` |
-| 19 | `FlashWrite` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 20 | `FlashVerify` | | |
-| 21 | `FlashProgress` | | |
-| 22 | `FlashComplete` | | |
-| 30 | `ButtonEvent` | | |
-| 31 | `TemperatureSensor` | | |
+| 19 | `FlashWrite` | 160 | `HeatingTarget` |
+| 20 | `FlashVerify` | 161 | `HeatingEnergy` |
+| 21 | `FlashProgress` | 162 | `HeatingEmergency` |
+| 22 | `FlashComplete` | 163 | `HeatingManual` |
+| 30 | `ButtonEvent` | 164 | `HeatingManualState` |
+| 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 41 | `HwRev` | | |
 | 42 | `ExtensionMode` | | |
 
@@ -127,6 +128,11 @@ without other traffic competing for bandwidth.
 Payload: whatever was sent, 0–8 bytes, any content. On receipt, the exact
 same CAN id and payload is immediately resent onto the bus, unconditionally
 (not gated by `UpdateSilence`) — a round-trip latency/connectivity probe.
+
+A `cancomponents` node also sends an `Echo` request every 30 s and restarts
+itself if none comes back for several intervals (the bus is broken or the
+gateway is gone). The console's `echo-restart off` switches the restart off
+(persisted); the node keeps probing but no longer resets.
 
 ## `DeviceIdType` — device provisioning
 
@@ -156,6 +162,117 @@ The only live producer is a CAN driver's own bus-alert reporting
 (`component = Can`, `detail` = the TWAI alert bitflags that triggered it).
 Consumers (the node registry) only ever read byte 0 for display — they
 don't decode the rest.
+
+### Structured reports from `cancomponents` nodes
+
+The `cancomponents` firmware doesn't use the layout above; its reports are
+`[component, code, severity, local_code, details × 4]`. The gateway only
+looks at byte 0 either way, so its values are *not* the legacy
+`ICAN::ERROR_t` ones (e.g. `Relais` is 6 here, `Light` in the table above).
+
+| `component` | Name | | `code` | Name |
+|---|---|---|---|---|
+| 1 | `Can` | | 1 | `InvalidData` |
+| 2 | `Device` | | 2 | `SensorLost` |
+| 3 | `Update` | | 3 | `SensorRecovered` |
+| 4 | `Storage` | | | |
+| 5 | `Ota` | | 4 | `OverTemperature` |
+| 6 | `Relais` | | 5 | `Timeout` |
+| 7 | `Sensor` | | | |
+| 8 | `Heating` | | | |
+
+`severity`: 1 `Warning`, 2 `RecoverableError`, 3 `RepeatingError`,
+4 `Error`, 5 `CriticalError`.
+
+**`Sensor` reports** concern DS18B20 temperature sensors. `local_code` is
+the sensor's slot (order of discovery since boot) and `details` the first
+four serial bytes, i.e. the `sub_id` low 32 bits little-endian — the same
+id the gateway puts in the sensor's MQTT topic.
+
+- `SensorLost` / `Error`: the sensor failed three measurement cycles
+  (30 s) in a row. Repeated as `SensorLost` / `RepeatingError` every minute
+  while it stays lost.
+- `SensorRecovered` / `Warning`: a lost sensor answers again.
+
+A lost sensor's `TemperatureSensor` frames stop (no stale value is
+resent). A sensor that was just found, or that comes back after being lost,
+answers with its power-on value of 85 °C until its first real conversion,
+so it is sampled every 3 s until three readings in a row agree (within
+0.5 K) before its values are sent or reported as recovered. The list of
+sensors is only kept in RAM: a sensor that is dead at boot is never seen.
+
+## Heating controller (`HeatingTarget` / `HeatingEnergy` / `HeatingEmergency`)
+
+A `HeatingControl` node (device type 9) has the relay hardware of a
+`Relais` node and drives it itself — a tank with a three-stage heating
+rod, two 3-way valves, a mixer and a pump. CAN `Relais` commands for its
+relays 0-10 are ignored (relay 11 is not part of the controller). It is controlled by three messages, all sent to
+the node's device id. Temperatures are signed 1/16 °C values like the
+sensor messages; multi-byte values are little-endian; extra bytes are
+ignored.
+
+| Message | Payload | Meaning |
+|---|---|---|
+| `HeatingTarget` (160) | `[flow_target i16][flags]` | Wanted flow temperature of the heating circuit. Flag bit 0: supply the circuit from the tank instead of directly from the heat pump. |
+| `HeatingEnergy` (161) | `[power i32 W][flags]` | Available (feed-in) power; negative while importing. Flag bit 0: the heating rod is released. |
+| `HeatingEmergency` (162) | `[stage u8][tank_target i16]` | Emergency operation: run the rod at `stage` (0-3) regardless of the available power, until the tank reaches `tank_target`. Stage 0 means no emergency. |
+| `HeatingManual` (163) | `[flags][relay u8][state]` | Commissioning: takes the relays 6-10 (valves, mixer, pump) out of the controller's hands. Flag bit 0: manual mode on (the relays all go off when it starts; without the flag the controller has them back). `relay` 6-10 (`0xFF` = none) is switched on/off by `state` (bit 0), in manual mode only and never both mixer directions at once. The rod (relays 0-5) can't be reached. Manual mode has no time limit: it stays on until a message without the flag ends it (a restart of the node ends it too). While it is on, `HeatingTarget`/`HeatingEnergy`/`HeatingEmergency` are dropped (and the ones received before are forgotten, so the rod switches off at once). Not part of the 30 s repeat rule. |
+| `HeatingManualState` (164) | `[flags][relays]` | Sent *by* the controller: flag bit 0 = manual mode is on, `relays` bit 0 = relay 6 … bit 4 = relay 10 for the ones that are on. Sent when something changes and every 5 s while manual mode is on; a controller that stays silent for 15 s counts as out of manual mode. |
+
+Every message but `HeatingManual` must be repeated at least every 30 s (the intended rate is 5
+s); **30 s without one counts as the input being gone** — without
+`HeatingEnergy`/`HeatingEmergency` all rod stages switch off, without
+`HeatingTarget` the valves and the pump return to direct operation.
+
+The gateway sends them on behalf of MQTT topics
+`canbus/heating_{target,energy,emergency}_command/<device>`; see
+[`protocol-mqtt.md`](protocol-mqtt.md).
+
+**Rod stages.** Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 =
+0-3, stage 3 = 0-5 (always in pairs). Normally the stage follows the
+available power (stage *n* starts at *n* × 3000 W + 300 W and keeps running down to *n* × 3000 W),
+as long as the rod is released and the tank's reference sensor is below
+the tank target. Discretionary stage changes happen at most every 120 s;
+anything unsafe or pointless switches the rod off at once: a tank sensor
+at 80 °C (re-armed at 75 °C), no usable tank sensor, missing input
+messages, a withdrawn release, a full tank. This is in addition to, not
+instead of, the independent hardware protection (contactor at 85 °C, STB
+at 90 °C).
+
+**Circuit.** In tank operation both 3-way valves (relays 6 and 7) switch
+together; the circuit pump (relay 10) follows 2 minutes later and stops
+together with the valves. The mixer (relays 8 = hot, 9 = cold; 90° in
+120 s) regulates the flow temperature to the target with a stepwise
+controller (a pulse, then 60 s for the sensor to follow) while the tank is
+hot enough; if it isn't, the mixer goes to the hot end (full flow). In
+direct operation, and while no `HeatingTarget` arrives, it goes all the way
+to return (cold end), the safe position. After a restart it first drives
+to the cold end to find its position.
+
+Relay 11 (hot-water circuit pump) is not touched by the controller; it
+stays available to ordinary `Relais` commands over CAN and MQTT.
+
+**Faults** are reported as `DeviceError` with `Component::Heating`:
+`OverTemperature` (details: hottest tank temperature), `SensorLost` (no
+usable tank sensor while heat is wanted), `Timeout` (the power messages
+stopped), `InvalidData` (a malformed message; `local_code` is the
+message type). Persisting faults are repeated every minute.
+
+The console of a `HeatingControl` node has `tank-sensor`, `flow-sensor`,
+`tank-target` (default 75 °C), `tank-ref` and `heating` to assign the
+sensors (by the id `sensors` prints), set the charge target and the tank
+position it is compared with (default: the bottom one, position 6), and to
+see what the controller is doing and why. Until a reference sensor is
+assigned, the rod stays off.
+
+For commissioning, `heating-manual on` hands the relays 6-10 (valves, mixer,
+pump) over to the console: they all go off and `relais <6-10> on|off`
+switches them one at a time (the two mixer directions never both on). The
+heating rod, relays 0-5, always stays with the controller and its limits.
+`heating-manual off`, or 10 minutes without a `relais` command, switches
+the relays 6-10 off again and the controller takes over, with the mixer
+finding its position anew. Relay 11 can be switched with `relais 11` at any
+time.
 
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
 
@@ -274,6 +391,26 @@ byte:  0..5               6..7
 ```
 
 Decoded value = `raw_value / 16.0` (fixed-point, ÷16 scale).
+
+### `TemperatureSensor` from DS18B20 sensors
+
+Relais devices with DS18B20 sensors on their 1-Wire header send one
+`TemperatureSensor` frame per sensor. `sub_id` is the sensor's 48-bit
+serial (ROM bytes 1..=6, without the family code and CRC byte) and
+`raw_value` is the sensor's native 1/16 °C reading. Every sensor is
+measured every 10 s; the frames go out every 30 s by default (CLI:
+`sensor-interval`). The layout is the one the original C++ firmware used.
+
+`raw_value` is a signed two's-complement value for `TemperatureSensor`
+(below-zero temperatures), which the gateway decodes accordingly
+(`FixedPointReading::signed_value`). The other fixed-point sensors are
+unsigned.
+
+On the gateway the sensor shows up as `canbus/temperature/<device>/0x<id>`,
+where `<id>` is the low 32 bits of `sub_id` in lowercase hex — for a sensor
+with ROM `28 22 B0 C3 32 20 01 36` that is `0x32c3b022`. The node's
+`sensors` console command prints this id next to each sensor's ROM and
+current temperature, to map physical sensors to topics.
 
 Ambient light (`AmbientLightSensor`, and nominally
 `AmbientLightSensorWhite` though nothing in the live gateway actually

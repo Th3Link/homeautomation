@@ -22,6 +22,14 @@ impl FixedPointReading {
         f64::from(self.raw_value) / 16.0
     }
 
+    /// Like [`value`](Self::value), but reads the raw field as a signed
+    /// (two's-complement) 16-bit number. This is what `TemperatureSensor`
+    /// needs for below-zero readings; the other fixed-point sensors
+    /// (pressure, CO₂, …) are unsigned and can exceed `i16::MAX`.
+    pub fn signed_value(self) -> f64 {
+        f64::from(self.raw_value as i16) / 16.0
+    }
+
     pub fn from_bytes(data: &[u8]) -> Result<Self, crate::DecodeError> {
         if data.len() < 8 {
             return Err(crate::DecodeError);
@@ -55,6 +63,23 @@ mod tests {
         let data = [0, 0, 0, 0, 0, 0, 16, 0];
         let reading = FixedPointReading::from_bytes(&data).unwrap();
         assert_eq!(reading.value(), 1.0);
+    }
+
+    #[test]
+    fn signed_value_decodes_below_zero_temperatures() {
+        // -10.125 °C = -162 = 0xFF5E.
+        let data = [0, 0, 0, 0, 0, 0, 0x5E, 0xFF];
+        let reading = FixedPointReading::from_bytes(&data).unwrap();
+        assert_eq!(reading.signed_value(), -10.125);
+        // The unsigned view is what the other sensors use.
+        assert_eq!(reading.value(), f64::from(0xFF5Eu16) / 16.0);
+    }
+
+    #[test]
+    fn signed_and_unsigned_agree_for_positive_values() {
+        let data = [0, 0, 0, 0, 0, 0, 0x91, 0x01];
+        let reading = FixedPointReading::from_bytes(&data).unwrap();
+        assert_eq!(reading.signed_value(), reading.value());
     }
 
     #[test]

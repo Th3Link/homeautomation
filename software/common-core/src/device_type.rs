@@ -17,6 +17,10 @@ pub enum DeviceType {
     Gateway = 6,
     Rollershutter = 7,
     SSR = 8,
+    /// Heating controller: relay hardware like [`DeviceType::Relais`], driven
+    /// by the tank/heating-circuit control logic instead of by CAN relay
+    /// commands.
+    HeatingControl = 9,
 }
 
 impl DeviceType {
@@ -33,6 +37,7 @@ impl DeviceType {
             "Gateway" => Self::Gateway,
             "Rollershutter" => Self::Rollershutter,
             "SSR" => Self::SSR,
+            "HeatingControl" => Self::HeatingControl,
             _ => Self::Unknown,
         }
     }
@@ -48,6 +53,7 @@ impl DeviceType {
             Self::Gateway => "Gateway",
             Self::Rollershutter => "Rollershutter",
             Self::SSR => "SSR",
+            Self::HeatingControl => "HeatingControl",
         }
     }
 }
@@ -67,6 +73,7 @@ mod tests {
             (DeviceType::Gateway, 6),
             (DeviceType::Rollershutter, 7),
             (DeviceType::SSR, 8),
+            (DeviceType::HeatingControl, 9),
         ];
         for &(variant, byte) in known {
             assert_eq!(u8::from(variant), byte);
@@ -77,7 +84,7 @@ mod tests {
     #[test]
     fn unknown_byte_falls_back_to_unknown() {
         assert_eq!(DeviceType::from(1), DeviceType::Unknown);
-        assert_eq!(DeviceType::from(9), DeviceType::Unknown);
+        assert_eq!(DeviceType::from(10), DeviceType::Unknown);
         assert_eq!(DeviceType::from(255), DeviceType::Unknown);
     }
 
@@ -91,6 +98,7 @@ mod tests {
             DeviceType::Gateway,
             DeviceType::Rollershutter,
             DeviceType::SSR,
+            DeviceType::HeatingControl,
         ] {
             assert_eq!(DeviceType::from_name(dt.name()), dt);
         }

@@ -28,7 +28,20 @@ static RELAIS_CHANNEL: Channel<CriticalSectionRawMutex, Message, MAX_RELAIS> = C
 
 pub async fn relais_handler(_id: CanId, data: &[u8], _remote_request: bool) {
     match Message::from_bytes(data) {
-        Ok(msg) => RELAIS_CHANNEL.send(msg).await,
+        Ok(msg) => {
+            // On a heating controller these relays are driven by its control
+            // logic alone (the rod, valves, mixer and pump).
+            if cancomponents_core::heating::is_controlled_relay(msg.num)
+                && crate::heating::is_heating_controller().await
+            {
+                console_log!(
+                    "relais {}: owned by the heating controller, ignored",
+                    msg.num
+                );
+                return;
+            }
+            RELAIS_CHANNEL.send(msg).await
+        }
         Err(_) => {
             report_error(
                 Component::Relais,

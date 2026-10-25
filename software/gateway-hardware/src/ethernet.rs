@@ -20,13 +20,14 @@
 //! - PHY address = 1, fixed, not auto-discovered (`phy_addr = 1`)
 //! - PHY reset = GPIO5 (`reset_gpio_num`), driven manually here since
 //!   esp-hal's `Phy` trait has no reset-pin concept of its own
-//! - RMII reference clock: `clock_mode = EMAC_CLK_OUT` with
-//!   `clock_gpio = EMAC_CLK_OUT_180_GPIO` — the ESP32 generates the 50MHz
-//!   RMII clock itself (via APLL) and outputs it on **GPIO17** (the "180"
-//!   variant; GPIO16 is the non-inverted `EMAC_CLK_OUT` alternative). To
-//!   switch, change [`EthernetPins::clock`]'s type here and the
-//!   corresponding `peripherals.GPIO17`/`GPIO16` passed to it in
-//!   `main.rs` — they're the only two wired options on ESP32.
+//! - RMII reference clock: the ESP32 generates the 50MHz RMII clock itself
+//!   (via APLL) and outputs it on **GPIO16** or **GPIO17** — the only two
+//!   pins the silicon offers for it. Which one is right depends on the
+//!   board revision: the rev1 boards (and the original `LAN.cpp`,
+//!   `EMAC_CLK_OUT_180_GPIO`) use **GPIO17**; the rev2 schematic routes IO16
+//!   to the PHY's clock input instead. It is a console setting
+//!   (`eth-clock`, default 17), read at boot. With the wrong pin the PHY
+//!   doesn't answer on MDIO and bring-up fails with `Phy(Timeout)`.
 
 use crate::console_log;
 use embassy_executor::Spawner;
@@ -38,21 +39,73 @@ use esp_hal::ethernet::{Ethernet, EthernetDmaStorage, RmiiPinBundle};
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::peripherals::ETH;
 use esp_hal::Async;
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 
 /// `smi_mdc_gpio_num`/`smi_mdio_gpio_num` from `LAN.cpp`.
 const PHY_ADDRESS: u8 = 1;
 
 /// DMA descriptor/buffer ring sizes — small is fine for this gateway's
 /// traffic volume (MQTT + the occasional web UI request, not bulk transfer).
-const RX_DESCRIPTORS: usize = 4;
+const RX_DESCRIPTORS: usize = 8;
 const TX_DESCRIPTORS: usize = 4;
 
-type EthDriver = Ethernet<'static, Async, GenericPhy>;
+type RawDriver = Ethernet<'static, Async, GenericPhy>;
+type EthDriver = SoftwareChecksums<RawDriver>;
 
-static DMA_STORAGE: StaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
-    StaticCell::new();
-static NET_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
+/// Passes everything through to the Ethernet driver, but has the network
+/// stack compute the checksums itself.
+///
+/// The driver leaves them to the MAC (descriptor "checksum insertion"), and
+/// that produces wrong TCP checksums for a good part of the segments: the
+/// peer drops them, so responses of more than a few hundred bytes never
+/// arrived (and uploads crawled along on retransmissions). With a correct
+/// checksum already in the frame, what the MAC then inserts is right.
+pub struct SoftwareChecksums<D>(D);
+
+impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareChecksums<D> {
+    type RxToken<'a>
+        = D::RxToken<'a>
+    where
+        Self: 'a;
+    type TxToken<'a>
+        = D::TxToken<'a>
+    where
+        Self: 'a;
+
+    fn receive(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+    ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+        self.0.receive(cx)
+    }
+
+    fn transmit(&mut self, cx: &mut core::task::Context<'_>) -> Option<Self::TxToken<'_>> {
+        self.0.transmit(cx)
+    }
+
+    fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> embassy_net_driver::LinkState {
+        self.0.link_state(cx)
+    }
+
+    fn capabilities(&self) -> embassy_net_driver::Capabilities {
+        let mut capabilities = self.0.capabilities();
+        capabilities.checksum.ipv4 = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.tcp = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.udp = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.icmpv4 = embassy_net_driver::Checksum::Both;
+        capabilities.checksum.icmpv6 = embassy_net_driver::Checksum::Both;
+        capabilities
+    }
+
+    fn hardware_address(&self) -> embassy_net_driver::HardwareAddress {
+        self.0.hardware_address()
+    }
+}
+
+// Constructed in place: by value it would pass through the stack.
+static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
+    ConstStaticCell::new(EthernetDmaStorage::new());
+static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
 
 /// Peripherals/pins Ethernet needs from `main.rs` — grouped since there are
 /// nine of them and they're always passed together.
@@ -66,10 +119,10 @@ pub struct EthernetPins {
     pub tx_en: esp_hal::peripherals::GPIO21<'static>,
     pub mdc: esp_hal::peripherals::GPIO23<'static>,
     pub mdio: esp_hal::peripherals::GPIO18<'static>,
-    /// The RMII reference clock output pin — GPIO17 to match `LAN.cpp`
-    /// (`EMAC_CLK_OUT_180_GPIO`), or GPIO16 for the non-inverted
-    /// `EMAC_CLK_OUT` alternative some boards use instead.
-    pub clock: esp_hal::peripherals::GPIO17<'static>,
+    /// The two pins the RMII reference clock can come out on; which one is
+    /// used is the `clock_gpio` argument of [`bring_up`].
+    pub clock16: esp_hal::peripherals::GPIO16<'static>,
+    pub clock17: esp_hal::peripherals::GPIO17<'static>,
     /// PHY reset, active-low (`reset_gpio_num = 5` in `LAN.cpp`).
     pub reset: esp_hal::peripherals::GPIO5<'static>,
 }
@@ -77,7 +130,7 @@ pub struct EthernetPins {
 /// Pulses the PHY's reset line and brings up the EMAC over RMII. Returns
 /// `None` only if the EMAC/PHY itself fails to initialize (no PHY answering
 /// on the MDIO bus — a hardware fault, not a missing cable).
-pub async fn bring_up(pins: EthernetPins) -> Option<EthDriver> {
+pub async fn bring_up(pins: EthernetPins, clock_gpio: u8) -> Option<EthDriver> {
     // Active-low reset: hold low, then release and let the PHY's internal
     // reset sequence settle before any MDIO access (Ethernet::new() does
     // phy.init() internally, so this must happen first).
@@ -94,27 +147,34 @@ pub async fn bring_up(pins: EthernetPins) -> Option<EthDriver> {
         .try_into()
         .expect("MAC address is always 6 bytes");
 
-    let storage = DMA_STORAGE.init(EthernetDmaStorage::new());
-    let rmii_pins = RmiiPinBundle {
-        clock: ApllClock::new(pins.clock),
-        rxd0: pins.rxd0,
-        rxd1: pins.rxd1,
-        rx_dv: pins.rx_dv,
-        txd0: pins.txd0,
-        txd1: pins.txd1,
-        tx_en: pins.tx_en,
-        mdc: pins.mdc,
-        mdio: pins.mdio,
+    let storage = DMA_STORAGE.take();
+    console_log!("ethernet: RMII clock on GPIO{clock_gpio}");
+    let phy = GenericPhy::new(PHY_ADDRESS);
+    // The clock pin's type is part of the pin bundle's type, so the choice
+    // between the two is made by building the bundle in each branch.
+    macro_rules! rmii_pins {
+        ($clock:expr) => {
+            RmiiPinBundle {
+                clock: ApllClock::new($clock),
+                rxd0: pins.rxd0,
+                rxd1: pins.rxd1,
+                rx_dv: pins.rx_dv,
+                txd0: pins.txd0,
+                txd1: pins.txd1,
+                tx_en: pins.tx_en,
+                mdc: pins.mdc,
+                mdio: pins.mdio,
+            }
+        };
+    }
+    let started = if clock_gpio == 17 {
+        Ethernet::new(pins.eth, storage, mac_addr, phy, rmii_pins!(pins.clock17))
+    } else {
+        Ethernet::new(pins.eth, storage, mac_addr, phy, rmii_pins!(pins.clock16))
     };
 
-    match Ethernet::new(
-        pins.eth,
-        storage,
-        mac_addr,
-        GenericPhy::new(PHY_ADDRESS),
-        rmii_pins,
-    ) {
-        Ok(eth) => Some(eth.into_async()),
+    match started {
+        Ok(eth) => Some(SoftwareChecksums(eth.into_async())),
         Err(e) => {
             console_log!("ethernet: init failed: {e:?}");
             None
@@ -143,5 +203,26 @@ pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> St
     config.ipv6 = embassy_net::ConfigV6::Slaac;
     let (stack, runner) = embassy_net::new(eth, config, resources, seed);
     spawner.spawn(net_task(runner).unwrap());
+    spawner.spawn(address_log_task(stack).unwrap());
     stack
+}
+
+/// Logs when the DHCP lease arrives or is lost — the only visible sign that
+/// the wired network really works end to end (a PHY can report "link up"
+/// over MDIO even if the RMII clock or data lines are wrong).
+#[embassy_executor::task]
+async fn address_log_task(stack: Stack<'static>) {
+    loop {
+        stack.wait_config_up().await;
+        match stack.config_v4() {
+            Some(config) => console_log!(
+                "ethernet: address {} gateway {:?}",
+                config.address,
+                config.gateway
+            ),
+            None => console_log!("ethernet: network configured"),
+        }
+        stack.wait_config_down().await;
+        console_log!("ethernet: address lost");
+    }
 }
