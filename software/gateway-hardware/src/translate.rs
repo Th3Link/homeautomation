@@ -16,7 +16,7 @@ use heapless::String as HString;
 /// Routes one received CAN frame to whichever handler cares about its
 /// `msg_type`. Called from [`crate::can::dispatch`] after the device-list
 /// bookkeeping every frame gets regardless of type.
-pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
+pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
     crate::echo::dispatch(id, data).await;
 
     match id.msg_type {
@@ -70,9 +70,18 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
                 .await;
             }
         }
-        CanMessageType::HeatingManualState => {
-            if let Ok(state) = gateway_core::heating_message::HeatingManualState::from_bytes(data) {
+        // The answer to an R frame; the R frame itself (which nobody but this
+        // gateway sends) is no news.
+        CanMessageType::HeatingState if !request => {
+            if let Ok(state) = gateway_core::heating_message::HeatingState::from_bytes(data) {
                 crate::heating_state::observe(id.device_key(), state).await;
+            }
+        }
+        CanMessageType::SensorConfig if !request => dispatch_sensor_config(id, data).await,
+        // The answers of a node to a firmware update.
+        CanMessageType::OtaControl if !request => {
+            if let Ok(control) = gateway_core::ota::OtaControl::from_bytes(data) {
+                crate::can_update::reply(id.device_key(), control);
             }
         }
         CanMessageType::TemperatureSensor
@@ -102,9 +111,34 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
                         crate::sensor_list::now_seconds(),
                     );
                 }
+                // The sensor's name, if its node told us one: asked for once
+                // per device, the first reading is the one that makes us ask.
+                let name = {
+                    let mut info = crate::sensor_list::SENSOR_INFO.lock().await;
+                    let name = info
+                        .find(key, reading.sub_id)
+                        .and_then(|sensor| sensor.name)
+                        .map(|name| HString::<8>::try_from(name.as_str()).unwrap_or_default())
+                        .unwrap_or_default();
+                    let ask = info.should_ask(key, crate::sensor_list::now_seconds());
+                    drop(info);
+                    if ask {
+                        let id = key + u32::from(u8::from(CanMessageType::SensorConfig));
+                        crate::can::send_raw(id, &[], true).await;
+                    }
+                    name
+                };
                 publish_with_custom_string(
                     key,
-                    |cs| device::fixed_point_sensor_topic(msg_type, key, cs, reading.sub_id),
+                    |cs| {
+                        device::fixed_point_sensor_topic(
+                            msg_type,
+                            key,
+                            cs,
+                            reading.sub_id,
+                            name.as_str(),
+                        )
+                    },
                     body.as_str(),
                 )
                 .await;
@@ -127,6 +161,34 @@ pub async fn dispatch(id: CanId, data: &[u8], _request: bool) {
         // by the original either (see gateway_core::topics::device's doc
         // comment) — only this gateway's own self-announce on MQTT connect
         // is, which is handled separately at connect time.
+        _ => {}
+    }
+}
+
+/// Takes in what a node says about its sensors (the answer to a list request
+/// or to a command).
+async fn dispatch_sensor_config(id: CanId, data: &[u8]) {
+    use gateway_core::sensor_config::SensorConfig;
+    use gateway_core::sensor_info::SensorInfo;
+    let key = id.device_key();
+    let mut table = crate::sensor_list::SENSOR_INFO.lock().await;
+    match SensorConfig::from_bytes(data) {
+        Ok(SensorConfig::Info {
+            slot,
+            serial,
+            lost,
+            settling,
+            role,
+        }) => table.observe_info(SensorInfo {
+            device_key: key,
+            slot,
+            serial,
+            name: None,
+            role,
+            lost,
+            settling,
+        }),
+        Ok(SensorConfig::Name { slot, name }) => table.observe_name(key, slot, name),
         _ => {}
     }
 }
@@ -250,23 +312,23 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
 /// device that can't be resolved, is dropped silently like for the other
 /// command topics.
 async fn dispatch_heating_command(topic: &str, body: &str) {
+    use gateway_core::heating_message::HeatingCommand;
     let Some(target) = resolve_target(topic).await else {
         return;
     };
-    // A heating in manual mode takes no orders from anywhere.
-    if crate::heating_state::manual_status(target).await.enabled {
-        return;
-    }
-    if heating_topics::is_heating_target_command_topic(topic) {
-        if let Ok(msg) = heating_topics::parse_target_body(body) {
-            send_command(target, CanMessageType::HeatingTarget, &msg.to_bytes()).await;
-        }
+    // A controller in manual mode drops these itself, whoever sent them.
+    let command = if heating_topics::is_heating_target_command_topic(topic) {
+        heating_topics::parse_target_body(body).map(HeatingCommand::Target)
     } else if heating_topics::is_heating_energy_command_topic(topic) {
-        if let Ok(msg) = heating_topics::parse_energy_body(body) {
-            send_command(target, CanMessageType::HeatingEnergy, &msg.to_bytes()).await;
-        }
-    } else if let Ok(msg) = heating_topics::parse_emergency_body(body) {
-        send_command(target, CanMessageType::HeatingEmergency, &msg.to_bytes()).await;
+        heating_topics::parse_energy_body(body).map(HeatingCommand::Energy)
+    } else {
+        heating_topics::parse_emergency_body(body).map(HeatingCommand::Emergency)
+    };
+    if let Ok(payload) = command
+        .map_err(|_| ())
+        .and_then(|c| c.to_payload().map_err(|_| ()))
+    {
+        send_command(target, CanMessageType::HeatingCommand, payload.as_slice()).await;
     }
 }
 

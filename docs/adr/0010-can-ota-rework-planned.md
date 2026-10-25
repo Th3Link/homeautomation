@@ -1,6 +1,6 @@
 # ADR 0010: Rework CAN-bus OTA into a chunked, acknowledged, retransmitting protocol
 
-**Status:** Proposed — not yet implemented. The port currently reproduces
+**Status:** Superseded by [ADR 0017](../../software/gateway-core/docs/adr/0017-block-ota.md) (the block protocol). Originally: proposed — not yet implemented. The port currently reproduces
 the original protocol as-is; see
 [gateway-core's technical-debt.md](../../software/gateway-core/docs/technical-debt.md#can-bus-ota-is-unreliable)
 for the concrete failure mode driving this ADR.

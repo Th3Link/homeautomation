@@ -28,6 +28,8 @@ next to the component they constrain — e.g.
 | [0013](../../software/gateway-core/docs/adr/0013-ethernet-only-no-wifi.md) | Wired Ethernet is the only network path — drop WiFi | gateway | Accepted |
 | [0014](../../software/gateway-core/docs/adr/0014-rest-api-by-resource.md) | A REST API by resource instead of `/state.json` and `/control.json` | gateway | Accepted |
 | [0015](../../software/gateway-core/docs/adr/0015-mqtt-tls-pinned-public-key.md) | MQTT over TLS 1.3 with a pinned broker key | gateway | Accepted |
+| [0016](../../software/gateway-core/docs/adr/0016-op-coded-heating-and-sensor-messages.md) | Op-coded heating and sensor messages, state by R frame | gateway | Accepted |
+| [0017](../../software/gateway-core/docs/adr/0017-block-ota.md) | Firmware update over CAN in acknowledged blocks | gateway | Accepted |
 
 ADRs 0010 and 0011 are **proposed**, not yet implemented — see
 [`gateway-core`'s technical-debt.md`](../../software/gateway-core/docs/technical-debt.md)

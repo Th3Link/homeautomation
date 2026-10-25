@@ -26,7 +26,9 @@ pub fn sensor_name(msg_type: CanMessageType) -> &'static str {
 
 /// Topic for a fixed-point sensor reading (temperature/pressure/humidity/
 /// co2/voc/air_quality): `canbus/<name>/0x<device>/0x<sub_id>` or
-/// `canbus/<name>/<custom_string>/0x<sub_id>`.
+/// `canbus/<name>/<custom_string>/0x<sub_id>`; a sensor that has a name
+/// (`sensor_name`, not empty) is called by it instead of by `0x<sub_id>`, the
+/// way a device with a custom string is.
 ///
 /// `sub_id` is the reading's accompanying 48-bit id
 /// ([`crate::sensor::FixedPointReading::sub_id`]) — but the hex suffix is
@@ -41,11 +43,16 @@ pub fn fixed_point_sensor_topic(
     device_key: u32,
     custom_string: &str,
     sub_id: u64,
+    name: &str,
 ) -> Topic {
     let mut t = Topic::new();
     let _ = write!(t, "canbus/{}/", sensor_name(msg_type));
     write_device_segment(&mut t, device_key, custom_string);
-    let _ = write!(t, "/0x{}", to_hex_string(sub_id as u32));
+    if name.is_empty() {
+        let _ = write!(t, "/0x{}", to_hex_string(sub_id as u32));
+    } else {
+        let _ = write!(t, "/{name}");
+    }
     t
 }
 
@@ -96,8 +103,29 @@ mod tests {
             0x1005_0100,
             "",
             0x0000_1234,
+            "",
         );
         assert_eq!(t.as_str(), "canbus/temperature/0x10050100/0x1234");
+    }
+
+    #[test]
+    fn fixed_point_topic_prefers_the_sensor_name() {
+        let t = fixed_point_sensor_topic(
+            CanMessageType::TemperatureSensor,
+            0x1005_0100,
+            "HEIZUNG1",
+            0x0000_1234,
+            "TANK-O1",
+        );
+        assert_eq!(t.as_str(), "canbus/temperature/HEIZUNG1/TANK-O1");
+        let t = fixed_point_sensor_topic(
+            CanMessageType::TemperatureSensor,
+            0x1005_0100,
+            "",
+            0x1234,
+            "VL",
+        );
+        assert_eq!(t.as_str(), "canbus/temperature/0x10050100/VL");
     }
 
     #[test]
@@ -107,6 +135,7 @@ mod tests {
             0x1005_0100,
             "bathroom",
             0x1234,
+            "",
         );
         assert_eq!(t.as_str(), "canbus/humidity/bathroom/0x1234");
     }
@@ -121,6 +150,7 @@ mod tests {
             0x1005_0100,
             "",
             sub_id_48bit,
+            "",
         );
         assert_eq!(t.as_str(), "canbus/temperature/0x10050100/0x1234");
     }

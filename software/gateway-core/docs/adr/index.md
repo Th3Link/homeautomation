@@ -16,3 +16,5 @@ globally-numbered list including cross-cutting decisions.
 | [0013](0013-ethernet-only-no-wifi.md) | Wired Ethernet is the only network path — drop WiFi | Accepted |
 | [0014](0014-rest-api-by-resource.md) | A REST API by resource instead of `/state.json` and `/control.json` | Accepted |
 | [0015](0015-mqtt-tls-pinned-public-key.md) | MQTT over TLS 1.3 with a pinned broker key | Accepted |
+| [0016](0016-op-coded-heating-and-sensor-messages.md) | Op-coded heating and sensor messages, state by R frame | Accepted |
+| [0017](0017-block-ota.md) | Firmware update over CAN in acknowledged blocks | Accepted |

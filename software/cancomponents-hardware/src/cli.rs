@@ -104,6 +104,15 @@ enum Commands<'a> {
     /// Stop tracking (and reporting) sensors that are currently lost, e.g.
     /// after removing one on purpose.
     SensorsForget,
+    /// Give the sensor in this slot (as shown by `sensors`) a name of up to 7
+    /// characters (A-Z a-z 0-9 - _), which the gateway uses in its MQTT
+    /// topics and the web UI shows. The name stays with the sensor.
+    SensorName {
+        #[set(short)]
+        slot: usize,
+        #[set(short)]
+        name: &'a str,
+    },
     /// Heating controller: assign the DS18B20 with this id (as shown by
     /// `sensors`, e.g. 0x32c3b022) to a tank position, 0 = top … 6 =
     /// bottom. Use `none` as id to clear a position.
@@ -413,6 +422,9 @@ async fn handle_command(
         Commands::CustomString(text) => respond(writer, &cmd_custom_string(text).await).await,
         Commands::RelaisMode(mode) => respond(writer, &cmd_relais_mode(mode).await).await,
         Commands::ExtensionMode(mode) => respond(writer, &cmd_extension_mode(mode).await).await,
+        Commands::SensorName { slot, name } => {
+            respond(writer, &cmd_sensor_name(slot, name).await).await
+        }
         Commands::TankSensor { position, id } => {
             respond(writer, &cmd_tank_sensor(position, id).await).await
         }
@@ -659,6 +671,19 @@ fn fmt_millicelsius(milli: i32) -> String<12> {
     out
 }
 
+async fn cmd_sensor_name(slot: usize, name: &str) -> String<LINE_CAP> {
+    let Some(name) = cancomponents_core::sensor_config::SensorName::new(name) else {
+        return str_msg("a name has 1-7 characters out of A-Z a-z 0-9 - _");
+    };
+    let Some(sensor) = temperature::sensors().into_iter().find(|s| s.slot == slot) else {
+        return str_msg("no sensor in that slot (see `sensors`)");
+    };
+    match crate::sensor_config::set_name(sensor.rom.serial(), name).await {
+        Ok(()) => fmt_msg(format_args!("sensor {slot} is called {}", name.as_str())),
+        Err(reason) => str_msg(reason),
+    }
+}
+
 async fn cmd_tank_sensor(position: usize, id: &str) -> String<LINE_CAP> {
     let Some(id) = parse_sensor_id(id) else {
         return str_msg("id must be hex like 0x32c3b022, or 'none'");
@@ -863,6 +888,13 @@ async fn cmd_sensors(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             let _ = write!(line, "{byte:02X}");
         }
         let _ = write!(line, "  id 0x{:x}  ", sensor.rom.topic_id());
+        if let Some(name) = crate::sensor_config::name_of(&sensor.rom.serial()) {
+            let _ = write!(line, "{}  ", name.as_str());
+        }
+        let role = crate::sensor_config::role_for(sensor.rom.topic_id());
+        if role != cancomponents_core::sensor_config::SensorRole::None {
+            let _ = write!(line, "[{}]  ", role.name());
+        }
         match (sensor.reading, sensor.lost) {
             (Some(reading), _) => {
                 let milli = reading.temperature.millicelsius();

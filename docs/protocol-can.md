@@ -99,11 +99,11 @@ intentional, not omissions:
 | 16 | `FlashSelect` | 156 | `Ping` |
 | 17 | `FlashErase` | 157 | `PingDisable` |
 | 18 | `FlashRead` | 158 | `Echo` |
-| 19 | `FlashWrite` | 160 | `HeatingTarget` |
-| 20 | `FlashVerify` | 161 | `HeatingEnergy` |
-| 21 | `FlashProgress` | 162 | `HeatingEmergency` |
-| 22 | `FlashComplete` | 163 | `HeatingManual` |
-| 30 | `ButtonEvent` | 164 | `HeatingManualState` |
+| 19 | `FlashWrite` | 165 | `HeatingCommand` |
+| 20 | `FlashVerify` | 166 | `HeatingState` |
+| 21 | `FlashProgress` | 167 | `SensorConfig` |
+| 22 | `FlashComplete` | 168 | `OtaControl` |
+| 30 | `ButtonEvent` | 169 | `OtaData` |
 | 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 41 | `HwRev` | | |
 | 42 | `ExtensionMode` | | |
@@ -201,32 +201,83 @@ so it is sampled every 3 s until three readings in a row agree (within
 0.5 K) before its values are sent or reported as recovered. The list of
 sensors is only kept in RAM: a sensor that is dead at boot is never seen.
 
-## Heating controller (`HeatingTarget` / `HeatingEnergy` / `HeatingEmergency`)
+## Heating controller (`HeatingCommand` / `HeatingState`)
 
 A `HeatingControl` node (device type 9) has the relay hardware of a
 `Relais` node and drives it itself — a tank with a three-stage heating
 rod, two 3-way valves, a mixer and a pump. CAN `Relais` commands for its
-relays 0-10 are ignored (relay 11 is not part of the controller). It is controlled by three messages, all sent to
-the node's device id. Temperatures are signed 1/16 °C values like the
-sensor messages; multi-byte values are little-endian; extra bytes are
-ignored.
+relays 0-10 are ignored (relay 11 is not part of the controller). It is
+controlled by **one message type**, `HeatingCommand` (165), sent to the
+node's device id: the first byte holds an operation code (bits 0-2) and, in
+the bits above it, that operation's flags; the other bytes the values.
+Temperatures are signed 1/16 °C values like the sensor messages; multi-byte
+values are little-endian; extra bytes are ignored.
 
-| Message | Payload | Meaning |
-|---|---|---|
-| `HeatingTarget` (160) | `[flow_target i16][flags]` | Wanted flow temperature of the heating circuit. Flag bit 0: supply the circuit from the tank instead of directly from the heat pump. |
-| `HeatingEnergy` (161) | `[power i32 W][flags]` | Available (feed-in) power; negative while importing. Flag bit 0: the heating rod is released. |
-| `HeatingEmergency` (162) | `[stage u8][tank_target i16]` | Emergency operation: run the rod at `stage` (0-3) regardless of the available power, until the tank reaches `tank_target`. Stage 0 means no emergency. |
-| `HeatingManual` (163) | `[flags][relay u8][state]` | Commissioning: takes the relays 6-10 (valves, mixer, pump) out of the controller's hands. Flag bit 0: manual mode on (the relays all go off when it starts; without the flag the controller has them back). `relay` 6-10 (`0xFF` = none) is switched on/off by `state` (bit 0), in manual mode only and never both mixer directions at once. The rod (relays 0-5) can't be reached. Manual mode has no time limit: it stays on until a message without the flag ends it (a restart of the node ends it too). While it is on, `HeatingTarget`/`HeatingEnergy`/`HeatingEmergency` are dropped (and the ones received before are forgotten, so the rod switches off at once). Not part of the 30 s repeat rule. |
-| `HeatingManualState` (164) | `[flags][relays]` | Sent *by* the controller: flag bit 0 = manual mode is on, `relays` bit 0 = relay 6 … bit 4 = relay 10 for the ones that are on. Sent when something changes and every 5 s while manual mode is on; a controller that stays silent for 15 s counts as out of manual mode. |
+| Op | Command | Byte 0, bits 3-7 | Bytes 1… |
+|---|---|---|---|
+| 0 | Target | bit 3: supply the circuit from the tank instead of directly from the heat pump | flow target `i16` |
+| 1 | Energy | bit 3: the heating rod is released | available (feed-in) power `i32` W; negative while importing |
+| 2 | Emergency | bits 3-4: rod stage 0-3 (0 = no emergency) | tank target `i16`: run the rod at that stage regardless of the available power, until the tank reaches it |
+| 3 | Manual | bit 3: manual mode on; bit 4: a relay is given; bits 5-7: relay − 6 | bit 0: the relay is on |
 
-Every message but `HeatingManual` must be repeated at least every 30 s (the intended rate is 5
-s); **30 s without one counts as the input being gone** — without
-`HeatingEnergy`/`HeatingEmergency` all rod stages switch off, without
-`HeatingTarget` the valves and the pump return to direct operation.
+An unknown op, a short frame, or a manual relay outside 6-10 is dropped and
+reported (`InvalidData`).
+
+**Manual mode** is for commissioning (venting, valve checks): it takes the
+relays 6-10 (valves, mixer, pump) out of the controller's hands. With bit 3
+the relays all go off when it starts and are then switched one at a time
+(never both mixer directions); without it the controller has them back, the
+mixer finding its position anew. The rod (relays 0-5) can't be reached. There
+is no time limit — it stays on until it is ended (a restart of the node ends
+it too). While it is on, the other commands are dropped, whoever sent them, and
+the ones received before are forgotten, so the rod switches off at once.
+
+**State.** `HeatingState` (166) is *read*, never sent by the node by itself: an
+R frame on it is answered with a data frame, `[flags][relays]`. Byte 0: bit 0
+manual mode on, bits 1-3 the target/energy/emergency input is alive, bit 4
+over-temperature latch, bits 5-6 rod stage. Byte 1: bit 0 = relay 6 … bit 4 =
+relay 10 for the relays that are on in manual mode.
+
+The retired numbers 160-164 (the five messages this replaced) are never to be
+used again: a node that was not updated yet would read a frame of the new
+kind as the old one. A mismatch of versions is safe: a node that gets
+nothing it understands counts the inputs as gone.
+
+The inputs (target, energy, emergency) must be repeated at least every 30 s
+(the intended rate is 5 s); **30 s without one counts as the input being
+gone** — without energy/emergency all rod stages switch off, without target
+the valves and the pump return to direct operation.
 
 The gateway sends them on behalf of MQTT topics
 `canbus/heating_{target,energy,emergency}_command/<device>`; see
 [`protocol-mqtt.md`](protocol-mqtt.md).
+
+## Sensor management (`SensorConfig`)
+
+`SensorConfig` (167) manages the temperature sensors of a node: the list, their
+names and their roles in the heating controller. A sensor is called by its
+**slot** (0-31), the number in the order the node found its sensors since it
+started. A slot is local to the node and temporary — after a restart, or when
+sensors come and go, it may mean another sensor — so a command that matters
+carries a *guard*, the first four serial bytes the sender thinks the slot
+has, and the node refuses it if that is not so. Names stay with the sensor
+(the node keeps them by serial), slots don't.
+
+Byte 0 of every frame: bits 0-4 slot, bits 5-7 operation.
+
+| Op | Frame | Bytes 1-7 |
+|---|---|---|
+| 0 name | set (to the node) / reported (from it) | the name: 1-7 characters out of `A-Z a-z 0-9 - _`, NUL padded; unique on a node |
+| 1 info | request for a slot (1 byte long) / the answer | serial (6 bytes, as in `TemperatureSensor`), flags: bit 0 lost, bit 1 settling, bits 4-7 role |
+| 2 role | give the sensor a role | role (1 byte), guard (4 bytes) |
+| 3 forget | forget the sensors that are lost | – |
+
+Roles: 0 none, 1-7 tank position 0-6 (top to bottom), 8 flow. Giving a role
+takes it from the sensor that had it, and a sensor has one role. An **R frame**
+on `SensorConfig` asks for the whole list: the node answers with an info frame
+and, if the sensor has a name, a name frame for each of its sensors, a few
+milliseconds apart. A refused request is reported as `InvalidData`
+(`Component::Sensor`) with the slot and a reason number.
 
 **Rod stages.** Each stage adds 3 kW: stage 1 = relays 0+1, stage 2 =
 0-3, stage 3 = 0-5 (always in pairs). Normally the stage follows the
@@ -258,7 +309,9 @@ usable tank sensor while heat is wanted), `Timeout` (the power messages
 stopped), `InvalidData` (a malformed message; `local_code` is the
 message type). Persisting faults are repeated every minute.
 
-The console of a `HeatingControl` node has `tank-sensor`, `flow-sensor`,
+The sensors can be named (`sensor-name`) and given roles from the web UI or
+over CAN as well (`SensorConfig`); the console's `sensors` shows slot, name
+and role. The console of a `HeatingControl` node has `tank-sensor`, `flow-sensor`,
 `tank-target` (default 75 °C), `tank-ref` and `heating` to assign the
 sensors (by the id `sensors` prints), set the charge target and the tank
 position it is compared with (default: the bottom one, position 6), and to
@@ -269,9 +322,9 @@ For commissioning, `heating-manual on` hands the relays 6-10 (valves, mixer,
 pump) over to the console: they all go off and `relais <6-10> on|off`
 switches them one at a time (the two mixer directions never both on). The
 heating rod, relays 0-5, always stays with the controller and its limits.
-`heating-manual off`, or 10 minutes without a `relais` command, switches
-the relays 6-10 off again and the controller takes over, with the mixer
-finding its position anew. Relay 11 can be switched with `relais 11` at any
+`heating-manual off` (or a restart) switches the relays 6-10 off again and
+the controller takes over, with the mixer finding its position anew; there
+is no time limit. Relay 11 can be switched with `relais 11` at any
 time.
 
 ## Relay/rollershutter (`Relais` / `Rollershutter` / `RelaisState` / `RollershutterState`)
@@ -424,13 +477,47 @@ byte:  0..3
       └──────────┘
 ```
 
-## OTA (`FlashStart`/`FlashWrite`/.../`FlashComplete`)
+## Firmware update in blocks (`OtaControl` / `OtaData`)
 
-The sequence a bus master (this gateway, as `CANUpdate`) drives to push
-firmware to a target node or type-broadcast. **Known to be unreliable —
-see [`technical-debt.md`](technical-debt.md#can-bus-ota-is-unreliable) and
-[ADR 0010](adr/0010-can-ota-rework-planned.md).** Documented here exactly
-as currently implemented, as the baseline for that rework.
+The way the `cancomponents` nodes are updated; the nodes know no other. Design
+and reasons: [ADR 0017](../software/gateway-core/docs/adr/0017-block-ota.md).
+The image goes over in **blocks** of 1 KiB (`BLOCK_SIZE`, a constant: a multiple of
+256 that divides the 4 KiB flash sector). A block is announced by a header
+frame and followed by its bytes in `OtaData` (169) frames, 8 bytes each (the last
+one zero-padded), sent back to back with no pause. All control frames are
+`OtaControl` (168), the operation in the low 4 bits of byte 0:
+
+| Op | Frame | Direction | Layout |
+|---|---|---|---|
+| 0 | Begin | to the node | byte 0 high nibble: block size / 256 − 1; bytes 1-3 image size (u24); bytes 4-7 image CRC-32 |
+| 1 | Block | to the node | bytes 1-2 index (u16); bytes 3-4 length (u16, ≤ block size, only the last block is shorter); bytes 5-6 CRC-16/CCITT-FALSE of the block |
+| 2 | End | to the node | – (verify the whole image and switch to it) |
+| 3 | Abort | to the node | – |
+| 4 | Ack | from the node | bytes 1-2: the block expected next (cumulative); `Ack 0` answers `Begin` |
+| 5 | Nak | from the node | bytes 1-2 block index; byte 3 reason: 1 frames missing, 2 bad CRC, 3 flash failed, 4 bad header, 5 out of order (the index is the one expected) |
+| 6 | Done | from the node | – (the image verified; the node restarts about a second later) |
+| 7 | Error | from the node | byte 1: 1 bad `Begin`, 2 image too large, 3 not started, 4 verify failed, 5 flash failed, 6 `End` before the last block |
+
+The node acknowledges a block when its length and CRC-16 are right and it is
+safely in its sector buffer; the block that completes a 4 KiB sector is
+acknowledged after the sector was written. A block that does not come out
+right is answered with a `Nak`; a block that stops (300 ms without a frame) is
+asked for again by a `Nak`; the sender repeats a refused or unanswered block
+(1 s) up to 8 times, then gives the update up with `Abort`. A repeated block
+whose ack was lost is acknowledged again and not taken twice. `Begin` is
+answered within 10 s, `End` within 15 s. The node silences itself for the
+update (the update messages are exempt from `UpdateSilence`), and a new image is
+only kept once the node has been heard on the bus (its first `Echo` answered).
+
+## Legacy OTA (`FlashStart`/`FlashWrite`/.../`FlashComplete`)
+
+The original streaming protocol, kept for the old STM32 nodes and as the
+gateway's fallback and for updates by type; the `cancomponents` nodes no longer
+implement it. **Known to be unreliable**, see
+[`technical-debt.md`](technical-debt.md#can-bus-ota-legacy-streaming-protocol).
+Documented here as implemented in the gateway (`gateway_core::can_ota`): the
+sequence a bus master (this gateway, as `CANUpdate`) drives to push firmware to
+a target node or type-broadcast.
 
 Start sequence (`filesize`, `crc` known up front):
 

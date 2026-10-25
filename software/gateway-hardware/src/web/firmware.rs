@@ -67,6 +67,10 @@ struct Job {
     target: &'static str,
     total: usize,
     sent: usize,
+    /// For a device: `blocks` or `legacy`, which way the image goes.
+    protocol: Option<&'static str>,
+    /// Blocks that had to be sent again.
+    retries: u32,
     error: Option<&'static str>,
 }
 
@@ -75,6 +79,8 @@ static JOB: Mutex<CriticalSectionRawMutex, Job> = Mutex::new(Job {
     target: "",
     total: 0,
     sent: 0,
+    protocol: None,
+    retries: 0,
     error: None,
 });
 
@@ -140,6 +146,11 @@ async fn fail(message: &'static str, status: StatusCode, code: &'static str) -> 
     ApiError::new(status, code, message)
 }
 
+/// A failed CAN update: the job says why, the request answers `502`.
+async fn fail_update(error: crate::can_update::UpdateError) -> ApiError {
+    fail(error.message(), StatusCode::BAD_GATEWAY, "update_failed").await
+}
+
 /// Receives the image from `reader` and hands it to `target`.
 async fn receive<B: Read>(
     target: Target,
@@ -170,17 +181,23 @@ async fn receive<B: Read>(
         target: target.name(),
         total: size,
         sent: 0,
+        protocol: None,
+        retries: 0,
         error: None,
     };
 
     let started = match target {
         Target::Gateway => crate::update::start(size as u32, crc).await,
-        Target::Device(key) => {
-            crate::can_update::by_uid_start(key, size as u32, crc).await;
-            true
-        }
+        Target::Device(key) => match crate::can_update::start_device(key, size as u32, crc).await {
+            Ok(protocol) => {
+                JOB.lock().await.protocol = Some(protocol.name());
+                true
+            }
+            Err(error) => return Err(fail_update(error).await),
+        },
         Target::Type(device_type) => {
-            crate::can_update::by_type_start(device_type, size as u32, crc).await;
+            crate::can_update::start_type(device_type, size as u32, crc).await;
+            JOB.lock().await.protocol = Some("legacy");
             true
         }
     };
@@ -211,10 +228,13 @@ async fn receive<B: Read>(
         };
         let written = match target {
             Target::Gateway => crate::update::write(&chunk[..read]).await,
-            _ => {
-                crate::can_update::data(&chunk[..read]).await;
-                true
-            }
+            _ => match crate::can_update::data(&chunk[..read]).await {
+                Ok(()) => true,
+                Err(error) => {
+                    abort(target).await;
+                    return Err(fail_update(error).await);
+                }
+            },
         };
         if !written {
             abort(target).await;
@@ -226,7 +246,15 @@ async fn receive<B: Read>(
             .await);
         }
         received += read;
-        JOB.lock().await.sent = received;
+        let mut job = JOB.lock().await;
+        job.sent = received;
+        if !matches!(target, Target::Gateway) {
+            // What the device has acknowledged is the progress.
+            let progress = crate::can_update::progress().await;
+            job.sent = progress.bytes as usize;
+            job.retries = progress.retries;
+        }
+        drop(job);
     }
 
     match target {
@@ -241,7 +269,12 @@ async fn receive<B: Read>(
             }
             super::system::request_restart();
         }
-        _ => crate::can_update::complete().await,
+        _ => {
+            if let Err(error) = crate::can_update::complete().await {
+                return Err(fail_update(error).await);
+            }
+            JOB.lock().await.sent = size;
+        }
     }
     JOB.lock().await.state = State::Done;
     Ok(Uploaded {
