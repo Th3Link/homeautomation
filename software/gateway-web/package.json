@@ -1,0 +1,18 @@
+{
+  "name": "gateway-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser UI of the CAN<->MQTT gateway, served by gateway-hardware (src/web/assets.rs)",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node dev.js"
+  },
+  "dependencies": {
+    "crc-32": "1.2.2",
+    "htm": "3.1.1",
+    "preact": "10.26.9"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.8"
+  }
+}

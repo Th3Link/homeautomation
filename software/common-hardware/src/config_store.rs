@@ -91,6 +91,29 @@ impl<const BUF: usize> ConfigStore<BUF> {
             .map_err(|_| ())
     }
 
+    /// Reads a byte string of at most `N` bytes; `None` if the key is unset
+    /// or the value is longer.
+    pub async fn get_bytes<const N: usize>(
+        &mut self,
+        key: impl Into<u8>,
+    ) -> Option<heapless::Vec<u8, N>> {
+        let raw: &[u8] = self
+            .map
+            .fetch_item(&mut self.buffer, &key.into())
+            .await
+            .ok()
+            .flatten()?;
+        heapless::Vec::from_slice(raw).ok()
+    }
+
+    /// Stores a byte string (the empty slice stands for "nothing").
+    pub async fn set_bytes(&mut self, key: impl Into<u8>, value: &[u8]) -> Result<(), ()> {
+        self.map
+            .store_item(&mut self.buffer, &key.into(), &value)
+            .await
+            .map_err(|_| ())
+    }
+
     pub async fn get_bool(&mut self, key: impl Into<u8>) -> Option<bool> {
         self.get_u8(key).await.map(|b| b != 0)
     }

@@ -35,25 +35,45 @@ pub fn hex_to_int(s: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
-/// Splits an MQTT broker URI of the form `mqtt://host[:port]` into
-/// `(host, port)`, defaulting the port to 1883. An IPv6 literal must be
-/// bracketed, as in any URI: `mqtt://[fd00::1]:1883` yields `"fd00::1"`
-/// (brackets stripped, ready for a resolver). Returns `None` for any other
-/// scheme or an unparsable port.
-pub fn parse_broker_uri(uri: &str) -> Option<(&str, u16)> {
-    let rest = uri.strip_prefix("mqtt://")?;
+/// Where an MQTT broker URI points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerAddress<'a> {
+    /// `mqtts://` — the session is wrapped in TLS.
+    pub tls: bool,
+    /// Host name or IP literal (IPv6 without its brackets), ready for a
+    /// resolver.
+    pub host: &'a str,
+    pub port: u16,
+}
+
+/// Splits an MQTT broker URI of the form `mqtt://host[:port]` (plain,
+/// default port 1883) or `mqtts://host[:port]` (TLS, default port 8883).
+/// An IPv6 literal must be bracketed, as in any URI: `mqtt://[fd00::1]:1883`
+/// yields host `"fd00::1"`. Returns `None` for any other scheme or an
+/// unparsable port.
+pub fn parse_broker_uri(uri: &str) -> Option<BrokerAddress<'_>> {
+    let (tls, rest, default_port) = if let Some(rest) = uri.strip_prefix("mqtt://") {
+        (false, rest, 1883)
+    } else {
+        (true, uri.strip_prefix("mqtts://")?, 8883)
+    };
     if let Some(bracketed) = rest.strip_prefix('[') {
         let (host, after) = bracketed.split_once(']')?;
-        return match after.strip_prefix(':') {
-            Some(port) => Some((host, port.parse().ok()?)),
-            None if after.is_empty() => Some((host, 1883)),
-            None => None,
+        let port = match after.strip_prefix(':') {
+            Some(port) => port.parse().ok()?,
+            None if after.is_empty() => default_port,
+            None => return None,
         };
+        return Some(BrokerAddress { tls, host, port });
     }
-    match rest.rsplit_once(':') {
-        Some((host, port)) => Some((host, port.parse().ok()?)),
-        None => Some((rest, 1883)),
+    let (host, port) = match rest.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse().ok()?),
+        None => (rest, default_port),
+    };
+    if host.is_empty() {
+        return None;
     }
+    Some(BrokerAddress { tls, host, port })
 }
 
 #[cfg(test)]
@@ -102,15 +122,31 @@ mod tests {
         assert_eq!(hex_to_int(""), None);
     }
 
+    fn address(tls: bool, host: &str, port: u16) -> Option<BrokerAddress<'_>> {
+        Some(BrokerAddress { tls, host, port })
+    }
+
     #[test]
     fn broker_uri_defaults_port_and_parses_host() {
         assert_eq!(
             parse_broker_uri("mqtt://broker.lan"),
-            Some(("broker.lan", 1883))
+            address(false, "broker.lan", 1883)
         );
         assert_eq!(
             parse_broker_uri("mqtt://10.0.0.5:1884"),
-            Some(("10.0.0.5", 1884))
+            address(false, "10.0.0.5", 1884)
+        );
+    }
+
+    #[test]
+    fn mqtts_scheme_selects_tls_and_its_default_port() {
+        assert_eq!(
+            parse_broker_uri("mqtts://broker.lan"),
+            address(true, "broker.lan", 8883)
+        );
+        assert_eq!(
+            parse_broker_uri("mqtts://10.0.0.5:8884"),
+            address(true, "10.0.0.5", 8884)
         );
     }
 
@@ -118,11 +154,15 @@ mod tests {
     fn broker_uri_accepts_bracketed_ipv6() {
         assert_eq!(
             parse_broker_uri("mqtt://[fd00::1]"),
-            Some(("fd00::1", 1883))
+            address(false, "fd00::1", 1883)
         );
         assert_eq!(
-            parse_broker_uri("mqtt://[fd00::1]:8883"),
-            Some(("fd00::1", 8883))
+            parse_broker_uri("mqtt://[fd00::1]:8884"),
+            address(false, "fd00::1", 8884)
+        );
+        assert_eq!(
+            parse_broker_uri("mqtts://[fd00::1]"),
+            address(true, "fd00::1", 8883)
         );
     }
 
@@ -132,5 +172,8 @@ mod tests {
         assert_eq!(parse_broker_uri("mqtt://host:notaport"), None);
         assert_eq!(parse_broker_uri("mqtt://[fd00::1"), None);
         assert_eq!(parse_broker_uri("mqtt://[fd00::1]junk"), None);
+        assert_eq!(parse_broker_uri("mqtt://"), None);
+        assert_eq!(parse_broker_uri("mqtts://:8883"), None);
+        assert_eq!(parse_broker_uri("ssl://broker"), None);
     }
 }

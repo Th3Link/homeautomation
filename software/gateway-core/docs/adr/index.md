@@ -14,3 +14,5 @@ globally-numbered list including cross-cutting decisions.
 | [0008](0008-mandatory-web-authentication.md) | Require Basic Auth on every web endpoint unconditionally | Accepted |
 | [0009](0009-promiscuous-can-dispatch.md) | Replace the dispatcher-list CAN fan-out with direct `msg_type` routing | Accepted |
 | [0013](0013-ethernet-only-no-wifi.md) | Wired Ethernet is the only network path — drop WiFi | Accepted |
+| [0014](0014-rest-api-by-resource.md) | A REST API by resource instead of `/state.json` and `/control.json` | Accepted |
+| [0015](0015-mqtt-tls-pinned-public-key.md) | MQTT over TLS 1.3 with a pinned broker key | Accepted |

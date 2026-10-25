@@ -10,13 +10,28 @@ how each of these relates to a CAN message, and
 
 ## Connection
 
+The gateway subscribes to its command topics one at a time, waiting for
+the broker's SUBACK of each before sending the next SUBSCRIBE (the client
+refuses more than four unconfirmed ones).
+
 - Protocol version: **MQTT 5.0** (see [ADR 0007](adr/0007-mqtt5-client.md)
   for why this differs from the original's 3.1.1).
-- Broker address: `mqtt://<host>:<port>` (configured `mqtt_uri`; `<port>`
-  defaults to `1883` if omitted). No TLS.
-- Credentials: optional `mqtt_user`/`mqtt_password`, sent as the MQTT
+- **Two brokers** can be configured and served at the same time (say,
+  Home Assistant's as the primary and a Cerbo's as the secondary), each in
+  its own slot with its own connection. Commands are accepted from either
+  and handled identically. Everything the gateway publishes (node states,
+  sensor readings, its own `available` announcement) goes to the
+  **primary** broker only; the secondary broker is receive-only, and
+  publishing something to it too is a deliberate exception that has to be
+  programmed per message (`mqtt::publish_secondary`; there is none yet).
+  Console commands `mqtt-…` configure the primary slot, `mqtt2-…` the
+  secondary; a slot that isn't enabled stays idle.
+- Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`,
+  unencrypted) or `mqtts://<host>[:<port>]` (port defaults to `8883`,
+  [encrypted](#encryption-mqtts)).
+- Credentials: optional per-broker username/password, sent as the MQTT
   CONNECT username/password if non-empty.
-- Client id: `"gateway-hardware"`, fixed.
+- Client id: `"gateway-hardware"`, fixed (on each broker).
 - `clean_start` is set on every connect — no persisted session across
   reconnects.
 - On disconnect, the gateway reconnects with a fixed backoff and
@@ -24,7 +39,8 @@ how each of these relates to a CAN message, and
   (re)connect — subscriptions are not assumed to survive a reconnect, so
   this happens unconditionally every time, not just after the first
   connect.
-- On every successful (re)connect, the gateway also republishes its own
+- On every successful (re)connect to the primary broker, the gateway also
+  republishes its own
   [`canbus/available/<hex>`](#canbusavailable) self-announcement (see
   below) — this is the *only* case where an `Available` CAN message
   results in an MQTT publish; `Available` frames observed from *other*
@@ -107,6 +123,31 @@ when a runtime "MQTT logging" flag is enabled (toggled via the
 `mqtt_logging` `/control.json` verb). Reserved for parity; not yet wired
 into `gateway-hardware`'s CAN transport.
 
+### Encryption (`mqtts://`)
+
+`mqtts://` connections use TLS 1.3 (one cipher suite,
+`TLS_AES_128_GCM_SHA256`; every current Mosquitto/OpenSSL offers it).
+Brokers on a LAN mostly have self-signed certificates and the gateway has
+no clock, so instead of validating a certificate chain it *pins the
+broker's public key*:
+
+1. `mqtt-trust` (`mqtt2-trust` for the second broker) makes the next
+   connection a capture: the certificate the broker presents is stored in
+   flash and its SHA-256 fingerprint is logged, to compare with
+   `openssl x509 -in <cert> -noout -fingerprint -sha256`. The request is
+   not persisted; it is also lost on a restart.
+2. From then on the broker must present a certificate with that same
+   public key and sign the handshake with the matching private key, or the
+   connection is refused. A renewed certificate with the same key is
+   accepted; a new key needs `mqtt-trust` again.
+
+`mqtt-untrust` forgets the pinned certificate (a TLS broker without one
+isn't connected to), `mqtt-insecure on` accepts any certificate instead:
+encrypted, but a man in the middle isn't excluded.
+
+Limits: certificates with ECDSA P-256/P-384 or RSA keys (at most 2048
+bytes), and validity dates, the issuer and the host name are not checked.
+
 ## Command topics (broker → gateway)
 
 Every command topic below is an MQTT subscription with a `#` wildcard
@@ -119,6 +160,35 @@ Body: `<num>/<state>/<stop_time_ms>` — three decimal integers, all
 required. Encodes to the CAN `Relais`/`Rollershutter` message using the
 **MQTT-command wire shape**, distinct from the RPC path — see
 [`protocol-can.md`](../../../docs/protocol-can.md#relayrollershutter-relais--rollershutter--relaisstate--rollershutterstate).
+
+### `canbus/heating_target_command/<device>`, `canbus/heating_energy_command/<device>`, `canbus/heating_emergency_command/<device>`
+
+Commands for a `HeatingControl` node (new — the original has nothing like
+them). Each becomes the CAN message of the same name, see
+[`protocol-can.md`](../../../docs/protocol-can.md#heating-controller-heatingtarget--heatingenergy--heatingemergency).
+Bodies are `/`-separated; temperatures are decimal °C (`45`, `45.5`,
+`-3.25`, within -50…150), flags are `1`/`0` (or `true`/`false`,
+`on`/`off`):
+
+| Topic | Body | Example |
+|---|---|---|
+| `heating_target_command` | `<flow_target_°C>/<tank_mode>` | `45.5/1` — 45.5 °C flow, supplied from the tank |
+| `heating_energy_command` | `<power_W>/<rod_enabled>` | `6200/1` — 6.2 kW surplus, rod released (negative while importing) |
+| `heating_emergency_command` | `<stage 0-3>/<tank_target_°C>` | `2/60` — rod stage 2 until the tank is at 60 °C; stage `0` ends it |
+
+The node counts each of these as gone 30 s after it last arrived, and then
+switches the heating rod off (or the circuit back to direct operation) —
+so the publisher has to repeat them, about every 5 s. The gateway does not
+repeat anything itself. **Publish them without the retain flag:** a
+retained delivery (what a broker sends after a reconnect) is ignored, since
+an old value replayed that way would look fresh to the node. A body that
+doesn't parse, or a device that can't be resolved, is dropped silently like
+for the other command topics.
+
+While a heating controller is in **manual mode** (set from the web UI or the
+node's console, see [`api-rest.md`](api-rest.md)) all three are dropped —
+by the gateway, which knows the state from the node's reports, and by the
+node itself. The rod is off then, whoever publishes.
 
 ### `canbus/lamp_command/<device>`
 
@@ -147,7 +217,8 @@ frame limit), and sent verbatim as that CAN message's payload.
 ### `canbus/gateway/restart`
 
 Exact topic match (no wildcard segment, no device targeting). Any body.
-Restarts the gateway itself.
+Restarts the gateway itself. A retained message is ignored — it would
+restart the gateway again after every reconnect.
 
 ## Not covered by this document
 

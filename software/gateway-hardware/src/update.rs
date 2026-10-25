@@ -83,6 +83,23 @@ pub async fn complete() -> bool {
     }
 }
 
+/// Finalizes the update like [`complete`] but leaves the restart to the
+/// caller, so that a web request can still be answered. Returns whether the
+/// image verified and is now the one to boot.
+pub async fn finish() -> bool {
+    let mut guard = OTA.lock().await;
+    let Some(ota) = guard.as_mut() else {
+        return false;
+    };
+    match ota.ota_flush(true, true) {
+        Ok(()) => true,
+        Err(e) => {
+            console_log!("update: verify failed: {e:?}");
+            false
+        }
+    }
+}
+
 /// Aborts an in-progress update (`Update::abort`/`IUpdate::abort`).
 pub async fn abort() {
     *OTA.lock().await = None;

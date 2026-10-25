@@ -16,12 +16,18 @@ use crate::can::{send_can_message, DEVICE_ID, DEVICE_TYPE};
 use crate::config::{self, config};
 use crate::console_log;
 use crate::device::device;
+use crate::echo_guard;
+use crate::heating;
 use crate::logging::CLI_ACTIVE;
 use crate::relais::send_relais_command;
+use crate::temperature;
 use bareminal_cli::cli::{Bareminal, CommandWriter};
 use bareminal_macros::Command;
 use cancomponents_core::can_message_type::CanMessageType;
 use cancomponents_core::extension::Mode as ExtensionMode;
+use cancomponents_core::heating_message::{
+    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingTarget,
+};
 use cancomponents_core::relais::{Message as RelaisMessage, Mode as RelaisMode, State};
 use core::fmt::Write as _;
 use core::str::FromStr;
@@ -88,6 +94,74 @@ enum Commands<'a> {
         "software_rollershutter", "hardware_rollershutter",
     ])]
     ExtensionMode(ExtensionModeArg),
+    /// Set how often (in seconds, 10..=86400) the DS18B20 temperatures are
+    /// sent over CAN. They are measured every 10 s regardless.
+    #[set(min = 10, max = 86400)]
+    SensorInterval(u32),
+    /// List all DS18B20 temperature sensors: slot, ROM, the id used in CAN
+    /// frames and MQTT topics, current temperature and age.
+    Sensors,
+    /// Stop tracking (and reporting) sensors that are currently lost, e.g.
+    /// after removing one on purpose.
+    SensorsForget,
+    /// Heating controller: assign the DS18B20 with this id (as shown by
+    /// `sensors`, e.g. 0x32c3b022) to a tank position, 0 = top … 6 =
+    /// bottom. Use `none` as id to clear a position.
+    TankSensor {
+        #[set(short)]
+        position: usize,
+        #[set(short)]
+        id: &'a str,
+    },
+    /// Heating controller: the DS18B20 measuring the heating circuit's flow
+    /// temperature (id as shown by `sensors`, or `none`).
+    FlowSensor(&'a str),
+    /// Heating controller: stop charging the tank with surplus power once
+    /// the reference sensor reaches this temperature (°C).
+    #[set(min = 20, max = 75)]
+    TankTarget(u8),
+    /// Heating controller: tank position (0 = top … 6 = bottom) whose
+    /// sensor the tank target is compared with.
+    #[set(min = 0, max = 6)]
+    TankRef(u8),
+    /// Heating controller: show what it is doing and why.
+    Heating,
+    /// Bring-up: feed the heating controller a HeatingTarget as if it had
+    /// arrived over CAN (flow target in °C, tank operation 0/1). Expires
+    /// after 30 s like the real message.
+    SimTarget {
+        #[set(short)]
+        celsius: u8,
+        #[set(short, min = 0, max = 1)]
+        tank: u8,
+    },
+    /// Bring-up: feed the heating controller a HeatingEnergy (available
+    /// power in W, rod released 0/1).
+    SimEnergy {
+        #[set(short)]
+        watts: i32,
+        #[set(short, min = 0, max = 1)]
+        rod: u8,
+    },
+    /// Bring-up: feed the heating controller a HeatingEmergency (rod stage
+    /// 0-3, tank target in °C).
+    SimEmergency {
+        #[set(short, min = 0, max = 3)]
+        stage: u8,
+        #[set(short)]
+        celsius: u8,
+    },
+    /// Whether a missing CAN `Echo` (bus or gateway gone) restarts the
+    /// device. On by default; turn it off for a device without a gateway.
+    #[set(one_of = ["on", "off"])]
+    EchoRestart(OnOffArg),
+    /// Heating controller commissioning: take over the relays 6-10 (valves,
+    /// mixer, pump) so `relais` can switch them one by one. They are all
+    /// off when it starts. The heating rod (relays 0-5) stays under the
+    /// controller's care with all its limits. `off` — or 10 minutes without
+    /// a `relais` command — hands the relays back to the controller.
+    #[set(one_of = ["on", "off"])]
+    HeatingManual(OnOffArg),
     /// Directly drive one relay/rollershutter channel, for bring-up testing
     /// without a CAN bus master.
     Relais {
@@ -178,6 +252,24 @@ impl FromStr for ExtensionModeArg {
             "legacy_sensors" => Ok(Self::LegacySensors),
             "software_rollershutter" => Ok(Self::SoftwareRollershutter),
             "hardware_rollershutter" => Ok(Self::HardwareRollershutter),
+            _ => Err(()),
+        }
+    }
+}
+
+/// `on`/`off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnOffArg {
+    On,
+    Off,
+}
+
+impl FromStr for OnOffArg {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "on" => Ok(Self::On),
+            "off" => Ok(Self::Off),
             _ => Err(()),
         }
     }
@@ -321,6 +413,34 @@ async fn handle_command(
         Commands::CustomString(text) => respond(writer, &cmd_custom_string(text).await).await,
         Commands::RelaisMode(mode) => respond(writer, &cmd_relais_mode(mode).await).await,
         Commands::ExtensionMode(mode) => respond(writer, &cmd_extension_mode(mode).await).await,
+        Commands::TankSensor { position, id } => {
+            respond(writer, &cmd_tank_sensor(position, id).await).await
+        }
+        Commands::FlowSensor(id) => respond(writer, &cmd_flow_sensor(id).await).await,
+        Commands::TankTarget(celsius) => respond(writer, &cmd_tank_target(celsius).await).await,
+        Commands::TankRef(index) => respond(writer, &cmd_tank_ref(index).await).await,
+        Commands::Heating => cmd_heating(writer).await,
+        Commands::SimTarget { celsius, tank } => {
+            respond(writer, &cmd_sim_target(celsius, tank != 0).await).await
+        }
+        Commands::SimEnergy { watts, rod } => {
+            respond(writer, &cmd_sim_energy(watts, rod != 0).await).await
+        }
+        Commands::SimEmergency { stage, celsius } => {
+            respond(writer, &cmd_sim_emergency(stage, celsius).await).await
+        }
+        Commands::HeatingManual(setting) => {
+            respond(writer, &cmd_heating_manual(setting == OnOffArg::On).await).await
+        }
+        Commands::EchoRestart(setting) => {
+            respond(writer, &cmd_echo_restart(setting == OnOffArg::On).await).await
+        }
+        Commands::Sensors => cmd_sensors(writer).await,
+        Commands::SensorsForget => {
+            temperature::forget_lost_sensors();
+            respond(writer, "lost sensors are dropped within 10 s").await
+        }
+        Commands::SensorInterval(secs) => respond(writer, &cmd_sensor_interval(secs).await).await,
         Commands::Relais { num, state } => respond(writer, &cmd_relais(num, state).await).await,
         Commands::Ping => {
             send_can_message(CanMessageType::Ping, &[], false).await;
@@ -370,6 +490,38 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     match custom_string {
         Some(s) => respond(writer, &fmt_msg(format_args!("custom_string: {s}"))).await?,
         None => respond(writer, "custom_string: (unset)").await?,
+    }
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "sensor_interval: {} s",
+            temperature::send_interval_secs()
+        )),
+    )
+    .await?;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "echo_restart: {}",
+            if echo_guard::restart_enabled() {
+                "on"
+            } else {
+                "off"
+            }
+        )),
+    )
+    .await?;
+    let sensors = temperature::sensors();
+    if !sensors.is_empty() {
+        let lost = sensors.iter().filter(|s| s.lost).count();
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "sensors: {} ({lost} lost, see 'sensors')",
+                sensors.len()
+            )),
+        )
+        .await?;
     }
     respond(
         writer,
@@ -481,7 +633,321 @@ async fn cmd_extension_mode(mode: ExtensionModeArg) -> String<LINE_CAP> {
     ))
 }
 
+/// Parses a sensor id as printed by `sensors` (`0x32c3b022`, with or
+/// without the prefix); `none` and `0` mean "no sensor".
+fn parse_sensor_id(text: &str) -> Option<u32> {
+    if text.eq_ignore_ascii_case("none") {
+        return Some(0);
+    }
+    let digits = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .unwrap_or(text);
+    u32::from_str_radix(digits, 16).ok()
+}
+
+/// Formats a milli-degree value as `-12.345`.
+fn fmt_millicelsius(milli: i32) -> String<12> {
+    let mut out = String::new();
+    let sign = if milli < 0 { "-" } else { "" };
+    let _ = write!(
+        out,
+        "{sign}{}.{:03}",
+        milli.unsigned_abs() / 1000,
+        milli.unsigned_abs() % 1000
+    );
+    out
+}
+
+async fn cmd_tank_sensor(position: usize, id: &str) -> String<LINE_CAP> {
+    let Some(id) = parse_sensor_id(id) else {
+        return str_msg("id must be hex like 0x32c3b022, or 'none'");
+    };
+    match heating::set_tank_sensor(position, id).await {
+        Ok(()) => fmt_msg(format_args!("tank position {position} -> id 0x{id:x}")),
+        Err(()) => str_msg("position must be 0 (top) to 6 (bottom), or storing failed"),
+    }
+}
+
+async fn cmd_flow_sensor(id: &str) -> String<LINE_CAP> {
+    let Some(id) = parse_sensor_id(id) else {
+        return str_msg("id must be hex like 0x32c3b022, or 'none'");
+    };
+    match heating::set_flow_sensor(id).await {
+        Ok(()) => fmt_msg(format_args!("flow sensor -> id 0x{id:x}")),
+        Err(()) => str_msg("failed to persist flow sensor"),
+    }
+}
+
+async fn cmd_tank_target(celsius: u8) -> String<LINE_CAP> {
+    match heating::set_tank_target(celsius).await {
+        Ok(()) => fmt_msg(format_args!("tank target set to {celsius} C")),
+        Err(()) => str_msg("tank target out of range, or storing failed"),
+    }
+}
+
+async fn cmd_tank_ref(index: u8) -> String<LINE_CAP> {
+    match heating::set_tank_ref(index).await {
+        Ok(()) => fmt_msg(format_args!("tank reference sensor is position {index}")),
+        Err(()) => str_msg("position must be 0 (top) to 6 (bottom), or storing failed"),
+    }
+}
+
+const NOT_A_CONTROLLER: &str = "not a HeatingControl device";
+
+async fn cmd_sim_target(celsius: u8, tank: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_target(HeatingTarget {
+        flow_target_raw: millicelsius_to_raw(i32::from(celsius) * 1000),
+        tank_mode: tank,
+    });
+    fmt_msg(format_args!("target {celsius} C, tank operation {tank}"))
+}
+
+async fn cmd_sim_energy(watts: i32, rod: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_energy(HeatingEnergy {
+        power_w: watts,
+        rod_enabled: rod,
+    });
+    fmt_msg(format_args!("energy {watts} W, rod released {rod}"))
+}
+
+async fn cmd_sim_emergency(stage: u8, celsius: u8) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::inject_emergency(HeatingEmergency {
+        stage,
+        tank_target_raw: millicelsius_to_raw(i32::from(celsius) * 1000),
+    });
+    fmt_msg(format_args!(
+        "emergency stage {stage}, tank target {celsius} C"
+    ))
+}
+
+async fn cmd_heating(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    let settings = heating::settings();
+    let Some(live) = heating::live_status() else {
+        return respond(writer, "heating controller is not running on this device").await;
+    };
+    let (out, status) = (live.outputs, live.status);
+
+    if live.manual {
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "MANUAL MODE: relays 6-10 are under manual control until it is turned off; \
+                 circuit and mixer below show what the controller would do"
+            )),
+        )
+        .await?;
+    }
+
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "rod: stage {} ({:?}){}",
+            out.rod_stage,
+            status.rod_reason,
+            if status.over_temperature {
+                "  OVER-TEMPERATURE LATCHED"
+            } else {
+                ""
+            }
+        )),
+    )
+    .await?;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "circuit: {}, pump {}, tank {}",
+            if out.valves_tank {
+                "tank operation"
+            } else {
+                "direct"
+            },
+            if out.pump { "on" } else { "off" },
+            if status.tank_usable {
+                "hot enough"
+            } else {
+                "too cold"
+            },
+        )),
+    )
+    .await?;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "mixer: {:?}, about {} % hot{}",
+            out.mixer,
+            status.mixer_percent,
+            if status.mixer_homing { " (homing)" } else { "" }
+        )),
+    )
+    .await?;
+
+    let mut tank: String<LINE_CAP> = String::new();
+    for (position, temp) in live.tank_temps_mc.iter().enumerate() {
+        let marker = if position == usize::from(settings.tank_ref_index) {
+            "*"
+        } else {
+            ""
+        };
+        match temp {
+            Some(milli) => {
+                let _ = write!(tank, "#{position}{marker} {}  ", fmt_millicelsius(*milli));
+            }
+            None => {
+                let _ = write!(tank, "#{position}{marker} --  ");
+            }
+        }
+    }
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "tank (top to bottom, * = reference, target {} C): {tank}",
+            settings.tank_target_c
+        )),
+    )
+    .await?;
+    match live.flow_mc {
+        Some(milli) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("flow: {} C", fmt_millicelsius(milli))),
+            )
+            .await?
+        }
+        None => respond(writer, "flow: --").await?,
+    }
+
+    let age = |secs: Option<u64>| -> String<16> {
+        let mut out = String::new();
+        match secs {
+            Some(secs) => {
+                let _ = write!(out, "{secs} s ago");
+            }
+            None => {
+                let _ = write!(out, "never");
+            }
+        }
+        out
+    };
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "messages: target {}, energy {}, emergency {}",
+            age(live.target_age_s),
+            age(live.energy_age_s),
+            age(live.emergency_age_s)
+        )),
+    )
+    .await
+}
+
+async fn cmd_sensors(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    let sensors = temperature::sensors();
+    if sensors.is_empty() {
+        return respond(writer, "no sensors found").await;
+    }
+    for sensor in sensors {
+        let rom = sensor.rom.as_bytes();
+        let mut line: String<LINE_CAP> = String::new();
+        let _ = write!(line, "#{} rom ", sensor.slot);
+        for byte in rom {
+            let _ = write!(line, "{byte:02X}");
+        }
+        let _ = write!(line, "  id 0x{:x}  ", sensor.rom.topic_id());
+        match (sensor.reading, sensor.lost) {
+            (Some(reading), _) => {
+                let milli = reading.temperature.millicelsius();
+                let sign = if milli < 0 { "-" } else { "" };
+                let _ = write!(
+                    line,
+                    "{sign}{}.{:03} C  ({} s ago)",
+                    milli.unsigned_abs() / 1000,
+                    milli.unsigned_abs() % 1000,
+                    reading.at.elapsed().as_secs(),
+                );
+            }
+            (None, true) => {
+                let _ = write!(line, "LOST");
+            }
+            (None, false) if sensor.settling => {
+                let _ = write!(line, "settling");
+            }
+            (None, false) => {
+                let _ = write!(line, "no reading yet");
+            }
+        }
+        respond(writer, &line).await?;
+    }
+    Ok(())
+}
+
+async fn cmd_echo_restart(enabled: bool) -> String<LINE_CAP> {
+    match echo_guard::set_restart_enabled(enabled).await {
+        Ok(()) => fmt_msg(format_args!(
+            "restart on missing echo: {}",
+            if enabled { "on" } else { "off" }
+        )),
+        Err(()) => str_msg("failed to persist echo_restart"),
+    }
+}
+
+async fn cmd_sensor_interval(secs: u32) -> String<LINE_CAP> {
+    match temperature::set_send_interval_secs(secs).await {
+        Ok(applied) => fmt_msg(format_args!("sensor_interval set to {applied} s")),
+        Err(()) => str_msg("failed to persist sensor_interval"),
+    }
+}
+
+async fn cmd_heating_manual(enabled: bool) -> String<LINE_CAP> {
+    if !heating::is_heating_controller().await {
+        return str_msg(NOT_A_CONTROLLER);
+    }
+    heating::set_manual(enabled);
+    if enabled {
+        str_msg(
+            "manual mode: relays 6-10 are yours (all off now), `relais <6-10> on|off`; \
+             it stays on until `heating-manual off` (a restart ends it as well)",
+        )
+    } else {
+        str_msg("automatic mode: relays 6-10 off, the mixer homes again, then the controller takes over")
+    }
+}
+
 async fn cmd_relais(num: usize, state: RelaisStateArg) -> String<LINE_CAP> {
+    if cancomponents_core::heating::is_controlled_relay(num)
+        && heating::is_heating_controller().await
+    {
+        // Rod relays: only the controller, always. The others only in
+        // manual mode, one by one.
+        if num < 6 {
+            return fmt_msg(format_args!(
+                "relay {num} is part of the heating rod; only the controller switches it"
+            ));
+        }
+        let on = match state {
+            RelaisStateArg::On => true,
+            RelaisStateArg::Off => false,
+            RelaisStateArg::Up | RelaisStateArg::Down => {
+                return str_msg("use on or off for this relay");
+            }
+        };
+        return match heating::manual_relay(num, on).await {
+            Ok(()) => fmt_msg(format_args!(
+                "relay {num} -> {} (manual)",
+                if on { "on" } else { "off" }
+            )),
+            Err(reason) => str_msg(reason),
+        };
+    }
     let state: State = state.into();
     send_relais_command(RelaisMessage {
         num,

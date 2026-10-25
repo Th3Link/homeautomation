@@ -11,19 +11,80 @@
 use common_hardware::config_store::{ConfigCell, ConfigStore};
 use core::ops::Range;
 pub use gateway_core::config::Key;
-use gateway_core::config::{Bitrate, GatewayConfig};
+use gateway_core::config::{Bitrate, BrokerConfig, GatewayConfig};
 
 /// Matches the `nvs` entry in `partitions.csv`.
 pub const CONFIG_PARTITION: Range<u32> = 0x9000..0x4C000;
 
-// Sized for the largest single value (mqtt_uri/mqtt_user/mqtt_password,
-// each up to 60 bytes) plus sequential-storage's own per-item overhead.
-const BUF: usize = 128;
+// Sized for the largest single value — a pinned broker certificate, up to
+// `tls::CERT_CAP` bytes (the strings are at most 60) — plus
+// sequential-storage's own per-item overhead.
+const BUF: usize = 2048 + 64;
 
 /// The flash-backed config store, keyed by [`Key`].
 pub type Config = ConfigStore<BUF>;
 
 static CONFIG: ConfigCell<BUF> = ConfigCell::new();
+
+/// Flash key of the pinned server certificate of MQTT broker slot 0; slot
+/// `n` lives at `TRUST_KEY_BASE + n`. The value is the certificate in DER
+/// form; an empty value means nothing is pinned.
+const TRUST_KEY_BASE: u8 = 0x80;
+
+/// The server certificate pinned for MQTT broker `slot` (see
+/// [`crate::tls`]), if there is one.
+pub async fn pinned_certificate(
+    slot: usize,
+) -> Option<heapless::Vec<u8, { crate::tls::CERT_CAP }>> {
+    let cert = config()
+        .await
+        .get_bytes(TRUST_KEY_BASE + slot as u8)
+        .await?;
+    (!cert.is_empty()).then_some(cert)
+}
+
+/// Pins `certificate` (DER) for broker `slot`; an empty slice forgets the
+/// pinned one.
+pub async fn set_pinned_certificate(slot: usize, certificate: &[u8]) -> Result<(), ()> {
+    config()
+        .await
+        .set_bytes(TRUST_KEY_BASE + slot as u8, certificate)
+        .await
+}
+
+/// Flash key of the RMII clock pin setting (`u8`, 16 or 17). A raw key,
+/// clear of [`Key`]'s values: it describes how the board is wired, not the
+/// user-facing schema [`GatewayConfig`] shares with the web UI.
+const ETH_CLOCK_KEY: u8 = 0x70;
+
+/// GPIO the RMII reference clock comes out on (see
+/// [`crate::ethernet`]): 17 (rev1 boards) unless set to 16 (rev2).
+pub async fn eth_clock_gpio() -> u8 {
+    match config().await.get_u8(ETH_CLOCK_KEY).await {
+        Some(16) => 16,
+        _ => 17,
+    }
+}
+
+/// Persists the RMII clock pin (16 or 17); takes effect after a restart.
+pub async fn set_eth_clock_gpio(gpio: u8) -> Result<(), ()> {
+    if gpio != 16 && gpio != 17 {
+        return Err(());
+    }
+    config().await.set_u8(ETH_CLOCK_KEY, gpio).await
+}
+
+/// The user name and password the web server asks for.
+pub async fn web_credentials() -> (heapless::String<30>, heapless::String<30>) {
+    let defaults = GatewayConfig::default();
+    let mut store = config().await;
+    let user = store.get_str(Key::WebUsername).await;
+    let password = store.get_str(Key::WebPassword).await;
+    (
+        user.unwrap_or(defaults.web_username),
+        password.unwrap_or(defaults.web_password),
+    )
+}
 
 /// Initializes the `CONFIG` singleton. Idempotent; safe to call more than
 /// once.
@@ -102,20 +163,32 @@ impl LoadOrInit for Config {
             }
         };
 
-        let mqtt_enabled = match self.get_bool(Key::MqttEnabled).await {
-            Some(v) => v,
-            None => {
-                let _ = self.set_bool(Key::MqttEnabled, defaults.mqtt_enabled).await;
-                defaults.mqtt_enabled
-            }
-        };
+        let mut brokers = defaults.brokers.clone();
+        for (slot, broker) in brokers.iter_mut().enumerate() {
+            let keys = Key::broker(slot);
+            let default = BrokerConfig::default();
+            broker.enabled = match self.get_bool(keys.enabled).await {
+                Some(v) => v,
+                None => {
+                    let _ = self.set_bool(keys.enabled, default.enabled).await;
+                    default.enabled
+                }
+            };
+            broker.uri = str_field!(keys.uri, default.uri);
+            broker.user = str_field!(keys.user, default.user);
+            broker.password = str_field!(keys.password, default.password);
+            broker.tls_insecure = match self.get_bool(keys.tls_insecure).await {
+                Some(v) => v,
+                None => {
+                    let _ = self.set_bool(keys.tls_insecure, default.tls_insecure).await;
+                    default.tls_insecure
+                }
+            };
+        }
 
         GatewayConfig {
             hostname: str_field!(Key::Hostname, defaults.hostname),
-            mqtt_enabled,
-            mqtt_uri: str_field!(Key::MqttUri, defaults.mqtt_uri),
-            mqtt_user: str_field!(Key::MqttUser, defaults.mqtt_user),
-            mqtt_password: str_field!(Key::MqttPassword, defaults.mqtt_password),
+            brokers,
             web_username: str_field!(Key::WebUsername, defaults.web_username),
             web_password: str_field!(Key::WebPassword, defaults.web_password),
             can_id: u8_field!(Key::CanId, defaults.can_id),

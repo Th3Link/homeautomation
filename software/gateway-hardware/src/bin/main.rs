@@ -8,7 +8,7 @@ use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
-use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update};
+use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update, web};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -20,6 +20,16 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     console_log!("gateway-hardware booting");
+
+    // The heap lives in the RAM the ESP32's ROM leaves free above the
+    // normal data segment (`dram2`, ~96 KB), so it costs the statics nothing.
+    // It holds the web server's tasks (see `web`) and the RSA signature
+    // check of TLS; everything else stays on heapless/static allocation.
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 94 * 1024);
+
+    // TLS needs unpredictable random numbers; without a radio the hardware
+    // generator only gets entropy from the ADC noise source.
+    gateway_hardware::tls::init_entropy(peripherals.RNG, peripherals.ADC1);
 
     flash::init(peripherals.FLASH);
     config::init().await;
@@ -51,19 +61,24 @@ async fn main(spawner: Spawner) -> ! {
     // Ethernet is the only network path (ADR 0013). A DHCP client, so
     // nothing needs configuring before the gateway is reachable; the
     // cable can be plugged in at any time.
-    let stack = match ethernet::bring_up(EthernetPins {
-        eth: peripherals.ETH,
-        rxd0: peripherals.GPIO25,
-        rxd1: peripherals.GPIO26,
-        rx_dv: peripherals.GPIO27,
-        txd0: peripherals.GPIO19,
-        txd1: peripherals.GPIO22,
-        tx_en: peripherals.GPIO21,
-        mdc: peripherals.GPIO23,
-        mdio: peripherals.GPIO18,
-        clock: peripherals.GPIO17,
-        reset: peripherals.GPIO5,
-    })
+    let clock_gpio = config::eth_clock_gpio().await;
+    let stack = match ethernet::bring_up(
+        EthernetPins {
+            eth: peripherals.ETH,
+            rxd0: peripherals.GPIO25,
+            rxd1: peripherals.GPIO26,
+            rx_dv: peripherals.GPIO27,
+            txd0: peripherals.GPIO19,
+            txd1: peripherals.GPIO22,
+            tx_en: peripherals.GPIO21,
+            mdc: peripherals.GPIO23,
+            mdio: peripherals.GPIO18,
+            clock16: peripherals.GPIO16,
+            clock17: peripherals.GPIO17,
+            reset: peripherals.GPIO5,
+        },
+        clock_gpio,
+    )
     .await
     {
         Some(eth) => Some(ethernet::init_stack(eth, &spawner, cfg.hostname.as_str()).await),
@@ -74,7 +89,11 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     if let Some(stack) = stack {
-        spawner.spawn(mqtt::mqtt_task(stack).unwrap());
+        // One session per broker slot; a slot that isn't enabled idles.
+        for slot in 0..gateway_core::config::MQTT_BROKERS {
+            spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
+        }
+        web::spawn(&spawner, stack);
     }
 
     can::send_can_message(
