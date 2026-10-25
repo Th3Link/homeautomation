@@ -173,9 +173,52 @@ impl HeatingManual {
     }
 }
 
+/// What the heating controller says about its manual mode, so that nobody has
+/// to guess: [`HeatingManualState`](crate::can_message_type::CanMessageType::HeatingManualState).
+///
+/// Wire layout (2 bytes): `[flags, relays]`. Flag bit 0: manual mode is on.
+/// `relays` has bit 0 = relay 6 … bit 4 = relay 10 for the ones that are on.
+/// The controller sends it when something changes and every 5 s while
+/// manual mode is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeatingManualState {
+    pub enabled: bool,
+    pub relays_on: u8,
+}
+
+impl HeatingManualState {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, DecodeError> {
+        if data.len() < 2 {
+            return Err(DecodeError);
+        }
+        Ok(Self {
+            enabled: data[0] & 1 != 0,
+            relays_on: data[1] & 0b1_1111,
+        })
+    }
+
+    pub fn to_bytes(&self) -> [u8; 2] {
+        [u8::from(self.enabled), self.relays_on & 0b1_1111]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_state_roundtrips_and_masks_unknown_relay_bits() {
+        let state = HeatingManualState {
+            enabled: true,
+            relays_on: 0b1_0100,
+        };
+        assert_eq!(state.to_bytes(), [1, 0b1_0100]);
+        assert_eq!(HeatingManualState::from_bytes(&state.to_bytes()), Ok(state));
+        let decoded = HeatingManualState::from_bytes(&[0, 0xFF]).unwrap();
+        assert!(!decoded.enabled);
+        assert_eq!(decoded.relays_on, 0b1_1111);
+        assert_eq!(HeatingManualState::from_bytes(&[1]), Err(DecodeError));
+    }
 
     #[test]
     fn manual_roundtrips_and_pins_the_layout() {

@@ -25,5 +25,6 @@ pub mod ds18b20;
 pub mod error;
 pub mod extension;
 pub mod heating;
+pub mod heating_manual;
 pub mod relais;
 pub mod relais_manager;

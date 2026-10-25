@@ -9,7 +9,7 @@
 
 use super::devices::DeviceName;
 use super::error::ApiError;
-use super::json::with_status;
+use super::json::{json, with_status};
 use crate::device_list::DEVICE_LIST;
 use gateway_core::can_message_type::CanMessageType;
 use gateway_core::command::{self, CanSend, SaveDeviceFields, Target, MAX_SENDS};
@@ -20,7 +20,7 @@ use gateway_core::web::{
 };
 use heapless::{String, Vec};
 use picoserve::response::{IntoResponse, Json, StatusCode};
-use picoserve::routing::{parse_path_segment, post, put, PathRouter};
+use picoserve::routing::{get, parse_path_segment, post, put, PathRouter};
 use picoserve::Router;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,10 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
             (DEVICES, device(), "/lamps", parse_path_segment::<u8>()),
             put(lamps),
         )
-        .route((DEVICES, device(), "/heating/manual"), put(heating_manual))
+        .route(
+            (DEVICES, device(), "/heating/manual"),
+            get(heating_manual_state).put(heating_manual),
+        )
         .route((DEVICES, device(), "/heating/target"), put(heating_target))
         .route((DEVICES, device(), "/heating/energy"), put(heating_energy))
         .route(
@@ -239,6 +242,42 @@ async fn heating(
     send_all(sends).await
 }
 
+#[derive(Serialize)]
+struct ManualState {
+    /// Manual mode is on.
+    enabled: bool,
+    /// The relays (6-10) that are on.
+    relays: Vec<u8, 5>,
+}
+
+/// What the controller says about its manual mode; off if it says nothing.
+async fn heating_manual_state(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
+    let status = crate::heating_state::manual_status(device_key(&name).await?).await;
+    let relays = (6..=10u8)
+        .filter(|relay| status.relays_on & (1 << (relay - 6)) != 0)
+        .collect();
+    json(&ManualState {
+        enabled: status.enabled,
+        relays,
+    })
+    .await
+}
+
+/// A heating in manual mode takes no commands but the manual ones.
+async fn not_in_manual_mode(name: &DeviceName) -> Result<(), ApiError> {
+    if crate::heating_state::manual_status(device_key(name).await?)
+        .await
+        .enabled
+    {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "manual_mode",
+            "the heating is in manual mode; end it first",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct HeatingManualBody {
     /// Manual mode on (the relays 6-10 go off) or off (the controller has them back).
@@ -274,6 +313,7 @@ async fn heating_target(
     name: DeviceName,
     Json(body): Json<HeatingTargetBody>,
 ) -> Result<impl IntoResponse, ApiError> {
+    not_in_manual_mode(&name).await?;
     let raw = celsius_to_raw(body.flow_c).ok_or(ApiError::invalid("flow_c must be -50…150"))?;
     let msg = gateway_core::heating_message::HeatingTarget {
         flow_target_raw: raw,
@@ -286,6 +326,7 @@ async fn heating_energy(
     name: DeviceName,
     Json(body): Json<HeatingEnergyBody>,
 ) -> Result<impl IntoResponse, ApiError> {
+    not_in_manual_mode(&name).await?;
     let msg = gateway_core::heating_message::HeatingEnergy {
         power_w: body.power_w,
         rod_enabled: body.rod_enabled,
@@ -297,6 +338,7 @@ async fn heating_emergency(
     name: DeviceName,
     Json(body): Json<HeatingEmergencyBody>,
 ) -> Result<impl IntoResponse, ApiError> {
+    not_in_manual_mode(&name).await?;
     if body.stage > 3 {
         return Err(ApiError::invalid("stage must be 0…3"));
     }

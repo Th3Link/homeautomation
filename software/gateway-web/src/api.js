@@ -89,6 +89,7 @@ export const devices = {
     put(`/devices/${seg(device)}/lamps/${bank}`, { value, bitmask }),
   heating: (device, kind, body) => put(`/devices/${seg(device)}/heating/${kind}`, body),
   // Manual (commissioning) mode of the heating controller's relays 6-10.
+  heatingManualState: (device) => get(`/devices/${seg(device)}/heating/manual`),
   heatingManual: (device, enabled, relay, on) =>
     put(`/devices/${seg(device)}/heating/manual`, relay === undefined ? { enabled } : { enabled, relay, on }),
 };

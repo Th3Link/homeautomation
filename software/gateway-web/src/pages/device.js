@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import * as api from '../api.js';
 import { FirmwareUpload } from '../firmware-upload.js';
 import { SensorTable } from './sensors.js';
@@ -145,54 +145,38 @@ const MANUAL_RELAYS = [
   [9, 'Mixer towards cold'],
   [10, 'Circuit pump'],
 ];
-const MANUAL_TIMEOUT_MS = 10 * 60 * 1000;
-
 function HeatingManual({ d }) {
   const id = d.name || d.key;
-  const [manual, setManual] = useState(false);
-  const [on, setOn] = useState({});
-  const timer = useRef(null);
-
-  // The controller ends manual mode itself after 10 minutes without a
-  // switch, and never says so: this follows the same clock.
-  const rearm = () => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      setManual(false);
-      setOn({});
-    }, MANUAL_TIMEOUT_MS);
-  };
-  useEffect(() => () => clearTimeout(timer.current), []);
+  // What the controller says: it reports its manual mode every few seconds.
+  const { data, reload } = useLoad(() => api.devices.heatingManualState(id), 3000);
+  const manual = !!(data && data.enabled);
+  const on = (relay) => !!(data && data.relays.includes(relay));
 
   const toggleMode = async () => {
     const enable = !manual;
     if (await run(() => api.devices.heatingManual(id, enable), enable ? 'Manual mode on: valves, mixer and pump are off' : 'Manual mode off: the controller has them back')) {
-      setManual(enable);
-      setOn({});
-      if (enable) rearm();
-      else clearTimeout(timer.current);
+      setTimeout(reload, 800);
     }
   };
 
   const toggle = (relay) => async () => {
-    const next = !on[relay];
-    if (await run(() => api.devices.heatingManual(id, true, relay, next), `Relay ${relay} ${next ? 'on' : 'off'}`)) {
-      setOn({ ...on, [relay]: next });
-      rearm();
+    if (await run(() => api.devices.heatingManual(id, true, relay, !on(relay)), `Relay ${relay} ${on(relay) ? 'off' : 'on'}`)) {
+      setTimeout(reload, 800);
     }
   };
 
   // The two mixer directions must never be on together.
-  const blocked = (relay) => (relay === 8 && on[9]) || (relay === 9 && on[8]);
+  const blocked = (relay) => (relay === 8 && on(9)) || (relay === 9 && on(8));
 
   return html`
     <${Section} title="Manual mode"
-      aside=${html`<${Button} kind=${manual ? 'danger' : ''} onClick=${toggleMode}>${manual ? 'End manual mode' : 'Start manual mode'}<//>`}>
-      <p class="muted">For commissioning: the controller leaves valves, mixer and pump alone (they all go off when this starts) and you switch them one by one. The heating rod is never switchable here. It ends by itself after 10 minutes without a switch, and the controller then has them back.</p>
+      aside=${html`<${Button} kind=${manual ? 'danger' : ''} disabled=${!data} onClick=${toggleMode}>${manual ? 'End manual mode' : 'Start manual mode'}<//>`}>
+      <p class="muted">For commissioning, venting and the like: the controller leaves valves, mixer and pump alone (they all go off when this starts) and you switch them one by one. It stays on until you end it, however long that takes — only a restart of the controller ends it too. While it is on, commands for the heating (from MQTT, too) are dropped, so the heating rod goes off. The rod is never switchable here.</p>
+      ${manual && html`<p class="badge warn">Manual mode is on</p>`}
       <div class="manual">
         ${MANUAL_RELAYS.map(
-          ([relay, label]) => html`<button key=${relay} class=${on[relay] ? 'primary' : ''} disabled=${!manual || blocked(relay)} onClick=${toggle(relay)}>
-            <span>${label}</span><small>relay ${relay}: ${on[relay] ? 'on' : 'off'}</small>
+          ([relay, label]) => html`<button key=${relay} class=${on(relay) ? 'primary' : ''} disabled=${!manual || blocked(relay)} onClick=${toggle(relay)}>
+            <span>${label}</span><small>relay ${relay}: ${on(relay) ? 'on' : 'off'}</small>
           </button>`,
         )}
       </div>

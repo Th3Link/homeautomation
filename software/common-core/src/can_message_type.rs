@@ -64,6 +64,8 @@ pub enum CanMessageType {
     HeatingEmergency = 162,
     /// Heating controller: manual (commissioning) mode of the relays 6-10.
     HeatingManual = 163,
+    /// Heating controller: whether manual mode is on and which of its relays are.
+    HeatingManualState = 164,
     /// Not part of the wire protocol. The original C++'s `switch` on
     /// `MSG_ID_t` silently drops unrecognized bytes; representing that as a
     /// typed fallback (rather than refusing to build a [`CanMessageType`]
@@ -130,6 +132,7 @@ mod tests {
             (CanMessageType::HeatingEnergy, 161),
             (CanMessageType::HeatingEmergency, 162),
             (CanMessageType::HeatingManual, 163),
+            (CanMessageType::HeatingManualState, 164),
         ];
 
         for &(variant, byte) in known {

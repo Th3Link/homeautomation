@@ -13,7 +13,7 @@
 //! `relais::relais_handler`), so nothing can switch the heating rod behind
 //! the controller's back.
 
-use crate::can::DEVICE_TYPE;
+use crate::can::{send_can_message, DEVICE_TYPE};
 use crate::config::{self, config, TANK_SENSOR_KEY_BASE};
 use crate::console_log;
 use crate::error::{report_error, Component, ErrorCode, Severity};
@@ -27,8 +27,12 @@ use cancomponents_core::heating::{
     HeatingStatus, MixerDrive, RodReason, TargetInput, CIRCUIT_PUMP_RELAY, MIXER_COLD_RELAY,
     MIXER_HOT_RELAY, ROD_RELAYS, TANK_SENSORS, VALVE_RELAYS,
 };
+use cancomponents_core::heating_manual::{
+    is_manual_relay, ManualMode, FIRST_MANUAL_RELAY, LAST_MANUAL_RELAY,
+};
 use cancomponents_core::heating_message::{
-    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingManual, HeatingTarget,
+    millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingManual, HeatingManualState,
+    HeatingTarget,
 };
 use cancomponents_core::relais::{Message as RelaisMessage, State};
 use core::cell::Cell;
@@ -45,6 +49,8 @@ pub const CONTROL_PERIOD: Duration = Duration::from_millis(500);
 const MAX_READING_AGE: Duration = Duration::from_secs(25);
 /// The relay states are sent again this often, in case one was lost.
 const RESYNC_PERIOD: Duration = Duration::from_secs(10);
+/// While manual mode is on, its state goes out this often.
+const MANUAL_STATE_PERIOD: Duration = Duration::from_secs(5);
 /// A condition that persists is reported again after this long.
 const REPORT_REPEAT: Duration = Duration::from_secs(60);
 
@@ -202,6 +208,17 @@ async fn apply_manual(message: HeatingManual) -> Result<(), &'static str> {
 /// Handles the heating CAN messages. Malformed ones are reported and
 /// dropped, and leave the previous value to time out on its own.
 pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
+    // In manual mode nobody else tells the heating what to do.
+    if manual_active()
+        && matches!(
+            id.msg_type,
+            CanMessageType::HeatingTarget
+                | CanMessageType::HeatingEnergy
+                | CanMessageType::HeatingEmergency
+        )
+    {
+        return;
+    }
     let decoded = match id.msg_type {
         CanMessageType::HeatingTarget => HeatingTarget::from_bytes(data).map(inject_target),
         CanMessageType::HeatingEnergy => HeatingEnergy::from_bytes(data).map(inject_energy),
@@ -239,71 +256,50 @@ pub async fn heating_handler(id: CanId, data: &[u8], _remote_request: bool) {
     }
 }
 
-/// How long the manual mode lasts after its last use.
-const MANUAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// The manual (commissioning) mode, see [`ManualMode`]: it stays on until it
+/// is turned off, and a restart of the node ends it.
+static MANUAL: Shared<Cell<ManualMode>> = BlockingMutex::new(Cell::new(ManualMode::new()));
 
-/// When the manual mode runs out; `None` while the controller is in charge.
-static MANUAL_UNTIL: Shared<Cell<Option<Instant>>> = BlockingMutex::new(Cell::new(None));
-/// Which of the relays 6-10 the console has switched on in manual mode
-/// (index = relay - 6).
-static MANUAL_ON: Shared<Cell<[bool; 5]>> = BlockingMutex::new(Cell::new([false; 5]));
-/// First relay the manual mode may switch; 0-5 are the heating rod.
-const FIRST_MANUAL_RELAY: usize = 6;
-/// Last relay the manual mode may switch (relay 11 is never controlled).
-const LAST_MANUAL_RELAY: usize = 10;
-
-/// Whether the console has taken over the relays 6-10 (see
+/// Whether the console or the bus has taken over the relays 6-10 (see
 /// [`set_manual`]).
 pub fn manual_active() -> bool {
-    MANUAL_UNTIL
-        .lock(Cell::get)
-        .is_some_and(|until| Instant::now() < until)
+    MANUAL.lock(|cell| cell.get().enabled())
 }
 
-/// Seconds until the manual mode ends by itself, if it is on.
-pub fn manual_seconds_left() -> Option<u64> {
-    let until = MANUAL_UNTIL.lock(Cell::get)?;
-    until
-        .checked_duration_since(Instant::now())
-        .map(|left| left.as_secs())
-}
-
-/// Turns the manual (commissioning) mode on or off. While it is on the
-/// controller leaves the relays 6-10 alone — valves, mixer and pump — so
-/// they can be switched one by one with [`manual_relay`]; the heating rod
-/// (relays 0-5) stays under the controller's care, and its safety limits,
-/// all the time. Turning it off, or letting it time out after 10 minutes
-/// without a command, switches the relays 6-10 off and hands them back,
-/// with the mixer finding its position again.
+/// Turns the manual mode on or off. While it is on the controller leaves the
+/// relays 6-10 alone — valves, mixer and pump — so they can be switched one
+/// by one with [`manual_relay`], and it takes no commands for the heating
+/// (`HeatingTarget`/`HeatingEnergy`/`HeatingEmergency` are dropped). The
+/// heating rod (relays 0-5) stays under the controller's care, and its
+/// safety limits, all the time; with its inputs gone it switches off
+/// straight away. Turning the mode off switches the relays 6-10 off and
+/// hands them back, with the mixer finding its position again. Turning it on
+/// when it is on changes nothing.
 pub fn set_manual(enabled: bool) {
-    MANUAL_UNTIL.lock(|cell| cell.set(enabled.then(|| Instant::now() + MANUAL_TIMEOUT)));
-    MANUAL_ON.lock(|cell| cell.set([false; 5]));
+    let was = manual_active();
+    MANUAL.lock(|cell| {
+        let mut mode = cell.get();
+        mode.set_enabled(enabled);
+        cell.set(mode);
+    });
+    if enabled && !was {
+        // Whatever was asked of the heating before is not wanted any more.
+        TARGET.lock(|cell| cell.set(None));
+        ENERGY.lock(|cell| cell.set(None));
+        EMERGENCY.lock(|cell| cell.set(None));
+    }
 }
 
 /// Switches one of the relays 6-10 by hand. Only in manual mode, and never
 /// both mixer directions at once.
 pub async fn manual_relay(num: usize, on: bool) -> Result<(), &'static str> {
-    if !(FIRST_MANUAL_RELAY..=LAST_MANUAL_RELAY).contains(&num) {
-        return Err("only relays 6-10 can be switched by hand");
-    }
-    if !manual_active() {
-        return Err("the controller drives this relay; use `heating-manual on` first");
-    }
-    let index = num - FIRST_MANUAL_RELAY;
-    let mut states = MANUAL_ON.lock(Cell::get);
-    if on {
-        let opposite = match num {
-            MIXER_HOT_RELAY => Some(MIXER_COLD_RELAY),
-            MIXER_COLD_RELAY => Some(MIXER_HOT_RELAY),
-            _ => None,
-        };
-        if opposite.is_some_and(|other| states[other - FIRST_MANUAL_RELAY]) {
-            return Err("the other mixer direction is on; switch it off first");
-        }
-    }
-    states[index] = on;
-    MANUAL_ON.lock(|cell| cell.set(states));
-    MANUAL_UNTIL.lock(|cell| cell.set(Some(Instant::now() + MANUAL_TIMEOUT)));
+    let switched = MANUAL.lock(|cell| {
+        let mut mode = cell.get();
+        let result = mode.switch(num, on);
+        cell.set(mode);
+        result
+    });
+    switched.map_err(|error| error.message())?;
     send_relais_command(RelaisMessage {
         num,
         state: if on { State::On } else { State::Off },
@@ -312,6 +308,15 @@ pub async fn manual_relay(num: usize, on: bool) -> Result<(), &'static str> {
     })
     .await;
     Ok(())
+}
+
+/// What `HeatingManualState` says right now.
+fn manual_state() -> HeatingManualState {
+    let mode = MANUAL.lock(Cell::get);
+    HeatingManualState {
+        enabled: mode.enabled(),
+        relays_on: mode.relays_on_mask(),
+    }
 }
 
 /// What the controller did last, for the console.
@@ -404,7 +409,7 @@ async fn apply(applied: &mut [Option<State>; 11], wanted: [State; 11], force: bo
             if (*state == State::On) != pass_on {
                 continue;
             }
-            if manual && (FIRST_MANUAL_RELAY..=LAST_MANUAL_RELAY).contains(&num) {
+            if manual && is_manual_relay(num) {
                 continue;
             }
             if !force && applied[num] == Some(*state) {
@@ -456,6 +461,9 @@ async fn heating_task() {
     let mut ticker = Ticker::every(CONTROL_PERIOD);
 
     let mut was_manual = false;
+    // What the bus was last told about the manual mode.
+    let mut told_manual: Option<HeatingManualState> = None;
+    let mut told_manual_at = Instant::now();
 
     // Whatever state the relays were in before: everything off first.
     apply(
@@ -506,12 +514,25 @@ async fn heating_task() {
                     *state = State::Off;
                 }
                 apply(&mut applied, wanted, true, false).await;
+                // A relay may have been switched by hand since the mode
+                // began, before this cycle noticed: it stays on.
+                let mode = MANUAL.lock(Cell::get);
+                for num in FIRST_MANUAL_RELAY..=LAST_MANUAL_RELAY {
+                    if mode.is_on(num) {
+                        send_relais_command(RelaisMessage {
+                            num,
+                            state: State::On,
+                            duration: Duration::from_millis(0),
+                            bank: 0,
+                        })
+                        .await;
+                    }
+                }
             } else {
                 // Handing back: the mixer may be anywhere now, so it finds
                 // its way again. The first cycle's outputs below put the
                 // relays where the controller wants them.
                 console_log!("heating: automatic mode again");
-                MANUAL_UNTIL.lock(|cell| cell.set(None));
                 controller.restart_circuit();
                 force = true;
             }
@@ -519,6 +540,18 @@ async fn heating_task() {
         }
         if force {
             last_resync = now;
+        }
+
+        // Tell the bus about the manual mode when it changes, and while it is
+        // on every few seconds, so that the gateway (and a browser) can show
+        // it and notices when it is gone.
+        let state = manual_state();
+        if told_manual != Some(state)
+            || (state.enabled && now.duration_since(told_manual_at) >= MANUAL_STATE_PERIOD)
+        {
+            send_can_message(CanMessageType::HeatingManualState, &state.to_bytes(), false).await;
+            told_manual = Some(state);
+            told_manual_at = now;
         }
         apply(&mut applied, relay_states(&outputs), force, manual).await;
 

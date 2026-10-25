@@ -185,6 +185,11 @@ an old value replayed that way would look fresh to the node. A body that
 doesn't parse, or a device that can't be resolved, is dropped silently like
 for the other command topics.
 
+While a heating controller is in **manual mode** (set from the web UI or the
+node's console, see [`api-rest.md`](api-rest.md)) all three are dropped —
+by the gateway, which knows the state from the node's reports, and by the
+node itself. The rod is off then, whoever publishes.
+
 ### `canbus/lamp_command/<device>`
 
 Body: `<value>/<bitmask>[/<bank>]` — `value` decimal, `bitmask`
