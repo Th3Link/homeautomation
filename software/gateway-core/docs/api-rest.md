@@ -1,7 +1,11 @@
 # REST API
 
-The gateway's web server (port 80) offers this API under `/api/v1` and, at
-the other paths, the browser UI that uses it (`software/gateway-web`). Why
+The gateway's web server offers this API under `/api/v1` and, at the other
+paths, the browser UI that uses it (`software/gateway-web`). It is served
+over HTTPS on port 443; port 80 answers `308 Permanent Redirect` to the
+same URL on `https://` (the method and body are kept). `web-https off` on
+the console serves everything over plain HTTP on port 80 instead
+([ADR 0018](adr/0018-https-certificate-management.md)). Why
 it looks like this: [ADR 0014](adr/0014-rest-api-by-resource.md). It replaces
 the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
@@ -29,8 +33,9 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
   has not been seen on the bus is `404`.
 - **`:slot`** is `primary` or `secondary`, see
   [`protocol-mqtt.md`](protocol-mqtt.md).
-- **Capacity:** the server handles three connections at a time and refuses
-  more; a client retries.
+- **Capacity:** the server holds two HTTPS connections at a time and serves
+  them one after the other (one TLS session at a time); more are refused,
+  a client retries.
 
 ## System and bus
 
@@ -107,9 +112,30 @@ package before sending.
 | `PUT /device-types/:type/firmware?crc32=…` | every node of a type at once, with the old streaming protocol (no acknowledgement). The web UI sends an image to the devices of a type one after the other through the per-device route instead |
 | `GET /firmware/job` | `state` (`idle`, `running`, `done`, `failed`), `target`, `total`, `sent` (for a device: the bytes it has acknowledged), `protocol` (`blocks`, `legacy`), `retries` (blocks sent again), `error` |
 
+## HTTPS certificate
+
+One device key (ECDSA P-256, never exported) and the configured FQDN; the
+certificate is self-signed, uploaded (from the gateway's CSR) or enrolled
+over EST. A new certificate replaces the active one only if it parses,
+carries the device key, names the FQDN and isn't expired; without a usable
+certificate the gateway makes a self-signed one. Certificates and keys are
+uploaded as the raw request body (PEM, or DER for a single certificate),
+up to 16 KiB.
+
+| Route | |
+|---|---|
+| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `ntp_server`, `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the same facts, `count` CA certificates) or `null`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
+| `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server`. A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
+| `POST /tls/self-signed` | `{"validity_years"}` (optional): a new self-signed certificate. `204` |
+| `GET /tls/csr` | the PKCS#10 request for the device key and the FQDN, `application/pkcs10` PEM |
+| `PUT /tls/certificate` | the signed certificate with its chain (switches the mode to `manual`); `422` with `key_mismatch`, `fqdn_mismatch`, `expired`, `not_yet_valid`, `unparsable` or `chain_too_long` if it isn't usable. `204` |
+| `PUT /tls/trust-anchor`, `DELETE` | the CA certificate(s) the EST server must chain to. `204` |
+| `PUT /tls/est/identity`, `DELETE` | the EST device identity: one PEM body with the certificate(s) and the private key; the key can't be read back. `204` |
+| `POST /tls/est/enroll` | enroll (or renew) now; `409 not_est_mode` outside EST mode. `202` |
+
 ## The browser UI
 
-`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/devices/:device` answer with `index.html`,
+`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/devices/:device` answer with `index.html`,
 `/assets/app.js` and `/assets/style.css` with the rest, all gzip'd and part
 of the firmware (`gateway-hardware/src/web/assets.rs`). Edit the sources in
 `software/gateway-web/src` and run `npm run build` there: the result in

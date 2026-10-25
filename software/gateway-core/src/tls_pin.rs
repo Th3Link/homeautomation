@@ -10,30 +10,8 @@
 //! the same key, and needs no certificate authority, no host name and no
 //! clock.
 
+use crate::x509::der::tlv;
 use heapless::Vec;
-
-/// Splits the DER element at the start of `input` into
-/// `(tag, content, rest)`.
-fn tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
-    let (&tag, rest) = input.split_first()?;
-    let (&first, rest) = rest.split_first()?;
-    let (len, rest) = if first < 0x80 {
-        (usize::from(first), rest)
-    } else {
-        let count = usize::from(first & 0x7F);
-        if count == 0 || count > 3 || rest.len() < count {
-            return None;
-        }
-        let len = rest[..count]
-            .iter()
-            .fold(0usize, |len, byte| (len << 8) | usize::from(*byte));
-        (len, &rest[count..])
-    };
-    if rest.len() < len {
-        return None;
-    }
-    Some((tag, &rest[..len], &rest[len..]))
-}
 
 /// The public key of an X.509 certificate (DER).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -24,6 +24,10 @@
 /// Re-exported from [`common_core`], shared with `cancomponents-core`.
 pub use common_core::DecodeError;
 
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
 /// The CAN wire-format types shared with the CAN node firmware
 /// (`cancomponents-core`) — re-exported from [`common_core`] so existing
 /// `crate::can_id`/`crate::can_message_type`/`crate::device_type`/
@@ -40,6 +44,7 @@ pub mod config;
 pub mod device_list;
 pub mod docs;
 pub mod error;
+pub mod est;
 pub mod helper;
 pub mod lamp;
 pub mod relais;
@@ -49,3 +54,4 @@ pub mod sensor_table;
 pub mod tls_pin;
 pub mod topics;
 pub mod web;
+pub mod x509;

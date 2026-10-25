@@ -53,6 +53,19 @@ impl Content for JsonBody {
 }
 
 impl JsonBuffer {
+    /// `value` rendered, as a body that doesn't borrow it (for a value that
+    /// borrows locals of the handler).
+    pub fn rendered(mut self, value: &impl Serialize) -> Result<JsonBody, ApiError> {
+        let len = serde_json_core::to_slice(value, &mut self.0[..]).map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "response_too_large",
+                "the response does not fit the buffer",
+            )
+        })?;
+        Ok(JsonBody { buffer: self, len })
+    }
+
     /// `value` as a JSON response with the given status.
     pub fn render_with_status(
         mut self,

@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { Device } from './pages/device.js';
 import { Devices } from './pages/devices.js';
 import { Gateway } from './pages/gateway.js';
+import { Https } from './pages/https.js';
 import { Mqtt } from './pages/mqtt.js';
 import { Sensors } from './pages/sensors.js';
 import { Link, match, usePath } from './router.js';
@@ -15,6 +16,7 @@ const routes = [
   { path: '/sensors', title: 'Sensors', page: Sensors },
   { path: '/mqtt', title: 'MQTT', page: Mqtt },
   { path: '/gateway', title: 'Gateway', page: Gateway },
+  { path: '/https', title: 'HTTPS', page: Https },
 ];
 
 const nav = [
@@ -22,6 +24,7 @@ const nav = [
   ['/sensors', 'Sensors'],
   ['/mqtt', 'MQTT'],
   ['/gateway', 'Gateway'],
+  ['/https', 'HTTPS'],
 ];
 
 function App() {

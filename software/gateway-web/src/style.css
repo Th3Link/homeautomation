@@ -65,17 +65,25 @@ th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color
 .field > span { font-size: 0.85rem; color: var(--muted); }
 .field small { color: var(--muted); font-size: 0.78rem; }
 input, select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.45rem 0.6rem; width: 100%; }
-input[type='checkbox'] { width: auto; }
+input[type='checkbox'], input[type='radio'] { width: auto; }
 input[type='file'] { padding: 0.3rem; }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .check { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0; }
+/* One of several options with an explanation under its name. */
+.choice { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; align-items: start; padding: 0.4rem 0; cursor: pointer; }
+.choice input { width: auto; margin: 0.2rem 0 0; }
+.choice span { display: grid; gap: 0.1rem; }
 
 .buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.buttons + .buttons { margin-top: 0.75rem; }
 button { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.45rem 0.9rem; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: progress; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--bad); border-color: var(--bad); }
+/* A link or file picker that looks like a button (CSR download, uploads). */
+a.button, label.button { display: inline-block; font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 0.45rem 0.9rem; cursor: pointer; text-decoration: none; }
+a.button:hover, label.button:hover { border-color: var(--accent); }
 
 .inline { width: 8rem; }
 .actions { white-space: nowrap; text-align: right; }
