@@ -90,5 +90,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "96ffff37df343edbbf038bf23c45bc6269bc5bc1",
+  "date": "2026-10-25T21:27:26+01:00",
+  "subject": "Merge pull request #11 from Th3Link/feat/heating-control",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 421768,
+    "iram": 18964,
+    "dram_static": 36232,
+    "stack_budget": 160376,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443371,
+    "iram": 16036,
+    "dram_static": 36020,
+    "stack_budget": 160584,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
