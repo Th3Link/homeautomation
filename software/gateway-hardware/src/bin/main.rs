@@ -8,7 +8,9 @@ use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
-use gateway_hardware::{can, config, console, console_log, ethernet, flash, mqtt, update, web};
+use gateway_hardware::{
+    can, cert, config, console, console_log, ethernet, flash, https, mqtt, update, wall_clock, web,
+};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -23,8 +25,9 @@ async fn main(spawner: Spawner) -> ! {
 
     // The heap lives in the RAM the ESP32's ROM leaves free above the
     // normal data segment (`dram2`, ~96 KB), so it costs the statics nothing.
-    // It holds the web server's tasks (see `web`) and the RSA signature
-    // check of TLS; everything else stays on heapless/static allocation.
+    // It holds the web server's tasks (see `web`), the one MbedTLS session
+    // of HTTPS/EST (see `https`) and the RSA signature check of the MQTT
+    // TLS; everything else stays on heapless/static allocation.
     esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 94 * 1024);
 
     // TLS needs unpredictable random numbers; without a radio the hardware
@@ -57,6 +60,11 @@ async fn main(spawner: Spawner) -> ! {
     .await;
 
     update::init().await;
+
+    // The HTTPS key and certificate (made on first boot), before the web
+    // server needs them.
+    https::init();
+    cert::init().await;
 
     // Ethernet is the only network path (ADR 0013). A DHCP client, so
     // nothing needs configuring before the gateway is reachable; the
@@ -93,7 +101,9 @@ async fn main(spawner: Spawner) -> ! {
         for slot in 0..gateway_core::config::MQTT_BROKERS {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
-        web::spawn(&spawner, stack);
+        spawner.spawn(wall_clock::sntp_task(stack).unwrap());
+        spawner.spawn(cert::manager_task(stack).unwrap());
+        web::spawn(&spawner, stack, cert::https_enabled().await);
     }
 
     can::send_can_message(

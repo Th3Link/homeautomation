@@ -105,7 +105,9 @@ impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareCheck
 // Constructed in place: by value it would pass through the stack.
 static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
-static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
+// DHCP, DNS, two MQTT brokers, three web connections, the EST client and
+// SNTP, plus one spare.
+static NET_RESOURCES: StaticCell<StackResources<10>> = StaticCell::new();
 
 /// Peripherals/pins Ethernet needs from `main.rs` — grouped since there are
 /// nine of them and they're always passed together.

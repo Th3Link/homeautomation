@@ -38,5 +38,5 @@ the broker is authenticated by its **public key**, pinned by the user:
   one: 94 KiB in the otherwise unused `dram2` region of the ESP32.
 - The broker has to speak TLS 1.3 and offer that cipher suite; every
   current Mosquitto/OpenSSL does.
-- The same TLS code can't be used as an HTTPS server (client-only); that is
-  a separate piece of work.
+- The same TLS code can't be used as an HTTPS server (client-only); the web
+  server uses MbedTLS instead ([ADR 0018](0018-https-certificate-management.md)).
