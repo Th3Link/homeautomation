@@ -67,6 +67,7 @@ function Relays({ d, kind }) {
     run(() => api.devices[kind](id, number, state, Math.round(duration * 1000)), `${shutter ? 'Rollershutter' : 'Relay'} ${number}: ${state}`);
   return html`
     <${Section} title=${shutter ? 'Rollershutter' : 'Relays'}>
+      ${d.device_type === 9 && html`<p class="muted">The heating controller drives relays 0-10 itself and ignores commands for them; only relay 11 can be switched here. For relays 6-10 see manual mode below.</p>`}
       <div class="row">
         <${Field} label="Number"><input type="number" min="1" max="16" value=${number} onInput=${(e) => setNumber(+e.target.value)} /><//>
         <${Field} label="Switch back after (s)" hint="0 = stay"><input type="number" min="0" step="0.1" value=${duration} onInput=${(e) => setDuration(+e.target.value)} /><//>
