@@ -56,16 +56,19 @@ pub enum CanMessageType {
     Ping = 156,
     PingDisable = 157,
     Echo = 158,
-    /// Heating controller: flow-temperature target and tank-mode request.
-    HeatingTarget = 160,
-    /// Heating controller: available (feed-in) power and heating-rod release.
-    HeatingEnergy = 161,
-    /// Heating controller: emergency operation with a fixed rod stage.
-    HeatingEmergency = 162,
-    /// Heating controller: manual (commissioning) mode of the relays 6-10.
-    HeatingManual = 163,
-    /// Heating controller: whether manual mode is on and which of its relays are.
-    HeatingManualState = 164,
+    // 160-164 were the first heating messages (target, energy, emergency,
+    // manual, manual state), one type each. They are retired: the numbers
+    // must not be used again, or a node that was not updated yet would read a
+    // new frame as an old one.
+    /// Heating controller: one command frame — flow target, available power,
+    /// emergency stage or manual mode, selected by an operation code in the
+    /// first byte.
+    HeatingCommand = 165,
+    /// Heating controller: its state, answered to an R frame.
+    HeatingState = 166,
+    /// Sensor management of a node: names, roles, the list. Selected by an
+    /// operation code, see [`crate::sensor_config`].
+    SensorConfig = 167,
     /// Not part of the wire protocol. The original C++'s `switch` on
     /// `MSG_ID_t` silently drops unrecognized bytes; representing that as a
     /// typed fallback (rather than refusing to build a [`CanMessageType`]
@@ -128,11 +131,9 @@ mod tests {
             (CanMessageType::Ping, 156),
             (CanMessageType::PingDisable, 157),
             (CanMessageType::Echo, 158),
-            (CanMessageType::HeatingTarget, 160),
-            (CanMessageType::HeatingEnergy, 161),
-            (CanMessageType::HeatingEmergency, 162),
-            (CanMessageType::HeatingManual, 163),
-            (CanMessageType::HeatingManualState, 164),
+            (CanMessageType::HeatingCommand, 165),
+            (CanMessageType::HeatingState, 166),
+            (CanMessageType::SensorConfig, 167),
         ];
 
         for &(variant, byte) in known {

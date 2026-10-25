@@ -15,6 +15,8 @@
 
 use crate::helper::mqtt_split;
 use crate::DecodeError;
+#[cfg(test)]
+use common_core::heating_message::HeatingCommand;
 use common_core::heating_message::{
     millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingTarget,
 };
@@ -181,7 +183,10 @@ mod tests {
     #[test]
     fn target_body_encodes_to_the_wire_message() {
         let msg = parse_target_body("45.5/1").unwrap();
-        assert_eq!(msg.to_bytes(), [0xD8, 0x02, 0x01]);
+        assert_eq!(
+            HeatingCommand::Target(msg).to_payload().unwrap().as_slice(),
+            [0x08, 0xD8, 0x02]
+        );
         let msg = parse_target_body("40/0").unwrap();
         assert!(!msg.tank_mode);
         assert_eq!(msg.flow_target_millicelsius(), 40_000);
@@ -229,7 +234,10 @@ mod tests {
         let msg = parse_energy_body("6200/1").unwrap();
         assert_eq!(msg.power_w, 6_200);
         assert!(msg.rod_enabled);
-        assert_eq!(msg.to_bytes(), [0x38, 0x18, 0, 0, 1]);
+        assert_eq!(
+            HeatingCommand::Energy(msg).to_payload().unwrap().as_slice(),
+            [0x09, 0x38, 0x18, 0, 0]
+        );
         let msg = parse_energy_body("-1500/0").unwrap();
         assert_eq!(msg.power_w, -1_500);
         assert!(!msg.rod_enabled);
@@ -249,7 +257,13 @@ mod tests {
         let msg = parse_emergency_body("2/60").unwrap();
         assert_eq!(msg.stage, 2);
         assert_eq!(msg.tank_target_millicelsius(), 60_000);
-        assert_eq!(msg.to_bytes(), [2, 0xC0, 0x03]);
+        assert_eq!(
+            HeatingCommand::Emergency(msg)
+                .to_payload()
+                .unwrap()
+                .as_slice(),
+            [0b0001_0010, 0xC0, 0x03]
+        );
         assert_eq!(parse_emergency_body("0/60").unwrap().stage, 0);
     }
 

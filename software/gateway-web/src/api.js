@@ -95,6 +95,12 @@ export const devices = {
 };
 
 export const sensors = {
+  // Names a sensor and/or gives it a role; `changes` has `name` and/or `role`
+  // (`none`, `tank0` … `tank6`, `flow`).
+  update: (device, slot, changes) => put(`/devices/${seg(device)}/sensors/${slot}`, changes),
+  // Asks the node for its sensor list (slots, names, roles).
+  refresh: (device) => post(`/devices/${seg(device)}/sensors/refresh`),
+  forget: (device) => post(`/devices/${seg(device)}/sensors/forget`),
   // All pages; of one device if `device` is given.
   async list(device) {
     const all = [];

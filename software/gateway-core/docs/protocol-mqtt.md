@@ -109,6 +109,15 @@ silently narrowing a wider value passed to it. A sub-id with any of its
 top 16 bits set produces a different-looking topic here than a
 "correct" 48-bit-aware formatter would.
 
+**Named sensors.** A sensor that has a name (up to 7 characters of
+`A-Z a-z 0-9 - _`, set from the web UI or the node's console, see
+[`protocol-can.md`](../../../docs/protocol-can.md)) is called by it instead
+of by `0x<sub_id>`: `canbus/temperature/HEIZUNG1/TANK-O1`, the way a device
+with a custom string is called by that and not by its key. The gateway asks a
+node for its sensors' names the first time it sees a reading of it (and again
+a minute later while it has heard nothing), so the very first readings after
+a start may still carry the hex id. Renaming a sensor changes its topic.
+
 ### `canbus/available/<hex>`
 
 Body: literal `"0x01"`. Published only as this gateway's own self-
@@ -186,9 +195,9 @@ doesn't parse, or a device that can't be resolved, is dropped silently like
 for the other command topics.
 
 While a heating controller is in **manual mode** (set from the web UI or the
-node's console, see [`api-rest.md`](api-rest.md)) all three are dropped —
-by the gateway, which knows the state from the node's reports, and by the
-node itself. The rod is off then, whoever publishes.
+node's console, see [`api-rest.md`](api-rest.md)) it drops all three, whoever
+sends them; the gateway forwards them regardless. The rod is off then,
+whoever publishes.
 
 ### `canbus/lamp_command/<device>`
 
