@@ -139,9 +139,13 @@ impl TDes {
 
     fn set_len_and_flags(&mut self, len: usize) {
         self.tdes1.set(len as u32 & RDES1_BUF1_SIZE_MASK);
-        self.tdes0.set(
-            (self.tdes0.get() & TDES0_CHAINED) | TDES0_FS | TDES0_LS | TDES0_IC | TDES0_CIC_FULL,
-        );
+        // The ESP32's checksum insertion is broken: it corrupts every second
+        // frame or so, and IPv6 frames it treats as IPv4 get both checksums
+        // written into their addresses. The network stack computes them there.
+        // Backport of esp-rs/esp-hal@0eb3e53 (`ethernet.tx_checksum_offload`).
+        let cic = if cfg!(esp32) { 0 } else { TDES0_CIC_FULL };
+        self.tdes0
+            .set((self.tdes0.get() & TDES0_CHAINED) | TDES0_FS | TDES0_LS | TDES0_IC | cic);
     }
 
     fn set_buffer_addr(&mut self, addr: *const u8) {

@@ -88,17 +88,14 @@ These aren't "bad", just genuinely unfinished relative to the original's
 feature set — tracked here so they don't get lost, distinct from the
 design-quality complaints above:
 
-- **HTTPS.** The web server (REST API and UI, [`api-rest.md`](api-rest.md))
-  speaks plain HTTP only, so the Basic Auth password crosses the LAN in the
-  clear. `embedded-tls` is client-only; a server needs another TLS library
-  (`mbedtls-rs` is the candidate, not tried on this chip and `esp-hal`) or an
-  own server handshake. picoserve takes any socket that implements its
-  `io::Socket` trait, so a TLS socket can slot in.
-- **Ethernet checksums.** The `esp-hal` Ethernet driver leaves the TCP/IP
-  checksums to the MAC, and the MAC gets them wrong for much of the traffic:
-  responses over a few hundred bytes never arrived. The stack computes them
-  itself now (`SoftwareChecksums` in `gateway-hardware/src/ethernet.rs`); the
-  cause in the driver or the silicon wasn't found.
+- **Patched copy of `esp-hal`.** The ESP32 MAC's checksum insertion is
+  broken: it gets every second checksum or so wrong, and it writes the IPv4
+  checksums into some IPv6 frames, right over their addresses (so IPv6 TCP
+  connections stalled). esp-hal 1.2.2 always switches it on; the fix
+  (esp-rs/esp-hal@0eb3e53) is on esp-hal's main but in no release yet, so
+  the workspace builds a patched copy of 1.2.2
+  ([`software/patches`](../../patches/README.md)). It goes once a release has
+  the fix.
 - **CAN-bus MQTT logging passthrough** (`canbus/log/0x<hex>`, toggled by
   the `mqtt_logging` RPC verb in the original) is speced in
   [`protocol-mqtt.md`](protocol-mqtt.md#canbuslog0xhex-planned-in-the-original-not-currently-wired-up)

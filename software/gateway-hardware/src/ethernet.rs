@@ -56,13 +56,13 @@ type RawDriver = Ethernet<'static, Async, GenericPhy>;
 type EthDriver = SoftwareChecksums<RawDriver>;
 
 /// Passes everything through to the Ethernet driver, but has the network
-/// stack compute the checksums itself.
+/// stack compute and check all checksums itself.
 ///
-/// The driver leaves them to the MAC (descriptor "checksum insertion"), and
-/// that produces wrong TCP checksums for a good part of the segments: the
-/// peer drops them, so responses of more than a few hundred bytes never
-/// arrived (and uploads crawled along on retransmissions). With a correct
-/// checksum already in the frame, what the MAC then inserts is right.
+/// The MAC's checksum insertion gets a good part of them wrong (and writes
+/// into the addresses of IPv6 frames); the patched esp-hal in
+/// `software/patches` switches it off, which makes the stack fill them in.
+/// This also has the stack check received ones, rather than trusting the
+/// same MAC's receive checksum engine alone.
 pub struct SoftwareChecksums<D>(D);
 
 impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareChecksums<D> {
