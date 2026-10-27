@@ -27,8 +27,9 @@ use picoserve::routing::{get, post, PathRouter, RequestHandlerService};
 use picoserve::{ResponseSent, Router};
 use serde::{Deserialize, Serialize};
 
-/// The largest certificate/key upload.
-const UPLOAD_MAX: usize = 16 * 1024;
+/// The largest certificate/key upload: room for what can be stored (6 KiB of
+/// DER, as PEM), and small enough for the heap next to the TLS session.
+const UPLOAD_MAX: usize = 10 * 1024;
 
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     router
@@ -53,9 +54,8 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
 
 fn api_error(error: CertError) -> ApiError {
     let status = match error {
-        CertError::Storage | CertError::Key | CertError::NoMemory => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        CertError::Storage | CertError::Key => StatusCode::INTERNAL_SERVER_ERROR,
+        CertError::NoMemory => StatusCode::SERVICE_UNAVAILABLE,
         CertError::Rejected(_) => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::BAD_REQUEST,
     };
@@ -280,12 +280,12 @@ async fn csr() -> Result<impl IntoResponse, ApiError> {
 }
 
 async fn delete_trust_anchor() -> Result<impl IntoResponse, ApiError> {
-    cert::set_trust_anchor(&[]).await.map_err(api_error)?;
+    cert::set_trust_anchor(&mut []).await.map_err(api_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_identity() -> Result<impl IntoResponse, ApiError> {
-    cert::set_est_identity(&[], &[]).await.map_err(api_error)?;
+    cert::set_est_identity(&mut []).await.map_err(api_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -324,14 +324,19 @@ impl RequestHandlerService<(), ()> for Upload {
             Err(ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "bad_size",
-                "the body must be 1 byte to 16 KiB",
+                "the body must be 1 byte to 10 KiB",
             ))
         } else {
-            let mut data: Vec<u8> = alloc::vec![0u8; size];
-            let mut reader = request.body_connection.body().reader();
-            match reader.read_exact(&mut data).await {
-                Ok(()) => Ok(data),
-                Err(_) => Err(ApiError::invalid("the body ended early")),
+            let mut data: Vec<u8> = Vec::new();
+            if data.try_reserve_exact(size).is_err() {
+                Err(api_error(CertError::NoMemory))
+            } else {
+                data.resize(size, 0);
+                let mut reader = request.body_connection.body().reader();
+                match reader.read_exact(&mut data).await {
+                    Ok(()) => Ok(data),
+                    Err(_) => Err(ApiError::invalid("the body ended early")),
+                }
             }
         };
         let connection = request.body_connection.finalize().await?;
@@ -340,9 +345,9 @@ impl RequestHandlerService<(), ()> for Upload {
             Err(error) => Err(error),
             Ok(mut data) => {
                 let result = match self.0 {
-                    Target::Certificate => cert::install_certificate(&data).await,
-                    Target::TrustAnchor => cert::set_trust_anchor(&data).await,
-                    Target::Identity => cert::set_est_identity(&data, &data).await,
+                    Target::Certificate => cert::install_certificate(&mut data).await,
+                    Target::TrustAnchor => cert::set_trust_anchor(&mut data).await,
+                    Target::Identity => cert::set_est_identity(&mut data).await,
                 };
                 // An identity upload holds a private key.
                 crate::cert::wipe(&mut data);
