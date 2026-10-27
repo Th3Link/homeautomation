@@ -113,5 +113,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "e7f590a59eff46b89a4ce57f679619ce52783126",
+  "date": "2026-10-27T11:27:56+01:00",
+  "subject": "Merge pull request #13 from Th3Link/renovate/p384-0.x",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 421768,
+    "iram": 18964,
+    "dram_static": 36232,
+    "stack_budget": 160376,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443371,
+    "iram": 16036,
+    "dram_static": 36020,
+    "stack_budget": 160584,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
