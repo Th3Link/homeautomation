@@ -8,6 +8,12 @@ members = [
     "software/cancomponents-core",
     "software/cancomponents-hardware",
 ]
+# Patched copies of upstream crates (see software/patches/README.md); each is
+# its own package, tested on its own.
+exclude = ["software/patches"]
+
+[patch.crates-io]
+esp-hal = { path = "software/patches/esp-hal" }
 
 [workspace.package]
 edition = "2021"

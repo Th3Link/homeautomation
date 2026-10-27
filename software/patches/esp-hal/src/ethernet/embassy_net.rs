@@ -155,11 +155,18 @@ impl<'d, P: Phy> Driver for Ethernet<'d, Async, P> {
         caps.max_burst_size = Some(self.tx.len());
         // Checksums are offloaded to hardware in both directions (RX COE + TX
         // insertion via the descriptor CIC bits), so smoltcp does neither.
-        caps.checksum.ipv4 = Checksum::None;
-        caps.checksum.tcp = Checksum::None;
-        caps.checksum.udp = Checksum::None;
-        caps.checksum.icmpv4 = Checksum::None;
-        caps.checksum.icmpv6 = Checksum::None;
+        // Except on the ESP32, which has no working TX insertion (see
+        // `TDes::set_len_and_flags`): there smoltcp computes them.
+        let checksum = if cfg!(esp32) {
+            Checksum::Tx
+        } else {
+            Checksum::None
+        };
+        caps.checksum.ipv4 = checksum;
+        caps.checksum.tcp = checksum;
+        caps.checksum.udp = checksum;
+        caps.checksum.icmpv4 = checksum;
+        caps.checksum.icmpv6 = checksum;
         caps
     }
 
