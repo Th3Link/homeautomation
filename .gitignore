@@ -8,3 +8,7 @@ software/*/target/
 software/**/*.bin
 software/**/*.hexdump
 **/nvs.csv
+
+# Building a patched crate on its own (tests, clippy).
+software/patches/*/target/
+software/patches/*/Cargo.lock

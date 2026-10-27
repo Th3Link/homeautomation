@@ -18,8 +18,10 @@ all of its fixes.
 | `smoltcp` | 0.13.1 | SLAAC configures every prefix of a Router Advertisement, not just the last (`wire::NdiscOptionIter`) | Issue smoltcp-rs/smoltcp#1165; no PR yet |
 | `smoltcp` | 0.13.1 | Routers' M/O flags and RDNSS servers (RFC 8106): `Interface::slaac_router_flags`, `Interface::slaac_dns_servers` | No PR yet |
 | `smoltcp` | 0.13.1 | SLAAC no longer polls without end after three unanswered Router Solicitations | No issue or PR yet |
+| `embassy-net` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease` | Needs the smoltcp patches above; no PR yet |
 
-The smoltcp copy has its own tests (`cargo test --lib` in
+Building a copy on its own (tests, clippy) uses the other copies through
+`software/patches/.cargo/config.toml`. The smoltcp copy has its own tests (`cargo test --lib` in
 `software/patches/smoltcp`, about 670). Building the gateway shows a dozen
 warnings from it: they are upstream's, for the feature set the gateway
 uses, and don't fail `clippy -D warnings` (the copy is no workspace
