@@ -120,7 +120,8 @@ over EST. A new certificate replaces the active one only if it parses,
 carries the device key, names the FQDN and isn't expired; without a usable
 certificate the gateway makes a self-signed one. Certificates and keys are
 uploaded as the raw request body (PEM, or DER for a single certificate),
-up to 16 KiB.
+up to 16 KiB. What an EST server has to support:
+[`est-server.md`](est-server.md).
 
 | Route | |
 |---|---|
