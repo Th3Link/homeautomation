@@ -136,5 +136,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "10824553f2559e13b8e8ca486b2d62f74efbf1dc",
+  "date": "2026-10-27T12:46:48+01:00",
+  "subject": "Merge pull request #15 from Th3Link/renovate/sha2-0.x",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 421768,
+    "iram": 18964,
+    "dram_static": 36232,
+    "stack_budget": 160376,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443371,
+    "iram": 16036,
+    "dram_static": 36020,
+    "stack_budget": 160584,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
