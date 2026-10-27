@@ -127,6 +127,23 @@ enum Commands<'a> {
     WebUsername(&'a str),
     /// Set the web UI's Basic Auth password.
     WebPassword(&'a str),
+    /// Serve the web UI over HTTPS on port 443 with port 80 redirecting
+    /// (on, the default), or over plain HTTP on port 80 (off: the way back
+    /// in if HTTPS doesn't work). Takes effect after a restart.
+    #[set(one_of = ["on", "off"])]
+    WebHttps(OnOff),
+    /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
+    /// servers and the time.
+    Network,
+    /// Show the HTTPS certificate: mode, FQDN, validity, status.
+    TlsStatus,
+    /// Set the FQDN the HTTPS certificate is for (empty: the hostname). In
+    /// self-signed mode a new certificate is made right away.
+    TlsFqdn(&'a str),
+    /// Make a new self-signed HTTPS certificate (and switch to that mode).
+    TlsSelfSigned,
+    /// Set the NTP server the time comes from (default pool.ntp.org).
+    NtpServer(&'a str),
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
     /// Restart the gateway.
@@ -333,6 +350,14 @@ async fn handle_command(
             )
             .await
         }
+        Commands::WebHttps(v) => {
+            respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
+        }
+        Commands::Network => cmd_network(writer).await,
+        Commands::TlsStatus => cmd_tls_status(writer).await,
+        Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
+        Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
+        Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,
         Commands::Ping => {
             send_can_message(CanMessageType::Available, &[], true).await;
             respond(writer, "ping sent").await
@@ -579,4 +604,214 @@ async fn cmd_mqtt_insecure(slot: usize, insecure: bool) -> String<LINE_CAP> {
         return fmt_msg(format_args!("failed to persist {name}"));
     }
     fmt_msg(format_args!("{name} set to {insecure}"))
+}
+
+async fn cmd_web_https(on: bool) -> String<LINE_CAP> {
+    match crate::cert::set_https_enabled(on).await {
+        Ok(()) if on => str_msg("web: HTTPS on port 443, port 80 redirects (after restart)"),
+        Ok(()) => str_msg("web: plain HTTP on port 80 (after restart)"),
+        Err(_) => str_msg("failed to persist web-https"),
+    }
+}
+
+async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    use gateway_core::x509::time::Rfc3339;
+    let status = crate::cert::status().await;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "https: {}, mode {}, fqdn {}",
+            if status.https_enabled { "on" } else { "off" },
+            status.settings.mode.code(),
+            status.effective_fqdn
+        )),
+    )
+    .await?;
+    match &status.certificate {
+        Some((info, state, origin)) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!(
+                    "certificate: {} ({}), issuer {}",
+                    state.code(),
+                    origin.code(),
+                    info.issuer
+                )),
+            )
+            .await?;
+            respond(
+                writer,
+                &fmt_msg(format_args!(
+                    "valid {} .. {}",
+                    Rfc3339(info.not_before),
+                    Rfc3339(info.not_after)
+                )),
+            )
+            .await?;
+            let f = &info.fingerprint;
+            respond(
+                writer,
+                &fmt_msg(format_args!(
+                    "SHA-256 {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}...",
+                    f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]
+                )),
+            )
+            .await?;
+        }
+        None => respond(writer, "certificate: none").await?,
+    }
+    respond(
+        writer,
+        if status.time_known {
+            "time: known (SNTP)"
+        } else {
+            "time: unknown (no SNTP answer yet)"
+        },
+    )
+    .await
+}
+
+async fn cmd_tls_fqdn(fqdn: &str) -> String<LINE_CAP> {
+    let update = crate::cert::SettingsUpdate {
+        fqdn: Some(fqdn),
+        ..Default::default()
+    };
+    match crate::cert::update_settings(update).await {
+        Ok(()) => fmt_msg(format_args!("tls fqdn: {fqdn}")),
+        Err(e) => fmt_msg(format_args!("tls fqdn refused: {}", e.code())),
+    }
+}
+
+async fn cmd_tls_self_signed() -> String<LINE_CAP> {
+    // Switching the mode to self-signed makes the certificate by itself.
+    let result = if crate::cert::settings().await.mode == crate::cert::Mode::SelfSigned {
+        crate::cert::generate_self_signed(None).await
+    } else {
+        let update = crate::cert::SettingsUpdate {
+            mode: Some(crate::cert::Mode::SelfSigned),
+            ..Default::default()
+        };
+        crate::cert::update_settings(update).await
+    };
+    match result {
+        Ok(()) => str_msg("tls: new self-signed certificate"),
+        Err(e) => fmt_msg(format_args!("tls: failed: {}", e.code())),
+    }
+}
+
+async fn cmd_ntp_server(server: &str) -> String<LINE_CAP> {
+    let update = crate::cert::SettingsUpdate {
+        ntp_server: Some(server),
+        ..Default::default()
+    };
+    match crate::cert::update_settings(update).await {
+        Ok(()) => fmt_msg(format_args!("ntp server: {server} (next sync)")),
+        Err(e) => fmt_msg(format_args!("ntp server refused: {}", e.code())),
+    }
+}
+
+async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    let Some(net) = crate::ethernet::info().await else {
+        return respond(writer, "network: not started (no Ethernet PHY)").await;
+    };
+    let m = net.mac;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "link: {}, MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            if net.link_up { "up" } else { "down" },
+            m[0],
+            m[1],
+            m[2],
+            m[3],
+            m[4],
+            m[5]
+        )),
+    )
+    .await?;
+
+    match net.v4 {
+        Some(v4) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("ipv4: {} (DHCP)", v4.address)),
+            )
+            .await?;
+            match v4.gateway {
+                Some(gateway) => {
+                    respond(writer, &fmt_msg(format_args!("ipv4 gateway: {gateway}"))).await?
+                }
+                None => respond(writer, "ipv4 gateway: none").await?,
+            }
+            for server in &v4.dns_servers {
+                respond(writer, &fmt_msg(format_args!("ipv4 dns: {server}"))).await?;
+            }
+        }
+        None => respond(writer, "ipv4: no DHCP lease").await?,
+    }
+
+    // The link-local address embassy-net derives from the MAC (EUI-64).
+    let link_local = core::net::Ipv6Addr::from([
+        0xfe,
+        0x80,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        m[0] ^ 0x02,
+        m[1],
+        m[2],
+        0xff,
+        0xfe,
+        m[3],
+        m[4],
+        m[5],
+    ]);
+    respond(
+        writer,
+        &fmt_msg(format_args!("ipv6 link-local: {link_local}/64")),
+    )
+    .await?;
+    match net.v6 {
+        Some(v6) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("ipv6: {} (SLAAC)", v6.address)),
+            )
+            .await?;
+            match v6.gateway {
+                Some(gateway) => {
+                    respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?
+                }
+                None => respond(writer, "ipv6 gateway: none").await?,
+            }
+            for server in &v6.dns_servers {
+                respond(writer, &fmt_msg(format_args!("ipv6 dns: {server}"))).await?;
+            }
+        }
+        None => respond(writer, "ipv6: no global address (no router advertisement)").await?,
+    }
+
+    let ntp = crate::cert::ntp_server().await;
+    match crate::wall_clock::now() {
+        Some(now) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!(
+                    "time: {} (SNTP from {ntp})",
+                    gateway_core::x509::time::Rfc3339(now)
+                )),
+            )
+            .await
+        }
+        None => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("time: unknown (no answer from {ntp} yet)")),
+            )
+            .await
+        }
+    }
 }

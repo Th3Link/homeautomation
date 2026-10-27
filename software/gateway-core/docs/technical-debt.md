@@ -21,6 +21,30 @@ is left of the problem is only the legacy path of the gateway:
 - a node whose firmware predates the block protocol is detected by a missing
   answer to `Begin` and updated the old way once; after that it takes blocks.
 
+## No secure boot, no flash encryption (secrets lie in flash in the clear)
+
+Nothing on the gateway (or the nodes) is protected against someone who holds
+the board: the bootloader accepts any signed-or-unsigned image, and the
+flash content can be read out over the serial port. What lives in that flash
+and would leak: the web and MQTT passwords, the pinned broker certificates
+and — once HTTPS lands — the device's HTTPS private key. To do:
+
+- **Encrypt the HTTPS private key** at rest, so a flash dump alone doesn't
+  give it away. Cheapest first step: wrap it with a key derived from the
+  chip's eFuse (or an eFuse-held key block read-protected from software),
+  independent of the full flash encryption below.
+- **Flash encryption** (ESP32 eFuse `FLASH_CRYPT`) for the whole `nvs`
+  partition and the images, which also covers the passwords above.
+- **Secure boot** (ESP32 V2, RSA-PSS signed images): only images signed with
+  our key boot. The OTA paths — the gateway's own `PUT /firmware/gateway` and
+  the CAN block updates of the nodes — then have to carry signed images, and
+  the signing key needs a place in the release process (CI secret, never in
+  the repo).
+
+Both are one-way eFuse burns on a board, so they need a recovery/test story
+(a sacrificial board first) and a decision on development builds before they
+are switched on. Status: not started.
+
 ## The `/control.json` RPC API is not good
 
 Carried over from the original almost mechanically (see "Legacy parity"

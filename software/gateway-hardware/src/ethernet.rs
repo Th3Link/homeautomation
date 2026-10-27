@@ -30,8 +30,11 @@
 //!   doesn't answer on MDIO and bring-up fails with `Phy(Timeout)`.
 
 use crate::console_log;
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
-use embassy_net::{Runner, Stack, StackResources};
+use embassy_net::{Runner, Stack, StackResources, StaticConfigV4, StaticConfigV6};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_hal::ethernet::clock::ApllClock;
 use esp_hal::ethernet::phy::generic::GenericPhy;
@@ -105,7 +108,54 @@ impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareCheck
 // Constructed in place: by value it would pass through the stack.
 static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
-static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
+// DHCP, DNS, two MQTT brokers, six web sockets (five HTTPS and the
+// redirect on port 80; plain HTTP uses three), the EST client and SNTP, plus
+// one spare. Keep in step with `web::HTTPS_TASKS`.
+static NET_RESOURCES: StaticCell<StackResources<13>> = StaticCell::new();
+
+/// A look at the network state, for the console's `network`.
+#[derive(Debug, Clone)]
+pub struct NetInfo {
+    pub link_up: bool,
+    pub mac: [u8; 6],
+    pub v4: Option<StaticConfigV4>,
+    /// The global address (SLAAC), its router and DNS servers.
+    pub v6: Option<StaticConfigV6>,
+}
+
+/// The stack lives in the network tasks (it can't be shared between
+/// tasks), so others ask [`info_task`] for a [`NetInfo`].
+static STARTED: AtomicBool = AtomicBool::new(false);
+static INFO_REQUEST: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static INFO: Signal<CriticalSectionRawMutex, NetInfo> = Signal::new();
+
+/// The current network state; `None` if the network isn't started.
+pub async fn info() -> Option<NetInfo> {
+    if !STARTED.load(Ordering::Relaxed) {
+        return None;
+    }
+    INFO.reset();
+    INFO_REQUEST.signal(());
+    embassy_time::with_timeout(Duration::from_secs(1), INFO.wait())
+        .await
+        .ok()
+}
+
+#[embassy_executor::task]
+async fn info_task(stack: Stack<'static>) {
+    loop {
+        INFO_REQUEST.wait().await;
+        let mac = match stack.hardware_address() {
+            embassy_net::HardwareAddress::Ethernet(mac) => mac.0,
+        };
+        INFO.signal(NetInfo {
+            link_up: stack.is_link_up(),
+            mac,
+            v4: stack.config_v4(),
+            v6: stack.config_v6(),
+        });
+    }
+}
 
 /// Peripherals/pins Ethernet needs from `main.rs` — grouped since there are
 /// nine of them and they're always passed together.
@@ -204,6 +254,8 @@ pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> St
     let (stack, runner) = embassy_net::new(eth, config, resources, seed);
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(address_log_task(stack).unwrap());
+    spawner.spawn(info_task(stack).unwrap());
+    STARTED.store(true, Ordering::Relaxed);
     stack
 }
 

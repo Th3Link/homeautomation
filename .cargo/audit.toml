@@ -2,12 +2,15 @@
 # rustsec/audit-check from the repository root.
 #
 # Both advisories below are about *secret-dependent* operations (private-key
-# decryption/signing, secret scalars). The gateway only ever *verifies*
-# signatures against the broker's public key it pinned (the TLS code in
-# gateway-hardware/src/tls.rs), which handles no secret, so the timing side
-# channels have nothing to leak. Neither can be fixed from here: `rsa` has no
-# fixed release, and the crypto-bigint 0.5 line is what `embedded-tls`,
-# `p256` and `p384` (all RustCrypto 0.13/0.16) are built on. Drop an entry
+# decryption/signing, secret scalars). The code they apply to only ever
+# *verifies* signatures against the MQTT broker's public key it pinned (the
+# TLS code in gateway-hardware/src/tls.rs), which handles no secret, so the
+# timing side channels have nothing to leak. Neither can be fixed from here:
+# `rsa` has no fixed release, and the crypto-bigint 0.5 line is what
+# `embedded-tls` and `p384` (RustCrypto 0.13) are built on. The one place the
+# gateway signs with a secret key in Rust, the HTTPS device key
+# (gateway-hardware/src/cert/key.rs), uses `p256` 0.14 on crypto-bigint 0.7.8,
+# which has the fix; TLS handshake signatures are MbedTLS's. Drop an entry
 # once its advisory can be fixed by a dependency update.
 
 [advisories]
