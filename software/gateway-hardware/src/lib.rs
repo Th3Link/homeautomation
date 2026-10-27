@@ -1,4 +1,7 @@
 #![no_std]
+// The web router (a type nested once per route) inside the TLS server
+// future is deeper than the default limit lets rustc lay out.
+#![recursion_limit = "256"]
 //! ESP32 firmware for the MQTT<->CAN home-automation gateway
 //! ("gateway-hardware"). Wire format and hardware-independent translation
 //! logic live in the `gateway-core` crate; everything in here talks to
@@ -12,15 +15,18 @@ pub use common_hardware::{flash, logging};
 
 pub mod can;
 pub mod can_update;
+pub mod cert;
 pub mod config;
 pub mod console;
 pub mod device_list;
 pub mod echo;
 pub mod ethernet;
 pub mod heating_state;
+pub mod https;
 pub mod mqtt;
 pub mod sensor_list;
 pub mod tls;
 pub mod translate;
 pub mod update;
+pub mod wall_clock;
 pub mod web;

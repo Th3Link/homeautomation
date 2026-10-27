@@ -1,5 +1,7 @@
 [target.xtensa-esp32-none-elf]
-runner = "espflash flash --partition-table ./partitions.csv --monitor --chip esp32 --erase-parts otadata"
+# 921600 baud: the image is ~2.3 MB (MbedTLS), at the default 115200 it
+# takes minutes to flash.
+runner = "espflash flash --partition-table ./partitions.csv --monitor --chip esp32 --erase-parts otadata --baud 921600"
 
 [env]
 

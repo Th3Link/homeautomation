@@ -26,5 +26,8 @@ allow = [
     "ISC",
     "0BSD",
     "BSD-3-Clause",
+    # const_format/konst, build-time helpers of mbedtls-rs-sys (the HTTPS
+    # server's TLS library, ADR 0018). Permissive, GPL-compatible.
+    "Zlib",
 ]
 confidence-threshold = 0.8

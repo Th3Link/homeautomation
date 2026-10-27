@@ -106,6 +106,19 @@ impl<const BUF: usize> ConfigStore<BUF> {
         heapless::Vec::from_slice(raw).ok()
     }
 
+    /// Reads a byte string into `out`; its length, or `None` if the key is
+    /// unset or the value doesn't fit.
+    pub async fn read_bytes(&mut self, key: impl Into<u8>, out: &mut [u8]) -> Option<usize> {
+        let raw: &[u8] = self
+            .map
+            .fetch_item(&mut self.buffer, &key.into())
+            .await
+            .ok()
+            .flatten()?;
+        out.get_mut(..raw.len())?.copy_from_slice(raw);
+        Some(raw.len())
+    }
+
     /// Stores a byte string (the empty slice stands for "nothing").
     pub async fn set_bytes(&mut self, key: impl Into<u8>, value: &[u8]) -> Result<(), ()> {
         self.map

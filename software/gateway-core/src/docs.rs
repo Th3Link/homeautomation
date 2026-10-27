@@ -79,6 +79,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0017-block-ota.md")]
     pub mod adr_0017_block_ota {}
+
+    #[doc = include_str!("../docs/adr/0018-https-certificate-management.md")]
+    pub mod adr_0018_https_certificate_management {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with
@@ -97,3 +100,7 @@ pub mod technical_debt {}
 /// The gateway's REST API and web UI.
 #[doc = include_str!("../docs/api-rest.md")]
 pub mod api_rest {}
+
+/// What an EST server has to support for the gateway's HTTPS certificate.
+#[doc = include_str!("../docs/est-server.md")]
+pub mod est_server {}

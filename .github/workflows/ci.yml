@@ -110,6 +110,10 @@ jobs:
           # espup asks the GitHub API for the toolchain release; without a
           # token all runners share 60 requests an hour and get a 403.
           GITHUB_TOKEN: ${{ github.token }}
+      - name: Install cmake and ninja
+        # gateway-hardware compiles MbedTLS from source (mbedtls-rs with
+        # `use-gcc`, ADR 0018); its build script runs for clippy and doc too.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
 
@@ -147,6 +151,10 @@ jobs:
           # espup asks the GitHub API for the toolchain release; without a
           # token all runners share 60 requests an hour and get a 403.
           GITHUB_TOKEN: ${{ github.token }}
+      - name: Install cmake and ninja
+        # gateway-hardware compiles MbedTLS from source (mbedtls-rs with
+        # `use-gcc`, ADR 0018); its build script runs for clippy and doc too.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build
       - name: Install espflash
         # Needed by build.rs, which shells out to `espflash save-image` to
         # turn the linked ELF into a flashable raw image.

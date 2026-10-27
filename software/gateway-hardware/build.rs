@@ -50,8 +50,12 @@ fn create_esp32_image() {
 
 fn vergen() -> Result<(), Box<dyn std::error::Error>> {
     let git2 = vergen_git2::Git2::all_git();
+    // VERGEN_BUILD_TIMESTAMP: the lower bound for the time until SNTP
+    // answered (see src/wall_clock.rs).
+    let build = vergen_git2::Build::all_build();
     vergen_git2::Emitter::default()
         .add_instructions(&git2)?
+        .add_instructions(&build)?
         .emit()?;
 
     Ok(())

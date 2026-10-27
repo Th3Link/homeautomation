@@ -157,6 +157,42 @@ pub fn parse_hex_u64(text: &str) -> Option<u64> {
     u64::from_str_radix(text.strip_prefix("0x")?, 16).ok()
 }
 
+/// The host of a `Host` header without its port (`gw.example.com:80` →
+/// `gw.example.com`, `[fe80::1]:80` → `[fe80::1]`), or `None` if it has
+/// characters no host name or address literal has (it ends up in a
+/// `Location` header).
+pub fn host_without_port(header: &str) -> Option<&str> {
+    let header = header.trim();
+    let host = if header.starts_with('[') {
+        &header[..=header.find(']')?]
+    } else {
+        header.split(':').next()?
+    };
+    let allowed =
+        |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']');
+    (!host.is_empty() && host.len() <= 253 && host.bytes().all(allowed)).then_some(host)
+}
+
+/// Writes `https://<host><path>[?<query>]`, the target of the HTTP to
+/// HTTPS redirect. A path or query with characters a request line can't
+/// carry is replaced by `/`.
+pub fn https_location(
+    out: &mut impl core::fmt::Write,
+    host: &str,
+    path: &str,
+    query: Option<&str>,
+) -> core::fmt::Result {
+    let clean = |s: &str| s.bytes().all(|b| b.is_ascii_graphic());
+    if !path.starts_with('/') || !clean(path) || !query.is_none_or(clean) {
+        return write!(out, "https://{host}/");
+    }
+    write!(out, "https://{host}{path}")?;
+    if let Some(query) = query {
+        write!(out, "?{query}")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -310,5 +346,42 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn host_header_without_port() {
+        assert_eq!(host_without_port("gw.example.com"), Some("gw.example.com"));
+        assert_eq!(
+            host_without_port("gw.example.com:80"),
+            Some("gw.example.com")
+        );
+        assert_eq!(host_without_port("192.168.1.5:8080"), Some("192.168.1.5"));
+        assert_eq!(host_without_port("[fe80::1]:80"), Some("[fe80::1]"));
+        assert_eq!(host_without_port("[fe80::1]"), Some("[fe80::1]"));
+        assert_eq!(host_without_port(""), None);
+        assert_eq!(host_without_port("evil.com\r\nSet-Cookie: x"), None);
+        assert_eq!(host_without_port("a/b"), None);
+    }
+
+    #[test]
+    fn redirect_location() {
+        let mut out = String::<128>::new();
+        https_location(
+            &mut out,
+            "gw.example.com",
+            "/api/v1/system",
+            Some("a=1&b=2"),
+        )
+        .unwrap();
+        assert_eq!(out, "https://gw.example.com/api/v1/system?a=1&b=2");
+        let mut out = String::<128>::new();
+        https_location(&mut out, "gw", "/", None).unwrap();
+        assert_eq!(out, "https://gw/");
+        let mut out = String::<128>::new();
+        https_location(&mut out, "gw", "*", None).unwrap();
+        assert_eq!(out, "https://gw/");
+        let mut out = String::<128>::new();
+        https_location(&mut out, "gw", "/x y", None).unwrap();
+        assert_eq!(out, "https://gw/");
     }
 }

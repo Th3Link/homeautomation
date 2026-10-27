@@ -15,15 +15,17 @@ export class ApiError extends Error {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The gateway serves only a few connections at a time and refuses the rest,
-// which looks like a network error: try those again before giving up.
+// which looks like a network error: try those again before giving up. A
+// string `body` is sent as it is (a PEM file), anything else as JSON.
 async function request(method, path, body) {
+  const raw = typeof body === 'string';
   for (let attempt = 1; ; attempt++) {
     let response;
     try {
       response = await fetch(BASE + path, {
         method,
-        headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        headers: body === undefined ? {} : { 'Content-Type': raw ? 'application/x-pem-file' : 'application/json' },
+        body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
       });
     } catch (e) {
       if (attempt >= 4) throw new ApiError(0, { message: 'gateway unreachable' });
@@ -65,6 +67,20 @@ export const mqtt = {
   trust: (slot) => post(`/mqtt/${slot}/trust`),
   certificate: (slot) => get(`/mqtt/${slot}/certificate`),
   forget: (slot) => del(`/mqtt/${slot}/certificate`),
+};
+
+// The HTTPS certificate (ADR 0018). Uploads take the file's text (PEM).
+export const tls = {
+  get: () => get('/tls'),
+  update: (changes) => patch('/tls', changes),
+  selfSigned: (validityYears) => post('/tls/self-signed', { validity_years: validityYears }),
+  csrUrl: () => `${BASE}/tls/csr`,
+  installCertificate: (pem) => put('/tls/certificate', pem),
+  setTrustAnchor: (pem) => put('/tls/trust-anchor', pem),
+  removeTrustAnchor: () => del('/tls/trust-anchor'),
+  setIdentity: (pem) => put('/tls/est/identity', pem),
+  removeIdentity: () => del('/tls/est/identity'),
+  enroll: () => post('/tls/est/enroll'),
 };
 
 export const devices = {
