@@ -14,6 +14,7 @@ exclude = ["software/patches"]
 
 [patch.crates-io]
 esp-hal = { path = "software/patches/esp-hal" }
+smoltcp = { path = "software/patches/smoltcp" }
 
 [workspace.package]
 edition = "2021"
