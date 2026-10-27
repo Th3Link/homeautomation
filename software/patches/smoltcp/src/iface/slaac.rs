@@ -412,41 +412,43 @@ impl Slaac {
 
     /// Get the next time the SLAAC state must be polled for updates.
     pub(crate) fn poll_at(&self, now: Instant) -> Option<Instant> {
-        match self.phase {
-            Phase::Discovering | Phase::Start => Some(self.retry_rs_at),
-            Phase::Maintaining => {
-                let prefix_at = self.prefix.values().filter_map(|prefix_info| {
-                    if prefix_info.is_valid(now) {
-                        Some(prefix_info.valid_until)
-                    } else {
-                        None
-                    }
-                });
-                let routes_at = self.routes.iter().filter_map(|r| {
-                    if r.is_valid(now) {
-                        Some(r.valid_until)
-                    } else {
-                        None
-                    }
-                });
-                let routers_at = self
-                    .routers
-                    .iter()
-                    .filter(|r| r.valid_until > now)
-                    .map(|r| r.valid_until);
-                let dns_at = self
-                    .dns_servers
-                    .iter()
-                    .filter(|s| s.valid_until > now)
-                    .map(|s| s.valid_until);
-                prefix_at
-                    .chain(routes_at)
-                    .chain(routers_at)
-                    .chain(dns_at)
-                    .min()
+        // The next solicitation, while there are any left: after the last
+        // one, `retry_rs_at` stays in the past.
+        let solicitation_at = match self.phase {
+            Phase::Discovering | Phase::Start if self.num_solicitations > 0 => {
+                Some(self.retry_rs_at)
             }
             _ => None,
-        }
+        };
+        // Expiries; advertisements may also come unsolicited, before the
+        // solicitations are done.
+        let prefix_at = self
+            .prefix
+            .values()
+            .filter(|info| info.is_valid(now))
+            .map(|info| info.valid_until);
+        let routes_at = self
+            .routes
+            .iter()
+            .filter(|r| r.is_valid(now))
+            .map(|r| r.valid_until);
+        let routers_at = self
+            .routers
+            .iter()
+            .filter(|r| r.valid_until > now)
+            .map(|r| r.valid_until);
+        let dns_at = self
+            .dns_servers
+            .iter()
+            .filter(|s| s.valid_until > now)
+            .map(|s| s.valid_until);
+        solicitation_at
+            .into_iter()
+            .chain(prefix_at)
+            .chain(routes_at)
+            .chain(routers_at)
+            .chain(dns_at)
+            .min()
     }
 }
 
@@ -513,6 +515,33 @@ mod test {
         slaac.rs_sent(now);
         assert_eq!(slaac.phase, Phase::None);
         assert!(slaac.poll_at(now).is_none());
+    }
+
+    #[test]
+    fn test_no_polling_after_the_last_solicitation() {
+        let mut slaac = Slaac::new();
+        let mut now = Instant::from_millis(1);
+        for _ in 0..MAX_RTR_SOLICITATIONS {
+            assert!(slaac.rs_required(now));
+            slaac.rs_sent(now);
+            now += RTR_SOLICITATION_INTERVAL;
+        }
+        // No router answered: nothing left to do, so no time to be woken
+        // at (it used to stay at the last retry time, in the past).
+        assert!(!slaac.rs_required(now));
+        assert_eq!(slaac.poll_at(now), None);
+        assert_eq!(slaac.poll_at(now + Duration::from_secs(60)), None);
+
+        // A router that comes up later is still taken.
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+        assert_eq!(slaac.phase, Phase::Maintaining);
+        assert_eq!(slaac.poll_at(now), Some(now + VALID));
     }
 
     #[test]
