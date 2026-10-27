@@ -159,5 +159,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "24ffe5661e01f11e8077bf638a5d068092fffa22",
+  "date": "2026-10-27T13:03:18+01:00",
+  "subject": "Merge pull request #16 from Th3Link/feat/https",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 421768,
+    "iram": 18964,
+    "dram_static": 36232,
+    "stack_budget": 160376,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443371,
+    "iram": 16036,
+    "dram_static": 36020,
+    "stack_budget": 160584,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
