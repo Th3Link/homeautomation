@@ -23,6 +23,7 @@ use crate::wall_clock;
 use alloc::string::String as HeapString;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
+use core::ops::Range;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -383,28 +384,50 @@ async fn activate(chain: &[u8], origin: Origin) -> Result<(), CertError> {
         .map_err(|_| CertError::Storage)
 }
 
-/// Splits uploaded data (PEM with one or more blocks, or a single DER
-/// certificate) into DER certificates.
-fn decode_certificates(data: &[u8]) -> Result<Vec<Vec<u8>>, CertError> {
-    let mut certs = Vec::new();
+/// The most certificates an upload may hold (a chain, or a CA bundle as
+/// trust anchor).
+const UPLOAD_CERTS: usize = 8;
+
+/// The certificates of an upload (PEM with one or more blocks, or DER, one
+/// or more concatenated), decoded where they are: their places in `data`.
+/// No copy, so that an upload fits the heap next to a TLS session.
+fn decode_certificates(
+    data: &mut [u8],
+) -> Result<heapless::Vec<Range<usize>, UPLOAD_CERTS>, CertError> {
+    let mut certs = heapless::Vec::new();
     if pem::is_pem(data) {
-        let text = core::str::from_utf8(data).map_err(|_| CertError::BadInput)?;
-        for (label, body) in pem::blocks(text) {
-            if label != "CERTIFICATE" {
-                continue;
-            }
-            let mut der = alloc::vec![0u8; body.len() * 3 / 4 + 3];
-            let len = pem::decode(body.as_bytes(), &mut der).map_err(|_| CertError::BadInput)?;
-            der.truncate(len);
-            certs.push(der);
+        let ends = pem::decode_in_place::<UPLOAD_CERTS>(data, "CERTIFICATE")
+            .map_err(|_| CertError::BadInput)?;
+        let mut start = 0;
+        for end in ends {
+            // As many as `ends` holds.
+            let _ = certs.push(start..end);
+            start = end;
         }
     } else {
-        certs.extend(split_concatenated(data).map(Vec::from));
+        let base = data.as_ptr() as usize;
+        for der in split_concatenated(data) {
+            let start = der.as_ptr() as usize - base;
+            certs
+                .push(start..start + der.len())
+                .map_err(|_| CertError::Rejected(Problem::TooLong))?;
+        }
     }
     if certs.is_empty() {
         return Err(CertError::BadInput);
     }
     Ok(certs)
+}
+
+/// `parts` one after the other, in a buffer allocated without panicking.
+fn concatenated<'a>(parts: impl Iterator<Item = &'a [u8]> + Clone) -> Result<Vec<u8>, CertError> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(parts.clone().map(<[u8]>::len).sum())
+        .map_err(|_| CertError::NoMemory)?;
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    Ok(out)
 }
 
 /// Checks a chain for the device key, the FQDN and the time, orders it leaf
@@ -415,18 +438,14 @@ async fn validated_chain<'a>(certs: impl Iterator<Item = &'a [u8]>) -> Result<Ve
     let chain = check::order_chain(certs, &point).map_err(CertError::Rejected)?;
     check::check_leaf(&chain[0], &point, &fqdn, wall_clock::clock())
         .map_err(CertError::Rejected)?;
-    let mut out = Vec::new();
-    for cert in &chain {
-        out.extend_from_slice(cert.der);
-    }
-    Ok(out)
+    concatenated(chain.iter().map(|cert| cert.der))
 }
 
 /// Installs an uploaded certificate (chain), PEM or DER, after checking it,
 /// and switches to the manual mode.
-pub async fn install_certificate(data: &[u8]) -> Result<(), CertError> {
+pub async fn install_certificate(data: &mut [u8]) -> Result<(), CertError> {
     let certs = decode_certificates(data)?;
-    let chain = validated_chain(certs.iter().map(Vec::as_slice)).await?;
+    let chain = validated_chain(certs.iter().map(|range| &data[range.clone()])).await?;
     activate(&chain, Origin::Manual).await?;
     // An uploaded certificate is the manual mode's, whatever the mode was:
     // EST or a new FQDN in self-signed mode would replace it otherwise.
@@ -470,7 +489,7 @@ async fn csr_der(fqdn: &str) -> Result<Vec<u8>, CertError> {
 
 /// Replaces the trust anchor (PEM or DER, one or more CA certificates);
 /// empty data removes it.
-pub async fn set_trust_anchor(data: &[u8]) -> Result<(), CertError> {
+pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
     if data.is_empty() {
         return store::TRUST_ANCHOR
             .write(&[])
@@ -478,11 +497,11 @@ pub async fn set_trust_anchor(data: &[u8]) -> Result<(), CertError> {
             .map_err(|_| CertError::Storage);
     }
     let certs = decode_certificates(data)?;
-    let mut all = Vec::new();
-    for der in &certs {
+    let certs = certs.iter().map(|range| &data[range.clone()]);
+    for der in certs.clone() {
         Certificate::parse(der).ok_or(CertError::Rejected(Problem::Unparsable))?;
-        all.extend_from_slice(der);
     }
+    let all = concatenated(certs)?;
     if all.len() > store::TRUST_ANCHOR.capacity() {
         return Err(CertError::Rejected(Problem::TooLong));
     }
@@ -499,10 +518,10 @@ pub async fn set_trust_anchor(data: &[u8]) -> Result<(), CertError> {
     Ok(())
 }
 
-/// Installs the EST device identity: its certificate (chain) and private key
-/// (PEM or DER). Empty data removes it. The key can't be read back.
-pub async fn set_est_identity(certificate: &[u8], private_key: &[u8]) -> Result<(), CertError> {
-    if certificate.is_empty() && private_key.is_empty() {
+/// Installs the EST device identity: its certificate (chain) and private key,
+/// both PEM in `data`. Empty data removes it. The key can't be read back.
+pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
+    if data.is_empty() {
         store::IDENTITY
             .write(&[])
             .await
@@ -513,23 +532,32 @@ pub async fn set_est_identity(certificate: &[u8], private_key: &[u8]) -> Result<
             .await
             .map_err(|_| CertError::Storage);
     }
-    let certs = decode_certificates(certificate)?;
-    let mut chain = Vec::new();
-    for der in &certs {
-        Certificate::parse(der).ok_or(CertError::Rejected(Problem::Unparsable))?;
-        chain.extend_from_slice(der);
-    }
-    let mut key_der = if pem::is_pem(private_key) {
-        let text = core::str::from_utf8(private_key).map_err(|_| CertError::BadInput)?;
+    // The key first: decoding the certificates overwrites `data`.
+    let mut key_der = {
+        let text = core::str::from_utf8(data).map_err(|_| CertError::BadInput)?;
         let (_, body) = pem::blocks(text)
             .find(|(label, _)| label.ends_with("PRIVATE KEY"))
             .ok_or(CertError::BadInput)?;
-        let mut der = alloc::vec![0u8; body.len() * 3 / 4 + 3];
+        let mut der = Vec::new();
+        der.try_reserve_exact(body.len() * 3 / 4 + 3)
+            .map_err(|_| CertError::NoMemory)?;
+        der.resize(body.len() * 3 / 4 + 3, 0);
         let len = pem::decode(body.as_bytes(), &mut der).map_err(|_| CertError::BadInput)?;
         der.truncate(len);
         der
-    } else {
-        Vec::from(private_key)
+    };
+    let chain = match decode_certificates(data).and_then(|certs| {
+        let certs = certs.iter().map(|range| &data[range.clone()]);
+        for der in certs.clone() {
+            Certificate::parse(der).ok_or(CertError::Rejected(Problem::Unparsable))?;
+        }
+        concatenated(certs)
+    }) {
+        Ok(chain) => chain,
+        Err(e) => {
+            key::wipe(&mut key_der);
+            return Err(e);
+        }
     };
     // MbedTLS must be able to use it.
     let usable = mbedtls_rs::PrivateKey::new(mbedtls_rs::X509::DER(&key_der), None).is_ok();
