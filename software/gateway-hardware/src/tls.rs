@@ -41,6 +41,9 @@ use embedded_tls::{
 use esp_hal::rng::{Trng, TrngSource};
 use gateway_core::tls_pin;
 use heapless::Vec;
+// embedded-tls 0.19 and rsa 0.9 are still on sha2 0.10 (digest 0.10): the
+// handshake transcript and the RSA-PSS digests take the copy rsa re-exports.
+use rsa::sha2 as handshake_sha2;
 use sha2::{Digest, Sha256};
 
 /// Largest server certificate (DER) that can be pinned or captured.
@@ -257,7 +260,7 @@ impl TlsVerifier<Aes128GcmSha256> for PinnedVerifier<'_> {
 
     fn verify_signature(&mut self, verify: CertificateVerifyRef) -> Result<(), TlsError> {
         let transcript = self.transcript.take().ok_or(TlsError::InternalError)?;
-        let hash = Digest::finalize(transcript);
+        let hash = handshake_sha2::Digest::finalize(transcript);
         let message = tls_pin::server_verify_message(hash.as_slice());
 
         let verified = match verify.signature_scheme {
@@ -278,10 +281,10 @@ impl TlsVerifier<Aes128GcmSha256> for PinnedVerifier<'_> {
                 key.verify(&message, &signature).is_ok()
             }
             SignatureScheme::RsaPssRsaeSha256 => {
-                verify_rsa_pss::<Sha256>(&self.key, &message, verify.signature)?
+                verify_rsa_pss::<handshake_sha2::Sha256>(&self.key, &message, verify.signature)?
             }
             SignatureScheme::RsaPssRsaeSha384 => {
-                verify_rsa_pss::<sha2::Sha384>(&self.key, &message, verify.signature)?
+                verify_rsa_pss::<handshake_sha2::Sha384>(&self.key, &message, verify.signature)?
             }
             _ => return Err(TlsError::InvalidSignatureScheme),
         };
@@ -298,7 +301,7 @@ impl TlsVerifier<Aes128GcmSha256> for PinnedVerifier<'_> {
 /// `RSAPublicKey` in `key`.
 fn verify_rsa_pss<D>(key: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, TlsError>
 where
-    D: Digest + sha2::digest::FixedOutputReset,
+    D: handshake_sha2::Digest + handshake_sha2::digest::FixedOutputReset,
 {
     use rsa::pkcs1::DecodeRsaPublicKey;
     use rsa::pss::{Signature, VerifyingKey};
