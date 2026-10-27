@@ -100,3 +100,7 @@ pub mod technical_debt {}
 /// The gateway's REST API and web UI.
 #[doc = include_str!("../docs/api-rest.md")]
 pub mod api_rest {}
+
+/// What an EST server has to support for the gateway's HTTPS certificate.
+#[doc = include_str!("../docs/est-server.md")]
+pub mod est_server {}

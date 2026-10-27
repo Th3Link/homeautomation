@@ -48,7 +48,8 @@ with `308 Permanent Redirect` to the same path on `https://` (308, unlike
   installed **trust anchor** and the URL's host name; there is no switch to
   turn that off. A first enrollment authenticates with an installed device
   identity (mTLS) if there is one; a renewal with the certificate being
-  renewed (RFC 7030 4.2.2).
+  renewed (RFC 7030 4.2.2). What the server has to support:
+  [`est-server.md`](../est-server.md).
 - Every new certificate is **checked completely before it replaces the
   active one**: it parses, carries the device key, names the FQDN in its
   SAN and is within its validity as far as the clock tells. The chain is
