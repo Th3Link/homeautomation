@@ -28,12 +28,25 @@ use esp_hal::timer::timg::TimerGroup;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+/// Called by `esp-backtrace` (feature `custom-halt`) after it has printed a
+/// panic: restart instead of halting forever, see
+/// `common_hardware::reset`.
+#[unsafe(no_mangle)]
+fn custom_halt() -> ! {
+    common_hardware::reset::restart_after_panic()
+}
+
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+
+    // `CoreSw` after a panic restart (see `custom_halt`) as well as after a
+    // deliberate reboot; a stream of them without a reboot request is a
+    // panic loop.
+    console_log!("reset reason: {:?}", esp_hal::system::reset_reason());
 
     flash::init(peripherals.FLASH);
     config::init().await;
