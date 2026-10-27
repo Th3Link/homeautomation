@@ -21,7 +21,9 @@ static UNIX_AT_BOOT: AtomicU32 = AtomicU32::new(0);
 const NTP_TO_UNIX: u64 = 2_208_988_800;
 const NTP_PORT: u16 = 123;
 const RESYNC: Duration = Duration::from_secs(6 * 3600);
-const RETRY: Duration = Duration::from_secs(60);
+/// Until the first answer: the first request after the link comes up is often
+/// lost while the neighbour is still being resolved.
+const RETRY: Duration = Duration::from_secs(10);
 
 /// The current Unix time, if a server has answered since boot.
 pub fn now() -> Option<i64> {
@@ -43,7 +45,7 @@ pub fn clock() -> Clock {
 }
 
 /// Asks the configured NTP server for the time, now and every six hours
-/// (every minute until the first answer).
+/// (every 10 s until a server has answered).
 #[embassy_executor::task]
 pub async fn sntp_task(stack: Stack<'static>) {
     let mut rx_meta = [PacketMetadata::EMPTY; 2];

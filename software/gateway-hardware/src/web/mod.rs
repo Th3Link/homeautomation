@@ -2,8 +2,8 @@
 //! it. See `gateway-core/docs/api-rest.md` for the routes.
 //!
 //! Every route sits behind [`BasicAuth`] (ADR 0008: no bypass, not even for
-//! read-only ones). One [`web_task`] serves one connection at a time, so
-//! [`TASKS`] of them are started; each builds the (zero-sized) router itself.
+//! read-only ones). One task serves one connection at a time, so several of
+//! them are started; each builds the (zero-sized) router itself.
 //!
 //! HTTPS (ADR 0018): the UI and the API are served over TLS on port 443
 //! with the certificate of [`crate::cert`]; port 80 only answers
@@ -35,15 +35,21 @@ use picoserve::response::{IntoResponse, StatusCode};
 use picoserve::routing::{get, post, Layer, Next, PathRouter};
 use picoserve::{Config, ResponseSent, Router, Timeouts};
 
-/// How many connections can be open at the same time: with HTTPS, all but
-/// the last task take TLS connections (served one after the other) and the
-/// last one answers the redirects on port 80.
-pub const TASKS: usize = 3;
+/// Plain HTTP (`web-https off`): connections served at the same time.
+const HTTP_TASKS: usize = 3;
+/// HTTPS: connections that can be open at the same time. They are served
+/// one after the other (one TLS session at a time), but each needs its own
+/// listening socket, or a browser's parallel connections are refused; so
+/// these tasks are cheap and share the session's buffers.
+const HTTPS_TASKS: usize = 5;
 const HTTP_PORT: u16 = 80;
 const HTTPS_PORT: u16 = 443;
 /// How long a TLS handshake may take (the ECDH and the signature are done
 /// in software on a 160 MHz core).
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long an accepted connection may stay silent before it is dropped
+/// (browsers open connections in advance and may never use them).
+const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(10);
 
 static SERVER_CONFIG: Config = Config::new(Timeouts {
     start_read_request: Duration::from_secs(5),
@@ -56,23 +62,35 @@ static SERVER_CONFIG: Config = Config::new(Timeouts {
 /// Starts the web server tasks on `stack`. `https`: see the module docs.
 pub fn spawn(spawner: &Spawner, stack: Stack<'static>, https: bool) {
     spawner.spawn(system::restart_task().unwrap());
-    for id in 0..TASKS {
-        spawner.spawn(web_task(id, stack, https).unwrap());
+    if https {
+        for _ in 0..HTTPS_TASKS {
+            spawner.spawn(https_task(stack).unwrap());
+        }
+        spawner.spawn(redirect_task(stack).unwrap());
+    } else {
+        for id in 0..HTTP_TASKS {
+            spawner.spawn(http_task(id, stack).unwrap());
+        }
     }
 }
 
-#[embassy_executor::task(pool_size = TASKS)]
-async fn web_task(id: usize, stack: Stack<'static>, https: bool) -> ! {
-    // The server's future, with the buffers it holds, is ~12 KB. On the heap
-    // (the otherwise unused RAM above the statics) it doesn't take away the
-    // stack's room the way the task's static storage would.
-    if !https {
-        alloc::boxed::Box::pin(serve_plain(id, stack)).await
-    } else if id + 1 < TASKS {
-        alloc::boxed::Box::pin(serve_tls(stack)).await
-    } else {
-        alloc::boxed::Box::pin(serve_redirect(id, stack)).await
-    }
+// The servers' futures, with the buffers they hold, live on the heap (the
+// otherwise unused RAM above the statics): there they don't take away the
+// stack's room the way the tasks' static storage would.
+
+#[embassy_executor::task(pool_size = HTTP_TASKS)]
+async fn http_task(id: usize, stack: Stack<'static>) -> ! {
+    alloc::boxed::Box::pin(serve_plain(id, stack)).await
+}
+
+#[embassy_executor::task(pool_size = HTTPS_TASKS)]
+async fn https_task(stack: Stack<'static>) -> ! {
+    alloc::boxed::Box::pin(serve_tls(stack)).await
+}
+
+#[embassy_executor::task]
+async fn redirect_task(stack: Stack<'static>) -> ! {
+    alloc::boxed::Box::pin(serve_redirect(HTTPS_TASKS, stack)).await
 }
 
 async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
@@ -98,16 +116,17 @@ async fn serve_redirect(id: usize, stack: Stack<'static>) -> ! {
         .into_never()
 }
 
-/// Port 443: accepts a connection, waits for the TLS slot, does the
-/// handshake and serves requests until the connection ends.
+/// Port 443: accepts a connection, waits until the client sends something,
+/// then for the TLS slot, and serves the connection ([`serve_session`]).
+///
+/// This future only holds the socket's buffers (~3 KB): several of these
+/// wait at the same time. The session's own future (the handshake and
+/// picoserve, ~20 KB) is put on the heap only while it runs, and only one
+/// runs at a time.
 async fn serve_tls(stack: Stack<'static>) -> ! {
-    use crate::https::{self, TcpStream, TlsConnection};
     use embassy_time::with_timeout;
-    use mbedtls_rs::{ServerSessionConfig, Session, SessionConfig};
 
-    let app = app();
-    let mut http_buffer = [0u8; 1536];
-    let mut tcp_rx = [0u8; 4096];
+    let mut tcp_rx = [0u8; 2048];
     let mut tcp_tx = [0u8; 1024];
     loop {
         let mut socket = embassy_net::tcp::TcpSocket::new(stack, &mut tcp_rx, &mut tcp_tx);
@@ -117,30 +136,44 @@ async fn serve_tls(stack: Stack<'static>) -> ! {
         socket.set_keep_alive(Some(Duration::from_secs(30)));
         socket.set_timeout(Some(Duration::from_secs(45)));
 
-        let slot = https::slot().await;
-        let session_config = match (https::tls(), crate::cert::server_credentials().await) {
-            (Some(tls), Some(credentials)) => Some((
-                tls,
-                SessionConfig::Server(ServerSessionConfig::new(credentials)),
-            )),
-            _ => None,
-        };
-        if let Some((tls, session_config)) = session_config {
-            if let Ok(mut session) = Session::new(tls, TcpStream(&mut socket), &session_config) {
-                if let Ok(Ok(())) = with_timeout(HANDSHAKE_TIMEOUT, session.connect()).await {
-                    if let Ok((read, write)) = session.split().await {
-                        let _ = picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
-                            .serve(TlsConnection { read, write })
-                            .await;
-                    }
-                    let _ = with_timeout(Duration::from_secs(1), session.close()).await;
-                }
-            }
+        // Only a connection that brings a ClientHello gets to wait for the
+        // slot.
+        let first = with_timeout(FIRST_BYTE_TIMEOUT, socket.read_with(|data| (0, data.len())));
+        if matches!(first.await, Ok(Ok(1..))) {
+            let mut slot = crate::https::slot().await;
+            alloc::boxed::Box::pin(serve_session(&mut socket, &mut slot)).await;
         }
-        drop(slot);
         socket.close();
         let _ = with_timeout(Duration::from_secs(1), socket.flush()).await;
         socket.abort();
+    }
+}
+
+/// One TLS connection: handshake, then requests until it ends.
+async fn serve_session(
+    socket: &mut embassy_net::tcp::TcpSocket<'_>,
+    buffers: &mut crate::https::Buffers,
+) {
+    use crate::https::{self, TcpStream, TlsConnection};
+    use embassy_time::with_timeout;
+    use mbedtls_rs::{ServerSessionConfig, Session, SessionConfig};
+
+    let (Some(tls), Some(credentials)) = (https::tls(), crate::cert::server_credentials().await)
+    else {
+        return;
+    };
+    let session_config = SessionConfig::Server(ServerSessionConfig::new(credentials));
+    let Ok(mut session) = Session::new(tls, TcpStream(socket), &session_config) else {
+        return;
+    };
+    if let Ok(Ok(())) = with_timeout(HANDSHAKE_TIMEOUT, session.connect()).await {
+        if let Ok((read, write)) = session.split().await {
+            let app = app();
+            let _ = picoserve::Server::new(&app, &SERVER_CONFIG, &mut buffers.http)
+                .serve(TlsConnection::new(read, write, &mut buffers.out))
+                .await;
+        }
+        let _ = with_timeout(Duration::from_secs(1), session.close()).await;
     }
 }
 
