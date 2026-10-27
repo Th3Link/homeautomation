@@ -621,6 +621,47 @@ impl<'a> fmt::Display for Repr<'a> {
     }
 }
 
+/// An iterator over the options of a Neighbor Discovery message, such as
+/// the several Prefix Information options a Router Advertisement can carry.
+///
+/// Options that don't parse are skipped, like [`super::NdiscRepr::parse`]
+/// does. Iteration ends at the first option whose length is zero or longer
+/// than the remaining data.
+#[derive(Debug, Clone)]
+pub struct Iter<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> Iter<'a> {
+    /// Iterates over the options in `data`, the payload of an NDISC message
+    /// (`Icmpv6Packet::payload`).
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Repr<'a>;
+
+    fn next(&mut self) -> Option<Repr<'a>> {
+        loop {
+            if self.data.len() < field::MIN_OPT_LEN {
+                return None;
+            }
+            let len = self.data[field::LENGTH] as usize * 8;
+            if len == 0 || len > self.data.len() {
+                self.data = &[];
+                return None;
+            }
+            let (option, rest) = self.data.split_at(len);
+            self.data = rest;
+            if let Ok(repr) = NdiscOption::new_checked(option).and_then(|o| Repr::parse(&o)) {
+                return Some(repr);
+            }
+        }
+    }
+}
+
 use crate::wire::pretty_print::{PrettyIndent, PrettyPrint};
 
 impl<T: AsRef<[u8]>> PrettyPrint for NdiscOption<T> {
@@ -776,5 +817,46 @@ mod test {
             Repr::parse(&NdiscOption::new_unchecked(&bytes)),
             Ok(Repr::Mtu(1500))
         );
+    }
+
+    #[test]
+    fn test_iter_yields_every_option() {
+        let mut second = PREFIX_OPT_BYTES;
+        second[31] = 0x02;
+        let mtu = [0x05, 0x01, 0x00, 0x00, 0x00, 0x00, 0x05, 0xdc];
+        // A Prefix Information option one block too short doesn't parse.
+        let short = [0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let mut bytes = std::vec::Vec::new();
+        for option in [&PREFIX_OPT_BYTES[..], &short, &mtu, &second] {
+            bytes.extend_from_slice(option);
+        }
+
+        let prefixes: std::vec::Vec<_> = super::Iter::new(&bytes)
+            .filter_map(|repr| match repr {
+                Repr::PrefixInformation(info) => Some(info.prefix),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            prefixes,
+            [
+                Ipv6Address::new(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Address::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)
+            ]
+        );
+        assert_eq!(super::Iter::new(&bytes).count(), 3);
+    }
+
+    #[test]
+    fn test_iter_stops_at_a_bad_length() {
+        let mtu = [0x05, 0x01, 0x00, 0x00, 0x00, 0x00, 0x05, 0xdc];
+        let zero = [0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0xdc];
+        let long = [0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x05, 0xdc];
+        for bad in [zero, long] {
+            let bytes = [mtu, bad, mtu].concat();
+            assert_eq!(super::Iter::new(&bytes).count(), 1);
+        }
+        // Trailing bytes too few for an option are ignored.
+        assert_eq!(super::Iter::new(&[0x05, 0x01, 0x00]).count(), 0);
     }
 }

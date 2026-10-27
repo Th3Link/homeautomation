@@ -1213,6 +1213,174 @@ fn test_router_advertisement_dual_stack_with_existing_ipv4_route(#[case] medium:
     );
 }
 
+/// An interface with SLAAC on, its link-local address set up, and the
+/// link-local address of a router on the link.
+#[cfg(all(feature = "medium-ethernet", feature = "proto-ipv6-slaac"))]
+struct SlaacLink {
+    device: crate::tests::TestingDevice,
+    iface: Interface,
+    sockets: SocketSet<'static>,
+    local_hw_addr: EthernetAddress,
+    local_ip_addr: Ipv6Cidr,
+    router_ip_addr: Ipv6Address,
+}
+
+#[cfg(all(feature = "medium-ethernet", feature = "proto-ipv6-slaac"))]
+impl SlaacLink {
+    const ROUTER_HW_ADDR: EthernetAddress = EthernetAddress([0x52, 0x54, 0x00, 0x00, 0x00, 0x00]);
+
+    fn new() -> Self {
+        let mut device = crate::tests::TestingDevice::new(Medium::Ethernet);
+        let local_hw_addr = EthernetAddress([0x02, 0x02, 0x02, 0x02, 0x02, 0x02]);
+        let ll_prefix = Ipv6Cidr::new(Ipv6Cidr::LINK_LOCAL_PREFIX.address(), 64);
+        let local_ip_addr =
+            Ipv6Cidr::from_link_prefix(&ll_prefix, HardwareAddress::Ethernet(local_hw_addr))
+                .unwrap();
+        let router_ip_addr =
+            Ipv6Cidr::from_link_prefix(&ll_prefix, HardwareAddress::Ethernet(Self::ROUTER_HW_ADDR))
+                .unwrap()
+                .address();
+
+        let mut config = Config::new(HardwareAddress::Ethernet(local_hw_addr));
+        config.slaac = true;
+        let mut iface = Interface::new(config, &mut device, Instant::ZERO);
+        iface.update_ip_addrs(|ip_addrs| {
+            ip_addrs.push(IpCidr::Ipv6(local_ip_addr)).unwrap();
+        });
+        let mut sockets = SocketSet::new(vec![]);
+        iface.poll(Instant::ZERO, &mut device, &mut sockets);
+
+        Self {
+            device,
+            iface,
+            sockets,
+            local_hw_addr,
+            local_ip_addr,
+            router_ip_addr,
+        }
+    }
+
+    /// The SLAAC address of this interface in `prefix`.
+    fn slaac_address(&self, prefix: Ipv6Address) -> IpCidr {
+        let prefix = Ipv6Cidr::new(prefix, 64);
+        IpCidr::Ipv6(
+            Ipv6Cidr::from_link_prefix(&prefix, HardwareAddress::Ethernet(self.local_hw_addr))
+                .unwrap(),
+        )
+    }
+
+    /// Has the interface receive a Router Advertisement with all of
+    /// `options` (the `NdiscRepr` it is built from holds one prefix at
+    /// most), then polls it at `now`.
+    fn advertise(
+        &mut self,
+        flags: NdiscRouterFlags,
+        router_lifetime: Duration,
+        options: &[NdiscOptionRepr],
+        now: Instant,
+    ) {
+        let advertisement = NdiscRepr::RouterAdvert {
+            hop_limit: 255,
+            flags,
+            router_lifetime,
+            reachable_time: Duration::ZERO,
+            retrans_time: Duration::ZERO,
+            lladdr: None,
+            mtu: None,
+            prefix_info: None,
+        };
+        let header_len = advertisement.buffer_len();
+        let options_len: usize = options.iter().map(NdiscOptionRepr::buffer_len).sum();
+        let mut icmp = vec![0u8; header_len + options_len];
+        Icmpv6Repr::Ndisc(advertisement).emit(
+            &self.router_ip_addr,
+            &IPV6_LINK_LOCAL_ALL_NODES,
+            &mut Icmpv6Packet::new_unchecked(&mut icmp[..header_len]),
+            &ChecksumCapabilities::default(),
+        );
+        let mut offset = header_len;
+        for option in options {
+            option.emit(&mut NdiscOption::new_unchecked(&mut icmp[offset..]));
+            offset += option.buffer_len();
+        }
+        Icmpv6Packet::new_unchecked(&mut icmp[..])
+            .fill_checksum(&self.router_ip_addr, &IPV6_LINK_LOCAL_ALL_NODES);
+
+        let ip_repr = IpRepr::Ipv6(Ipv6Repr {
+            src_addr: self.router_ip_addr,
+            dst_addr: IPV6_LINK_LOCAL_ALL_NODES,
+            next_header: IpProtocol::Icmpv6,
+            hop_limit: 255,
+            payload_len: icmp.len(),
+        });
+        let mut eth_bytes = vec![0u8; 14 + ip_repr.header_len() + icmp.len()];
+        let mut frame = EthernetFrame::new_unchecked(&mut eth_bytes);
+        frame.set_dst_addr(EthernetAddress([0x33, 0x33, 0, 0, 0, 1]));
+        frame.set_src_addr(Self::ROUTER_HW_ADDR);
+        frame.set_ethertype(EthernetProtocol::Ipv6);
+        ip_repr.emit(frame.payload_mut(), &ChecksumCapabilities::default());
+        frame.payload_mut()[ip_repr.header_len()..].copy_from_slice(&icmp);
+
+        self.iface.inner.process_ethernet(
+            &mut self.sockets,
+            PacketMeta::default(),
+            frame.into_inner(),
+            &mut self.iface.fragments,
+        );
+        self.iface.poll(now, &mut self.device, &mut self.sockets);
+    }
+}
+
+#[cfg(all(feature = "medium-ethernet", feature = "proto-ipv6-slaac"))]
+fn prefix_option(prefix: Ipv6Address, valid: u64) -> NdiscOptionRepr<'static> {
+    NdiscOptionRepr::PrefixInformation(NdiscPrefixInformation {
+        prefix,
+        prefix_len: 64,
+        flags: NdiscPrefixInfoFlags::ADDRCONF,
+        valid_lifetime: Duration::from_secs(valid),
+        preferred_lifetime: Duration::from_secs(valid / 2),
+    })
+}
+
+#[test]
+#[cfg(all(feature = "medium-ethernet", feature = "proto-ipv6-slaac"))]
+fn test_router_advertisement_with_two_prefixes() {
+    let global = Ipv6Address::new(0x2001, 0xdb8, 0x3, 0, 0, 0, 0, 0);
+    let ula = Ipv6Address::new(0xfd00, 0, 0, 0x7, 0, 0, 0, 0);
+
+    let mut link = SlaacLink::new();
+    link.advertise(
+        NdiscRouterFlags::empty(),
+        Duration::from_secs(600),
+        &[prefix_option(global, 600), prefix_option(ula, 300)],
+        Instant::ZERO,
+    );
+    assert_eq!(
+        link.iface.ip_addrs(),
+        [
+            IpCidr::Ipv6(link.local_ip_addr),
+            link.slaac_address(global),
+            link.slaac_address(ula),
+        ]
+    );
+
+    // A later advertisement may carry one of them only; the other stays
+    // until its valid lifetime ends.
+    link.advertise(
+        NdiscRouterFlags::empty(),
+        Duration::from_secs(600),
+        &[prefix_option(global, 600)],
+        Instant::from_secs(100),
+    );
+    assert_eq!(link.iface.ip_addrs().len(), 3);
+    link.iface
+        .poll(Instant::from_secs(301), &mut link.device, &mut link.sockets);
+    assert_eq!(
+        link.iface.ip_addrs(),
+        [IpCidr::Ipv6(link.local_ip_addr), link.slaac_address(global)]
+    );
+}
+
 #[rstest]
 #[case(Medium::Ip)]
 #[cfg(feature = "medium-ip")]
