@@ -354,7 +354,10 @@ async fn handle_command(
             respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
         }
         Commands::Network => cmd_network(writer).await,
-        Commands::TlsStatus => cmd_tls_status(writer).await,
+        // ~15 KB of state (the certificate status): on the heap while it
+        // runs, rather than in this task's static memory, which comes out
+        // of the main stack's room.
+        Commands::TlsStatus => crate::heap::boxed(|| cmd_tls_status(writer)).await,
         Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
         Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,

@@ -21,6 +21,7 @@ function Info() {
             <div><dt>Firmware</dt><dd>${data.firmware_version}</dd></div>
             <div><dt>Uptime</dt><dd>${duration(data.uptime_s)}</dd></div>
             <div><dt>Heap</dt><dd>${Math.round(data.heap_used / 1024)} KiB used, ${Math.round(data.heap_free / 1024)} KiB free</dd></div>
+            <div><dt>Stack</dt><dd>${Math.round(data.stack_untouched / 1024)} of ${Math.round(data.stack_size / 1024)} KiB never used</dd></div>
           </dl>`}
     <//>`;
 }

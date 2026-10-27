@@ -59,7 +59,7 @@ pub async fn sntp_task(stack: Stack<'static>) {
         let synced = match socket.bind(0) {
             // On the heap, like the EST client: the DNS lookup's future is
             // large and only needed for a moment.
-            Ok(()) => alloc::boxed::Box::pin(query(stack, &mut socket, &server)).await,
+            Ok(()) => crate::heap::boxed(|| query(stack, &mut socket, &server)).await,
             Err(_) => false,
         };
         drop(socket);

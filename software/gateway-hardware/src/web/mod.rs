@@ -80,17 +80,17 @@ pub fn spawn(spawner: &Spawner, stack: Stack<'static>, https: bool) {
 
 #[embassy_executor::task(pool_size = HTTP_TASKS)]
 async fn http_task(id: usize, stack: Stack<'static>) -> ! {
-    alloc::boxed::Box::pin(serve_plain(id, stack)).await
+    crate::heap::boxed(|| serve_plain(id, stack)).await
 }
 
 #[embassy_executor::task(pool_size = HTTPS_TASKS)]
 async fn https_task(stack: Stack<'static>) -> ! {
-    alloc::boxed::Box::pin(serve_tls(stack)).await
+    crate::heap::boxed(|| serve_tls(stack)).await
 }
 
 #[embassy_executor::task]
 async fn redirect_task(stack: Stack<'static>) -> ! {
-    alloc::boxed::Box::pin(serve_redirect(HTTPS_TASKS, stack)).await
+    crate::heap::boxed(|| serve_redirect(HTTPS_TASKS, stack)).await
 }
 
 async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
@@ -141,7 +141,7 @@ async fn serve_tls(stack: Stack<'static>) -> ! {
         let first = with_timeout(FIRST_BYTE_TIMEOUT, socket.read_with(|data| (0, data.len())));
         if matches!(first.await, Ok(Ok(1..))) {
             let mut slot = crate::https::slot().await;
-            alloc::boxed::Box::pin(serve_session(&mut socket, &mut slot)).await;
+            crate::heap::boxed(|| serve_session(&mut socket, &mut slot)).await;
         }
         socket.close();
         let _ = with_timeout(Duration::from_secs(1), socket.flush()).await;
@@ -169,9 +169,13 @@ async fn serve_session(
     if let Ok(Ok(())) = with_timeout(HANDSHAKE_TIMEOUT, session.connect()).await {
         if let Ok((read, write)) = session.split().await {
             let app = app();
-            let _ = picoserve::Server::new(&app, &SERVER_CONFIG, &mut buffers.http)
-                .serve(TlsConnection::new(read, write, &mut buffers.out))
-                .await;
+            let http = &mut buffers.http;
+            let out = &mut buffers.out;
+            let _ = crate::heap::boxed(|| {
+                picoserve::Server::new(&app, &SERVER_CONFIG, http)
+                    .serve(TlsConnection::new(read, write, out))
+            })
+            .await;
         }
         let _ = with_timeout(Duration::from_secs(1), session.close()).await;
     }
@@ -227,7 +231,10 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
         };
 
         if authorized {
-            next.run(state, path_parameters, response_writer).await
+            // The route's handler on the heap: the router keeps room for
+            // its largest one, and every layer above builds this future on
+            // the stack (see `crate::heap`).
+            crate::heap::boxed(|| next.run(state, path_parameters, response_writer)).await
         } else {
             (
                 StatusCode::UNAUTHORIZED,

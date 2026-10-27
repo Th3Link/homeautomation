@@ -226,13 +226,15 @@ async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError>
         ),
         None => None,
     };
-    cert::update_settings(SettingsUpdate {
-        fqdn: body.fqdn.as_deref(),
-        mode,
-        validity_years: body.validity_years,
-        est_url: body.est_url.as_deref(),
-        est_auto_renew: body.est_auto_renew,
-        ntp_server: body.ntp_server.as_deref(),
+    crate::heap::boxed(|| {
+        cert::update_settings(SettingsUpdate {
+            fqdn: body.fqdn.as_deref(),
+            mode,
+            validity_years: body.validity_years,
+            est_url: body.est_url.as_deref(),
+            est_auto_renew: body.est_auto_renew,
+            ntp_server: body.ntp_server.as_deref(),
+        })
     })
     .await
     .map_err(api_error)?;
@@ -245,10 +247,13 @@ struct SelfSignedRequest {
 }
 
 async fn self_signed(Json(body): Json<SelfSignedRequest>) -> Result<impl IntoResponse, ApiError> {
-    cert::generate_self_signed(body.validity_years)
-        .await
-        .map_err(api_error)?;
-    Ok(StatusCode::NO_CONTENT)
+    crate::heap::boxed(|| async move {
+        cert::generate_self_signed(body.validity_years)
+            .await
+            .map_err(api_error)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// The CSR, as `application/pkcs10` PEM, offered as a file.
@@ -269,14 +274,17 @@ impl picoserve::response::Content for CsrBody {
 }
 
 async fn csr() -> Result<impl IntoResponse, ApiError> {
-    let pem = cert::csr_pem().await.map_err(api_error)?;
-    Ok((
-        [(
-            "Content-Disposition",
-            "attachment; filename=\"gateway.csr\"",
-        )],
-        CsrBody(pem),
-    ))
+    crate::heap::boxed(|| async move {
+        let pem = cert::csr_pem().await.map_err(api_error)?;
+        Ok((
+            [(
+                "Content-Disposition",
+                "attachment; filename=\"gateway.csr\"",
+            )],
+            CsrBody(pem),
+        ))
+    })
+    .await
 }
 
 async fn delete_trust_anchor() -> Result<impl IntoResponse, ApiError> {
