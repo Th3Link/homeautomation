@@ -1381,6 +1381,49 @@ fn test_router_advertisement_with_two_prefixes() {
     );
 }
 
+#[test]
+#[cfg(all(feature = "medium-ethernet", feature = "proto-ipv6-slaac"))]
+fn test_router_advertisement_flags_and_dns_servers() {
+    let dns = Ipv6Address::new(0x2001, 0xdb8, 0x3, 0, 0, 0, 0, 0x53);
+    let dns_octets = dns.octets();
+    let rdnss = NdiscOptionRepr::RecursiveDnsServer(NdiscRecursiveDnsServer {
+        lifetime: Duration::from_secs(900),
+        addresses: &dns_octets,
+    });
+
+    let mut link = SlaacLink::new();
+    assert_eq!(link.iface.slaac_router_flags(), NdiscRouterFlags::empty());
+    // A router without a default route can still point to DHCPv6.
+    link.advertise(
+        NdiscRouterFlags::MANAGED | NdiscRouterFlags::OTHER,
+        Duration::ZERO,
+        &[rdnss],
+        Instant::from_secs(1),
+    );
+    assert_eq!(link.iface.slaac_updated_at(), Instant::from_secs(1));
+    assert_eq!(
+        link.iface.slaac_router_flags(),
+        NdiscRouterFlags::MANAGED | NdiscRouterFlags::OTHER
+    );
+    assert_eq!(
+        link.iface.slaac_dns_servers().collect::<std::vec::Vec<_>>(),
+        [dns]
+    );
+    link.iface
+        .routes_mut()
+        .update(|routes| assert!(routes.is_empty()));
+
+    // The server's lifetime ends: that is an update too.
+    link.iface
+        .poll(Instant::from_secs(901), &mut link.device, &mut link.sockets);
+    assert_eq!(link.iface.slaac_updated_at(), Instant::from_secs(901));
+    assert_eq!(link.iface.slaac_dns_servers().count(), 0);
+    assert_eq!(
+        link.iface.slaac_router_flags(),
+        NdiscRouterFlags::MANAGED | NdiscRouterFlags::OTHER
+    );
+}
+
 #[rstest]
 #[case(Medium::Ip)]
 #[cfg(feature = "medium-ip")]

@@ -513,7 +513,7 @@ impl InterfaceInner {
             #[cfg(feature = "proto-ipv6-slaac")]
             NdiscRepr::RouterAdvert {
                 hop_limit: _,
-                flags: _,
+                flags,
                 router_lifetime,
                 reachable_time: _,
                 retrans_time: _,
@@ -528,11 +528,9 @@ impl InterfaceInner {
                 {
                     self.slaac.process_advertisement(
                         &ip_repr.src_addr,
+                        flags,
                         router_lifetime,
-                        NdiscOptionIter::new(options).filter_map(|option| match option {
-                            NdiscOptionRepr::PrefixInformation(prefix) => Some(prefix),
-                            _ => None,
-                        }),
+                        NdiscOptionIter::new(options),
                         self.now,
                     )
                 }
@@ -712,6 +710,24 @@ impl Interface {
     #[cfg(feature = "proto-ipv6-slaac")]
     pub fn slaac_updated_at(&self) -> Instant {
         self.inner.slaac_updated
+    }
+
+    /// The Managed (`MANAGED`) and Other configuration (`OTHER`) flags of
+    /// the routers on the link (RFC 4861 § 4.2), OR-ed over all routers
+    /// heard from recently: whether DHCPv6 hands out addresses, or other
+    /// configuration such as DNS servers. A change shows in
+    /// [`Self::slaac_updated_at`].
+    #[cfg(feature = "proto-ipv6-slaac")]
+    pub fn slaac_router_flags(&self) -> NdiscRouterFlags {
+        self.inner.slaac.router_flags(self.inner.now)
+    }
+
+    /// The DNS servers the routers on the link announce (RDNSS, RFC 8106),
+    /// while their lifetimes last; at most `DNS_MAX_SERVER_COUNT`. A change
+    /// shows in [`Self::slaac_updated_at`].
+    #[cfg(feature = "proto-ipv6-slaac")]
+    pub fn slaac_dns_servers(&self) -> impl Iterator<Item = Ipv6Address> + '_ {
+        self.inner.slaac.dns_servers(self.inner.now)
     }
 
     /// Emit a router solicitation when required by the interface's slaac state machine.

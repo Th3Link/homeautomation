@@ -20,7 +20,9 @@ enum_with_unknown! {
         /// Redirected Header
         RedirectedHeader    = 0x4,
         /// MTU
-        Mtu                 = 0x5
+        Mtu                 = 0x5,
+        /// Recursive DNS Server
+        RecursiveDnsServer  = 0x19
     }
 }
 
@@ -32,6 +34,7 @@ impl fmt::Display for Type {
             Type::PrefixInformation => write!(f, "prefix information"),
             Type::RedirectedHeader => write!(f, "redirected header"),
             Type::Mtu => write!(f, "mtu"),
+            Type::RecursiveDnsServer => write!(f, "recursive dns server"),
             Type::Unknown(id) => write!(f, "{id}"),
         }
     }
@@ -140,6 +143,24 @@ mod field {
 
     //  MTU
     pub const MTU: Field = 4..8;
+
+    // Recursive DNS Server Option fields (RFC 8106 § 5.1)
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //  |     Type      |     Length    |           Reserved            |
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //  |                           Lifetime                            |
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //  |                                                               |
+    //  :            Addresses of IPv6 Recursive DNS Servers            :
+    //  |                                                               |
+    //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    // Reserved bits.
+    pub const RDNSS_RESERVED: Field = 2..4;
+    // Lifetime.
+    pub const RDNSS_LT: Field = 4..8;
+    // Start of the addresses, 16 bytes each.
+    pub const RDNSS_ADDRESSES: usize = 8;
 }
 
 /// Core getter methods relevant to any type of NDISC option.
@@ -186,6 +207,10 @@ impl<T: AsRef<[u8]>> NdiscOption<T> {
                     Type::SourceLinkLayerAddr | Type::TargetLinkLayerAddr | Type::Mtu => Ok(()),
                     Type::PrefixInformation if data_range.end >= field::PREFIX.end => Ok(()),
                     Type::RedirectedHeader if data_range.end >= field::REDIR_MIN_SZ => Ok(()),
+                    // At least one address.
+                    Type::RecursiveDnsServer if data_range.end >= field::RDNSS_ADDRESSES + 16 => {
+                        Ok(())
+                    }
                     Type::Unknown(_) => Ok(()),
                     _ => Err(Error),
                 }
@@ -231,6 +256,16 @@ impl<T: AsRef<[u8]>> NdiscOption<T> {
     pub fn mtu(&self) -> u32 {
         let data = self.buffer.as_ref();
         NetworkEndian::read_u32(&data[field::MTU])
+    }
+}
+
+/// Getter methods only relevant for the Recursive DNS Server option.
+impl<T: AsRef<[u8]>> NdiscOption<T> {
+    /// Return the lifetime of the servers.
+    #[inline]
+    pub fn rdnss_lifetime(&self) -> Duration {
+        let data = self.buffer.as_ref();
+        Duration::from_secs(NetworkEndian::read_u32(&data[field::RDNSS_LT]) as u64)
     }
 }
 
@@ -314,6 +349,23 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> NdiscOption<T> {
     pub fn set_mtu(&mut self, value: u32) {
         let data = self.buffer.as_mut();
         NetworkEndian::write_u32(&mut data[field::MTU], value);
+    }
+}
+
+/// Setter methods only relevant for the Recursive DNS Server option.
+impl<T: AsRef<[u8]> + AsMut<[u8]>> NdiscOption<T> {
+    /// Clear the reserved bits.
+    #[inline]
+    pub fn clear_rdnss_reserved(&mut self) {
+        let data = self.buffer.as_mut();
+        data[field::RDNSS_RESERVED].fill(0);
+    }
+
+    /// Set the lifetime of the servers.
+    #[inline]
+    pub fn set_rdnss_lifetime(&mut self, value: Duration) {
+        let data = self.buffer.as_mut();
+        NetworkEndian::write_u32(&mut data[field::RDNSS_LT], value.secs() as u32);
     }
 }
 
@@ -412,6 +464,29 @@ impl PrefixInformation {
     }
 }
 
+/// The DNS servers of a Recursive DNS Server option ([RFC 8106 § 5.1]).
+///
+/// [RFC 8106 § 5.1]: https://www.rfc-editor.org/rfc/rfc8106#section-5.1
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct RecursiveDnsServer<'a> {
+    /// How long the servers may be used; zero means no longer, all ones
+    /// (`0xffffffff` seconds) means forever.
+    pub lifetime: Duration,
+    /// The servers' addresses, 16 bytes each.
+    pub addresses: &'a [u8],
+}
+
+impl<'a> RecursiveDnsServer<'a> {
+    /// The servers' addresses.
+    pub fn addresses(&self) -> impl Iterator<Item = Ipv6Address> + 'a {
+        let (addresses, _) = self.addresses.as_chunks::<16>();
+        addresses
+            .iter()
+            .map(|octets| Ipv6Address::from_octets(*octets))
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct RedirectedHeader<'a> {
@@ -428,6 +503,7 @@ pub enum Repr<'a> {
     PrefixInformation(PrefixInformation),
     RedirectedHeader(RedirectedHeader<'a>),
     Mtu(u32),
+    RecursiveDnsServer(RecursiveDnsServer<'a>),
     Unknown {
         type_: u8,
         length: u8,
@@ -496,6 +572,18 @@ impl<'a> Repr<'a> {
                     Err(Error)
                 }
             }
+            Type::RecursiveDnsServer => {
+                // The 8 bytes of the header, then whole addresses: an odd
+                // length (RFC 8106 § 5.3.1).
+                if opt.data_len() >= 3 && opt.data_len() % 2 == 1 {
+                    Ok(Repr::RecursiveDnsServer(RecursiveDnsServer {
+                        lifetime: opt.rdnss_lifetime(),
+                        addresses: &opt.data()[field::RDNSS_ADDRESSES - 2..],
+                    }))
+                } else {
+                    Err(Error)
+                }
+            }
             Type::Unknown(id) => {
                 // A length of 0 is invalid.
                 if opt.data_len() != 0 {
@@ -524,6 +612,9 @@ impl<'a> Repr<'a> {
                 (8 + header.buffer_len() + data.len()).div_ceil(8) * 8
             }
             &Repr::Mtu(_) => field::MTU.end,
+            &Repr::RecursiveDnsServer(RecursiveDnsServer { addresses, .. }) => {
+                field::RDNSS_ADDRESSES + addresses.len()
+            }
             &Repr::Unknown { length, .. } => field::DATA(length).end,
         }
     }
@@ -578,6 +669,16 @@ impl<'a> Repr<'a> {
                 opt.set_data_len(1);
                 opt.set_mtu(mtu);
             }
+            Repr::RecursiveDnsServer(RecursiveDnsServer {
+                lifetime,
+                addresses,
+            }) => {
+                opt.set_option_type(Type::RecursiveDnsServer);
+                opt.set_data_len(((field::RDNSS_ADDRESSES + addresses.len()) / 8) as u8);
+                opt.clear_rdnss_reserved();
+                opt.set_rdnss_lifetime(lifetime);
+                opt.data_mut()[field::RDNSS_ADDRESSES - 2..].copy_from_slice(addresses);
+            }
             Repr::Unknown {
                 type_: id,
                 length,
@@ -611,6 +712,16 @@ impl<'a> fmt::Display for Repr<'a> {
             }
             Repr::Mtu(mtu) => {
                 write!(f, "MTU mtu={mtu}")
+            }
+            Repr::RecursiveDnsServer(RecursiveDnsServer {
+                lifetime,
+                addresses,
+            }) => {
+                write!(
+                    f,
+                    "RecursiveDnsServer lifetime={lifetime} servers={}",
+                    addresses.len() / 16
+                )
             }
             Repr::Unknown {
                 type_: id, length, ..
@@ -816,6 +927,56 @@ mod test {
         assert_eq!(
             Repr::parse(&NdiscOption::new_unchecked(&bytes)),
             Ok(Repr::Mtu(1500))
+        );
+    }
+
+    // Lifetime 600 s, servers 2001:db8::53 and 2001:db8::54.
+    static RDNSS_OPT_BYTES: [u8; 40] = [
+        0x19, 0x05, 0x00, 0x00, 0x00, 0x00, 0x02, 0x58, 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x53, 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x54,
+    ];
+
+    #[test]
+    fn test_repr_parse_rdnss() {
+        let Ok(Repr::RecursiveDnsServer(rdnss)) =
+            Repr::parse(&NdiscOption::new_unchecked(&RDNSS_OPT_BYTES[..]))
+        else {
+            panic!("not parsed as RDNSS");
+        };
+        assert_eq!(rdnss.lifetime, Duration::from_secs(600));
+        assert_eq!(
+            rdnss.addresses().collect::<std::vec::Vec<_>>(),
+            [
+                Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x53),
+                Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x54)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_repr_emit_rdnss() {
+        let repr = Repr::RecursiveDnsServer(super::RecursiveDnsServer {
+            lifetime: Duration::from_secs(600),
+            addresses: &RDNSS_OPT_BYTES[8..],
+        });
+        assert_eq!(repr.buffer_len(), RDNSS_OPT_BYTES.len());
+        let mut bytes = [0xff; 40];
+        repr.emit(&mut NdiscOption::new_unchecked(&mut bytes[..]));
+        assert_eq!(bytes, RDNSS_OPT_BYTES);
+    }
+
+    #[test]
+    fn test_rdnss_needs_whole_addresses() {
+        // Length 1: no address. Length 4: an address and a half.
+        let mut none = [0u8; 8];
+        none[..2].copy_from_slice(&[0x19, 0x01]);
+        assert_eq!(NdiscOption::new_checked(&none[..]), Err(Error));
+        let mut half = [0u8; 32];
+        half[..2].copy_from_slice(&[0x19, 0x04]);
+        assert_eq!(
+            Repr::parse(&NdiscOption::new_checked(&half[..]).unwrap()),
+            Err(Error)
         );
     }
 

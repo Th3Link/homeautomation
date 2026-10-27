@@ -259,8 +259,8 @@ pub use self::ndisc::{
 ))]
 pub use self::ndiscoption::{
     Iter as NdiscOptionIter, NdiscOption, PrefixInfoFlags as NdiscPrefixInfoFlags,
-    PrefixInformation as NdiscPrefixInformation, RedirectedHeader as NdiscRedirectedHeader,
-    Repr as NdiscOptionRepr, Type as NdiscOptionType,
+    PrefixInformation as NdiscPrefixInformation, RecursiveDnsServer as NdiscRecursiveDnsServer,
+    RedirectedHeader as NdiscRedirectedHeader, Repr as NdiscOptionRepr, Type as NdiscOptionType,
 };
 
 #[cfg(feature = "proto-ipv6")]
