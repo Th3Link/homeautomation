@@ -4,6 +4,17 @@
 runner = "espflash flash --partition-table ./partitions.csv --monitor --chip esp32 --erase-parts otadata --baud 921600"
 
 [env]
+# smoltcp's compile-time table sizes (its build.rs reads SMOLTCP_*). The
+# defaults (2 addresses, 1 DNS server) drop the IPv6 link-local address as
+# soon as an IPv4 and a global IPv6 address exist.
+# Addresses: IPv4, IPv6 link-local, two SLAAC prefixes, one DHCPv6 address.
+SMOLTCP_IFACE_MAX_ADDR_COUNT = "5"
+SMOLTCP_IFACE_MAX_PREFIX_COUNT = "2"
+# Routes: the IPv4 default route and up to three IPv6 routers.
+SMOLTCP_IFACE_MAX_ROUTE_COUNT = "4"
+SMOLTCP_DNS_MAX_SERVER_COUNT = "4"
+# One A and one AAAA answer, or two of a kind.
+SMOLTCP_DNS_MAX_RESULT_COUNT = "2"
 
 [build]
 rustflags = [
