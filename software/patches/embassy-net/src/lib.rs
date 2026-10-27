@@ -130,6 +130,31 @@ pub struct StaticConfigV6 {
     pub dns_servers: Vec<Ipv6Address, 3>,
 }
 
+/// IPv6 configuration a DHCPv6 client obtained: used next to SLAAC or a
+/// static address. Set it with [`Stack::set_dhcpv6_lease`].
+#[cfg(feature = "proto-ipv6")]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct Dhcpv6Lease {
+    /// The leased address (IA_NA); `None` for stateless DHCPv6, which hands
+    /// out other configuration only.
+    pub address: Option<Ipv6Cidr>,
+    /// DNS servers.
+    pub dns_servers: Vec<Ipv6Address, 3>,
+}
+
+/// The Managed and Other configuration flags of the IPv6 routers on the
+/// link (RFC 4861 § 4.2), OR-ed over the routers: what DHCPv6 offers.
+#[cfg(feature = "slaac")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct Ipv6RouterFlags {
+    /// Addresses are available via DHCPv6.
+    pub managed: bool,
+    /// Other configuration, such as DNS servers, is available via DHCPv6.
+    pub other: bool,
+}
+
 /// DHCP configuration.
 #[cfg(feature = "dhcpv4")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +320,10 @@ pub(crate) struct Inner {
     static_v6: Option<StaticConfigV6>,
     #[cfg(feature = "slaac")]
     slaac: bool,
+    #[cfg(feature = "slaac")]
+    router_flags: Ipv6RouterFlags,
+    #[cfg(feature = "proto-ipv6")]
+    dhcpv6: Option<Dhcpv6Lease>,
     #[cfg(feature = "dhcpv4")]
     dhcp_socket: Option<SocketHandle>,
     #[cfg(feature = "dns")]
@@ -368,6 +397,10 @@ pub fn new<'d, D: Driver, const SOCK: usize>(
         static_v6: None,
         #[cfg(feature = "slaac")]
         slaac: false,
+        #[cfg(feature = "slaac")]
+        router_flags: Ipv6RouterFlags::default(),
+        #[cfg(feature = "proto-ipv6")]
+        dhcpv6: None,
         #[cfg(feature = "dhcpv4")]
         dhcp_socket: None,
         #[cfg(feature = "dns")]
@@ -445,7 +478,8 @@ impl<'d> Stack<'d> {
 
         #[cfg(feature = "proto-ipv6")]
         {
-            v6_up = self.config_v6().is_some();
+            v6_up = self.config_v6().is_some()
+                || self.with(|i| i.dhcpv6.as_ref().is_some_and(|lease| lease.address.is_some()));
         }
         #[cfg(not(feature = "proto-ipv6"))]
         {
@@ -534,6 +568,53 @@ impl<'d> Stack<'d> {
     #[cfg(feature = "proto-ipv6")]
     pub fn config_v6(&self) -> Option<StaticConfigV6> {
         self.with(|i| i.static_v6.clone())
+    }
+
+    /// Get all IPv6 addresses of the interface: link-local, SLAAC (one per
+    /// prefix the routers announce), static and DHCPv6.
+    #[cfg(feature = "proto-ipv6")]
+    pub fn ipv6_addresses(&self) -> Vec<Ipv6Cidr, { smoltcp::config::IFACE_MAX_ADDR_COUNT }> {
+        self.with(|i| {
+            i.iface
+                .ip_addrs()
+                .iter()
+                .filter_map(|cidr| match cidr {
+                    IpCidr::Ipv6(cidr) => Some(*cidr),
+                    #[allow(unreachable_patterns)]
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// Set (or, with `None`, drop) what a DHCPv6 client obtained: the
+    /// address joins the interface's other addresses, the DNS servers the
+    /// others.
+    #[cfg(feature = "proto-ipv6")]
+    pub fn set_dhcpv6_lease(&self, lease: Option<Dhcpv6Lease>) {
+        self.with_mut(|i| {
+            i.dhcpv6 = lease;
+            i.apply_static_config();
+        })
+    }
+
+    /// Get what [`Self::set_dhcpv6_lease`] set.
+    #[cfg(feature = "proto-ipv6")]
+    pub fn dhcpv6_lease(&self) -> Option<Dhcpv6Lease> {
+        self.with(|i| i.dhcpv6.clone())
+    }
+
+    /// Get the Managed and Other configuration flags of the routers on the
+    /// link, from their Router Advertisements (SLAAC only).
+    #[cfg(feature = "slaac")]
+    pub fn ipv6_router_flags(&self) -> Ipv6RouterFlags {
+        self.with(|i| i.router_flags)
+    }
+
+    /// Wait for the routers' flags to differ from `current`.
+    #[cfg(feature = "slaac")]
+    pub async fn wait_ipv6_router_flags_change(&self, current: Ipv6RouterFlags) {
+        self.wait(move || self.ipv6_router_flags() != current).await
     }
 
     /// Set the IPv4 configuration.
@@ -682,6 +763,19 @@ impl Inner {
             .into()
     }
 
+    /// Is this one of the addresses SLAAC configured (from a prefix and the
+    /// hardware address, like the link-local one)? smoltcp adds and removes
+    /// those itself.
+    #[cfg(feature = "slaac")]
+    fn is_slaac_address(&self, cidr: &Ipv6Cidr) -> bool {
+        let ll_prefix = Ipv6Cidr::new(Ipv6Cidr::LINK_LOCAL_PREFIX.address(), 64);
+        let Some(link_local) = Ipv6Cidr::from_link_prefix(&ll_prefix, self.hardware_address) else {
+            return false;
+        };
+        cidr.address().octets()[8..] == link_local.address().octets()[8..]
+            && !Ipv6Cidr::LINK_LOCAL_PREFIX.contains_addr(&cidr.address())
+    }
+
     #[allow(clippy::absurd_extreme_comparisons)]
     pub fn get_local_port(&mut self) -> u16 {
         let res = self.next_local_port;
@@ -763,9 +857,9 @@ impl Inner {
     }
 
     fn apply_static_config(&mut self) {
-        let mut addrs = Vec::new();
+        let mut addrs: Vec<IpCidr, { smoltcp::config::IFACE_MAX_ADDR_COUNT }> = Vec::new();
         #[cfg(feature = "dns")]
-        let mut dns_servers: Vec<_, 6> = Vec::new();
+        let mut dns_servers: Vec<IpAddress, 9> = Vec::new();
         #[cfg(feature = "proto-ipv4")]
         let mut gateway_v4 = None;
         #[cfg(feature = "proto-ipv6")]
@@ -805,19 +899,47 @@ impl Inner {
             info!("IPv6: DOWN");
         }
 
-        // Apply addresses
+        #[cfg(feature = "proto-ipv6")]
+        if let Some(lease) = &self.dhcpv6 {
+            debug!("DHCPv6:");
+            debug!("   IP address:      {:?}", lease.address);
+            if let Some(address) = lease.address
+                && !addrs.contains(&IpCidr::Ipv6(address))
+            {
+                let _ = addrs.push(IpCidr::Ipv6(address));
+            }
+            #[cfg(feature = "dns")]
+            for s in &lease.dns_servers {
+                debug!("   DNS server:      {:?}", s);
+                let s = IpAddress::Ipv6(*s);
+                if !dns_servers.contains(&s) {
+                    let _ = dns_servers.push(s);
+                }
+            }
+        }
+
+        // Apply addresses. The link-local one first, so that it is never the
+        // one left out. SLAAC's own addresses (one per prefix) stay as they
+        // are: smoltcp adds and removes them.
+        #[cfg(feature = "slaac")]
+        let addrs = {
+            let mut all: Vec<IpCidr, { smoltcp::config::IFACE_MAX_ADDR_COUNT }> = Vec::new();
+            let _ = all.push(self.get_link_local_address());
+            let slaac_addrs = self.iface.ip_addrs().iter().filter(|cidr| match cidr {
+                IpCidr::Ipv6(v6) => self.slaac && self.is_slaac_address(v6),
+                #[allow(unreachable_patterns)]
+                _ => false,
+            });
+            for cidr in addrs.iter().chain(slaac_addrs) {
+                if !all.contains(cidr) && all.push(*cidr).is_err() {
+                    warn!("Too many IP addresses for IFACE_MAX_ADDR_COUNT, dropping {:?}", cidr);
+                }
+            }
+            all
+        };
         self.iface.update_ip_addrs(|a| {
             *a = addrs;
         });
-
-        // Add the link local-address
-        #[cfg(feature = "slaac")]
-        {
-            let ll_address = self.get_link_local_address();
-            self.iface.update_ip_addrs(|a| {
-                let _ = a.push(ll_address);
-            })
-        }
 
         // Apply gateways
         #[cfg(feature = "proto-ipv4")]
@@ -826,11 +948,24 @@ impl Inner {
         } else {
             self.iface.routes_mut().remove_default_ipv4_route();
         }
+        // With SLAAC, smoltcp keeps the IPv6 routes itself, one per router
+        // and each with its lifetime.
         #[cfg(feature = "proto-ipv6")]
-        if let Some(gateway) = gateway_v6 {
-            unwrap!(self.iface.routes_mut().add_default_ipv6_route(gateway));
-        } else {
-            self.iface.routes_mut().remove_default_ipv6_route();
+        {
+            #[cfg(feature = "slaac")]
+            let slaac_routes = self.slaac;
+            #[cfg(not(feature = "slaac"))]
+            let slaac_routes = false;
+            if !slaac_routes {
+                match gateway_v6 {
+                    Some(gateway) => {
+                        unwrap!(self.iface.routes_mut().add_default_ipv6_route(gateway));
+                    }
+                    None => {
+                        self.iface.routes_mut().remove_default_ipv6_route();
+                    }
+                }
+            }
         }
 
         // Apply DNS servers
@@ -932,9 +1067,7 @@ impl Inner {
         #[cfg(feature = "slaac")]
         if self.slaac && self.iface.slaac_updated_at() == timestamp {
             let ipv6_address = self.iface.ip_addrs().iter().find_map(|addr| match addr {
-                IpCidr::Ipv6(ip6_address) if !Ipv6Cidr::LINK_LOCAL_PREFIX.contains_addr(&ip6_address.address()) => {
-                    Some(ip6_address)
-                }
+                IpCidr::Ipv6(ip6_address) if self.is_slaac_address(ip6_address) => Some(*ip6_address),
                 _ => None,
             });
             self.static_v6 = if let Some(address) = ipv6_address {
@@ -949,13 +1082,18 @@ impl Inner {
                     })
                     .flatten();
                 let config = StaticConfigV6 {
-                    address: *address,
+                    address,
                     gateway,
-                    dns_servers: Vec::new(), // RDNSS not (yet) supported by smoltcp.
+                    dns_servers: self.iface.slaac_dns_servers().take(3).collect(),
                 };
                 Some(config)
             } else {
                 None
+            };
+            let flags = self.iface.slaac_router_flags();
+            self.router_flags = Ipv6RouterFlags {
+                managed: flags.contains(smoltcp::wire::NdiscRouterFlags::MANAGED),
+                other: flags.contains(smoltcp::wire::NdiscRouterFlags::OTHER),
             };
             configure = true;
         }

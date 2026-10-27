@@ -1,0 +1,4 @@
+# Building a patched crate here on its own (tests, clippy) uses the other
+# patched crates, like the workspace does.
+[patch.crates-io]
+smoltcp = { path = "smoltcp" }
