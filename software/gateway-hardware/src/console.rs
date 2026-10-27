@@ -132,6 +132,9 @@ enum Commands<'a> {
     /// in if HTTPS doesn't work). Takes effect after a restart.
     #[set(one_of = ["on", "off"])]
     WebHttps(OnOff),
+    /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
+    /// servers and the time.
+    Network,
     /// Show the HTTPS certificate: mode, FQDN, validity, status.
     TlsStatus,
     /// Set the FQDN the HTTPS certificate is for (empty: the hostname). In
@@ -350,6 +353,7 @@ async fn handle_command(
         Commands::WebHttps(v) => {
             respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
         }
+        Commands::Network => cmd_network(writer).await,
         Commands::TlsStatus => cmd_tls_status(writer).await,
         Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
@@ -703,5 +707,111 @@ async fn cmd_ntp_server(server: &str) -> String<LINE_CAP> {
     match crate::cert::update_settings(update).await {
         Ok(()) => fmt_msg(format_args!("ntp server: {server} (next sync)")),
         Err(e) => fmt_msg(format_args!("ntp server refused: {}", e.code())),
+    }
+}
+
+async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
+    let Some(net) = crate::ethernet::info().await else {
+        return respond(writer, "network: not started (no Ethernet PHY)").await;
+    };
+    let m = net.mac;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "link: {}, MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            if net.link_up { "up" } else { "down" },
+            m[0],
+            m[1],
+            m[2],
+            m[3],
+            m[4],
+            m[5]
+        )),
+    )
+    .await?;
+
+    match net.v4 {
+        Some(v4) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("ipv4: {} (DHCP)", v4.address)),
+            )
+            .await?;
+            match v4.gateway {
+                Some(gateway) => {
+                    respond(writer, &fmt_msg(format_args!("ipv4 gateway: {gateway}"))).await?
+                }
+                None => respond(writer, "ipv4 gateway: none").await?,
+            }
+            for server in &v4.dns_servers {
+                respond(writer, &fmt_msg(format_args!("ipv4 dns: {server}"))).await?;
+            }
+        }
+        None => respond(writer, "ipv4: no DHCP lease").await?,
+    }
+
+    // The link-local address embassy-net derives from the MAC (EUI-64).
+    let link_local = core::net::Ipv6Addr::from([
+        0xfe,
+        0x80,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        m[0] ^ 0x02,
+        m[1],
+        m[2],
+        0xff,
+        0xfe,
+        m[3],
+        m[4],
+        m[5],
+    ]);
+    respond(
+        writer,
+        &fmt_msg(format_args!("ipv6 link-local: {link_local}/64")),
+    )
+    .await?;
+    match net.v6 {
+        Some(v6) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("ipv6: {} (SLAAC)", v6.address)),
+            )
+            .await?;
+            match v6.gateway {
+                Some(gateway) => {
+                    respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?
+                }
+                None => respond(writer, "ipv6 gateway: none").await?,
+            }
+            for server in &v6.dns_servers {
+                respond(writer, &fmt_msg(format_args!("ipv6 dns: {server}"))).await?;
+            }
+        }
+        None => respond(writer, "ipv6: no global address (no router advertisement)").await?,
+    }
+
+    let ntp = crate::cert::ntp_server().await;
+    match crate::wall_clock::now() {
+        Some(now) => {
+            respond(
+                writer,
+                &fmt_msg(format_args!(
+                    "time: {} (SNTP from {ntp})",
+                    gateway_core::x509::time::Rfc3339(now)
+                )),
+            )
+            .await
+        }
+        None => {
+            respond(
+                writer,
+                &fmt_msg(format_args!("time: unknown (no answer from {ntp} yet)")),
+            )
+            .await
+        }
     }
 }

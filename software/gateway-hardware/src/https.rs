@@ -5,8 +5,9 @@
 //! A TLS session takes ~40 KB of heap (16 KiB records in, 8 KiB out, the
 //! handshake), so only one runs at a time: the web server's connections
 //! and the EST client take turns through [`slot`]. Further connections are
-//! accepted and wait; a browser's keep-alive connection lets go after a
-//! second of idleness.
+//! accepted and wait (they take the slot only once the client has sent
+//! something, so a browser's speculative connections don't hold it); a
+//! keep-alive connection lets go after a second of idleness.
 
 use embassy_net::tcp::{TcpReader, TcpSocket, TcpWriter};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -65,10 +66,26 @@ pub fn tls() -> Option<TlsReference<'static>> {
     INSTANCE.try_get().map(|tls| tls.reference())
 }
 
-static SLOT: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+/// What the one TLS session at a time needs besides MbedTLS' own heap: the
+/// HTTP request buffer and the buffer responses are collected in. Kept here
+/// once instead of in every web task, since only the slot holder uses them.
+pub struct Buffers {
+    pub http: [u8; 1536],
+    pub out: [u8; OUT_BUFFER],
+}
 
-/// The right to run a TLS session; held for the session's life.
-pub async fn slot() -> MutexGuard<'static, CriticalSectionRawMutex, ()> {
+/// How much of a response is collected before it goes out as one TLS
+/// record (each record costs a header, a tag and an encryption pass).
+pub const OUT_BUFFER: usize = 2048;
+
+static SLOT: Mutex<CriticalSectionRawMutex, Buffers> = Mutex::new(Buffers {
+    http: [0; 1536],
+    out: [0; OUT_BUFFER],
+});
+
+/// The right to run a TLS session, with the buffers for it; held for the
+/// session's life.
+pub async fn slot() -> MutexGuard<'static, CriticalSectionRawMutex, Buffers> {
     SLOT.lock().await
 }
 
@@ -111,47 +128,88 @@ impl mbedtls_rs::Split for TcpStream<'_, '_> {
 }
 
 /// An open TLS session as picoserve sees a connection: the two halves of a
-/// split MbedTLS session. Closing the session and the socket is the
-/// caller's business once picoserve is done.
-pub struct TlsConnection<R, W> {
+/// split MbedTLS session, the write half buffered. Closing the session and
+/// the socket is the caller's business once picoserve is done.
+pub struct TlsConnection<'b, R, W> {
     pub read: R,
-    pub write: W,
+    pub write: BufferedWriter<'b, W>,
 }
 
-/// picoserve's writer has to lend a buffer; MbedTLS' doesn't have one to
-/// lend, so this one stands in.
-pub struct LendingWriter<'a, W> {
-    inner: &'a mut W,
+impl<'b, R, W> TlsConnection<'b, R, W> {
+    pub fn new(read: R, write: W, out: &'b mut [u8]) -> Self {
+        Self {
+            read,
+            write: BufferedWriter {
+                inner: write,
+                buf: out,
+                len: 0,
+            },
+        }
+    }
 }
 
-impl<W: Write> ErrorType for LendingWriter<'_, W> {
+/// Collects what picoserve writes (it writes a response in many small
+/// pieces, a header line at a time) and hands it to MbedTLS in large
+/// pieces, so a response goes out in a few TLS records instead of dozens.
+/// picoserve flushes after every response.
+pub struct BufferedWriter<'b, W> {
+    inner: W,
+    buf: &'b mut [u8],
+    len: usize,
+}
+
+/// `write_with` drains the buffer first when less than this is free.
+const MIN_ROOM: usize = 256;
+
+impl<W: Write> BufferedWriter<'_, W> {
+    async fn drain(&mut self) -> Result<(), W::Error> {
+        if self.len > 0 {
+            self.inner.write_all(&self.buf[..self.len]).await?;
+            self.len = 0;
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> ErrorType for BufferedWriter<'_, W> {
     type Error = W::Error;
 }
 
-impl<W: Write> Write for LendingWriter<'_, W> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.inner.write(buf).await
+impl<W: Write> Write for BufferedWriter<'_, W> {
+    async fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
+        if self.len + data.len() > self.buf.len() {
+            self.drain().await?;
+        }
+        if data.len() >= self.buf.len() {
+            return self.inner.write(data).await;
+        }
+        self.buf[self.len..self.len + data.len()].copy_from_slice(data);
+        self.len += data.len();
+        Ok(data.len())
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.drain().await?;
         self.inner.flush().await
     }
 }
 
-impl<W: Write> picoserve::io::Write for LendingWriter<'_, W> {
+impl<W: Write> picoserve::io::Write for BufferedWriter<'_, W> {
     async fn write_with<F: FnOnce(picoserve::mem::BorrowedCursor<'_>) -> T, T>(
         &mut self,
         f: F,
     ) -> Result<T, Self::Error> {
-        let mut buffer = [0u8; 512];
-        let mut buffer = picoserve::mem::BorrowedBuffer::new(&mut buffer);
+        if self.buf.len() - self.len < MIN_ROOM {
+            self.drain().await?;
+        }
+        let mut buffer = picoserve::mem::BorrowedBuffer::new(&mut self.buf[self.len..]);
         let output = f(buffer.unfilled());
-        self.inner.write_all(buffer.filled()).await?;
+        self.len += buffer.filled().len();
         Ok(output)
     }
 }
 
-impl<R, W, E> picoserve::io::Socket<picoserve::EmbassyRuntime> for TlsConnection<R, W>
+impl<'b, R, W, E> picoserve::io::Socket<picoserve::EmbassyRuntime> for TlsConnection<'b, R, W>
 where
     R: Read<Error = E>,
     W: Write<Error = E>,
@@ -163,17 +221,12 @@ where
     where
         Self: 'a;
     type WriteHalf<'a>
-        = LendingWriter<'a, W>
+        = &'a mut BufferedWriter<'b, W>
     where
         Self: 'a;
 
     fn split(&mut self) -> (Self::ReadHalf<'_>, Self::WriteHalf<'_>) {
-        (
-            &mut self.read,
-            LendingWriter {
-                inner: &mut self.write,
-            },
-        )
+        (&mut self.read, &mut self.write)
     }
 
     async fn abort<T: picoserve::Timer<picoserve::EmbassyRuntime>>(
