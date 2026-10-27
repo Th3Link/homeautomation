@@ -32,7 +32,10 @@
 use crate::console_log;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
-use embassy_net::{Runner, Stack, StackResources, StaticConfigV4, StaticConfigV6};
+use embassy_net::{
+    Dhcpv6Lease, Ipv6Cidr, Ipv6RouterFlags, Runner, Stack, StackResources, StaticConfigV4,
+    StaticConfigV6,
+};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
@@ -119,8 +122,12 @@ pub struct NetInfo {
     pub link_up: bool,
     pub mac: [u8; 6],
     pub v4: Option<StaticConfigV4>,
-    /// The global address (SLAAC), its router and DNS servers.
+    /// The first SLAAC address, the router and the RDNSS DNS servers.
     pub v6: Option<StaticConfigV6>,
+    /// All IPv6 addresses: link-local, SLAAC (one per prefix), DHCPv6.
+    pub v6_addresses: heapless::Vec<Ipv6Cidr, 5>,
+    pub router_flags: Ipv6RouterFlags,
+    pub dhcpv6: Option<Dhcpv6Lease>,
 }
 
 /// The stack lives in the network tasks (it can't be shared between
@@ -153,6 +160,9 @@ async fn info_task(stack: Stack<'static>) {
             mac,
             v4: stack.config_v4(),
             v6: stack.config_v6(),
+            v6_addresses: stack.ipv6_addresses().into_iter().take(5).collect(),
+            router_flags: stack.ipv6_router_flags(),
+            dhcpv6: stack.dhcpv6_lease(),
         });
     }
 }
