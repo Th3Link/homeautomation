@@ -258,7 +258,7 @@ pub use self::ndisc::{
     any(feature = "medium-ethernet", feature = "medium-ieee802154")
 ))]
 pub use self::ndiscoption::{
-    NdiscOption, PrefixInfoFlags as NdiscPrefixInfoFlags,
+    Iter as NdiscOptionIter, NdiscOption, PrefixInfoFlags as NdiscPrefixInfoFlags,
     PrefixInformation as NdiscPrefixInformation, RedirectedHeader as NdiscRedirectedHeader,
     Repr as NdiscOptionRepr, Type as NdiscOptionType,
 };

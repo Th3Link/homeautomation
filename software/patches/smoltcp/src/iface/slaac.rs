@@ -184,14 +184,14 @@ impl Slaac {
     pub(super) fn process_advertisement(
         &mut self,
         source: &Ipv6Address,
-        router_lifetime: Duration,              // default route lifetime
-        prefix: Option<NdiscPrefixInformation>, // prefix info
+        router_lifetime: Duration, // default route lifetime
+        prefixes: impl IntoIterator<Item = NdiscPrefixInformation>, // all prefix infos
         now: Instant,
     ) {
-        if let Some(prefix) = prefix
-            && prefix.is_valid_prefix_info()
-        {
-            self.process_prefix(prefix, now)
+        for prefix in prefixes {
+            if prefix.is_valid_prefix_info() {
+                self.process_prefix(prefix, now)
+            }
         }
 
         if router_lifetime > Duration::ZERO {

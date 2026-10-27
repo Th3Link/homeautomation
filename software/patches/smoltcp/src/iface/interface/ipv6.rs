@@ -419,9 +419,9 @@ impl InterfaceInner {
             #[cfg(any(feature = "medium-ethernet", feature = "medium-ieee802154"))]
             Icmpv6Repr::Ndisc(repr) if ip_repr.hop_limit == 0xff => match self.caps.medium {
                 #[cfg(feature = "medium-ethernet")]
-                Medium::Ethernet => self.process_ndisc(ip_repr, repr),
+                Medium::Ethernet => self.process_ndisc(ip_repr, repr, icmp_packet.payload()),
                 #[cfg(feature = "medium-ieee802154")]
-                Medium::Ieee802154 => self.process_ndisc(ip_repr, repr),
+                Medium::Ieee802154 => self.process_ndisc(ip_repr, repr, icmp_packet.payload()),
                 #[cfg(feature = "medium-ip")]
                 Medium::Ip => None,
             },
@@ -452,6 +452,10 @@ impl InterfaceInner {
         &mut self,
         ip_repr: Ipv6Repr,
         repr: NdiscRepr<'frame>,
+        // The message's options, undecoded: `repr` keeps only the last one
+        // of each kind.
+        #[cfg_attr(not(feature = "proto-ipv6-slaac"), allow(unused_variables))]
+        options: &'frame [u8],
     ) -> Option<Packet<'frame>> {
         match repr {
             NdiscRepr::NeighborAdvert {
@@ -515,7 +519,7 @@ impl InterfaceInner {
                 retrans_time: _,
                 lladdr: _,
                 mtu: _,
-                prefix_info,
+                prefix_info: _,
             } if self.slaac_enabled => {
                 if ip_repr.src_addr.is_link_local()
                     && (ip_repr.dst_addr == IPV6_LINK_LOCAL_ALL_NODES
@@ -525,7 +529,10 @@ impl InterfaceInner {
                     self.slaac.process_advertisement(
                         &ip_repr.src_addr,
                         router_lifetime,
-                        prefix_info,
+                        NdiscOptionIter::new(options).filter_map(|option| match option {
+                            NdiscOptionRepr::PrefixInformation(prefix) => Some(prefix),
+                            _ => None,
+                        }),
                         self.now,
                     )
                 }
