@@ -41,7 +41,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free` |
+| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot) |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
 | `POST /bus/ping`, `/bus/refresh`, `/bus/restart` | to every device |
 | `PUT /bus/silence` `{"on": true}` | tells every device to be quiet / talk again |

@@ -27,13 +27,16 @@ struct Config {
 }
 
 async fn read() -> Result<impl IntoResponse, ApiError> {
-    let cfg = config().await.load_or_init().await;
-    json(&Config {
-        hostname: cfg.hostname,
-        can_bitrate: cfg.can_bitrate.as_str(),
-        update_delay_ms: cfg.update_delay_ms,
-        web_username: cfg.web_username,
-        web_password_set: !cfg.web_password.is_empty(),
+    crate::heap::boxed(|| async move {
+        let cfg = config().await.load_or_init().await;
+        json(&Config {
+            hostname: cfg.hostname,
+            can_bitrate: cfg.can_bitrate.as_str(),
+            update_delay_ms: cfg.update_delay_ms,
+            web_username: cfg.web_username,
+            web_password_set: !cfg.web_password.is_empty(),
+        })
+        .await
     })
     .await
 }

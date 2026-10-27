@@ -21,6 +21,8 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
+    // Marks the unused main stack, for `stack_untouched` in `GET /system`.
+    gateway_hardware::stack::paint();
     console_log!("gateway-hardware booting");
 
     // The heap lives in the RAM the ESP32's ROM leaves free above the

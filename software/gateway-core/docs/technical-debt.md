@@ -65,6 +65,27 @@ minimum: separate concerns instead of one verb-dispatch endpoint, have
 one consistent targeting mechanism instead of four, and report errors
 instead of silently dropping malformed requests.
 
+## One main stack for everything (gateway)
+
+Every task's poll, MbedTLS's handshake and the flash access run on the one
+main stack (~47 KB, what DRAM leaves after the statics). Rust's async code
+needs much more of it than the future sizes suggest: a poll function keeps
+room for every future it builds by value, and `Box::pin(f())` builds `f`'s
+future on the stack before moving it to the heap. The HTTPS request path
+went past 60 KB that way and wrote below the stack into the statics
+without hitting esp-hal's stack guard (one word): random crashes on the
+first authenticated request. It is down to ~32 KB now: large futures are
+built through `heap::boxed` (in their own frame, polled through `dyn`, so
+no caller keeps room for them), the certificate status is boxed, flash
+reads and writes skip `esp-storage`'s 4 KiB stack buffer, and the MQTT
+buffers are static.
+
+The margin is measured, not computed: the stack is painted at boot and
+`GET /system` reports `stack_untouched`. ~14 KB were left after HTTPS
+requests, uploads and a firmware update over HTTPS; MQTT over TLS (RSA
+signature check on the stack) is not measured yet. A new large future in
+a handler or task shows up there first.
+
 ## Single gateway, too many nodes, no gateway-to-gateway coordination
 
 The one gateway that exists today controls every node in the

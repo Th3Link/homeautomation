@@ -20,6 +20,7 @@ mod store;
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::wall_clock;
+use alloc::boxed::Box;
 use alloc::string::String as HeapString;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
@@ -653,47 +654,54 @@ pub struct Status {
     pub est: EstState,
 }
 
-pub async fn status() -> Status {
-    let settings = settings().await;
-    let fqdn = effective_fqdn().await;
-    let clock = wall_clock::clock();
+/// The status, on the heap: it is ~5 KB, and a handler holding it by value
+/// makes every web request's future, and the main stack frames that build
+/// and poll those, that much larger (the router keeps room for its largest
+/// handler).
+pub async fn status() -> Box<Status> {
+    crate::heap::boxed(|| async {
+        let settings = settings().await;
+        let fqdn = effective_fqdn().await;
+        let clock = wall_clock::clock();
 
-    let chain = store::CERTIFICATE.read().await;
-    let origin = Origin::from_u8(config().await.get_u8(store::ORIGIN).await.unwrap_or(0));
-    let (certificate, chain_length) = match chain.as_deref() {
-        Some(chain) => (
-            check::stored_leaf(chain)
-                .map(|leaf| (info(&leaf), check::status(&leaf, &fqdn, clock), origin)),
-            split_concatenated(chain).count(),
-        ),
-        None => (None, 0),
-    };
-    let anchors = store::TRUST_ANCHOR.read().await;
-    let (trust_anchor, trust_anchor_count) = match anchors.as_deref() {
-        Some(anchors) => (
-            check::stored_leaf(anchors).map(|c| info(&c)),
-            split_concatenated(anchors).count(),
-        ),
-        None => (None, 0),
-    };
-    let identity = store::IDENTITY.read().await;
-    let est_identity = identity
-        .as_deref()
-        .and_then(check::stored_leaf)
-        .map(|c| info(&c));
+        let chain = store::CERTIFICATE.read().await;
+        let origin = Origin::from_u8(config().await.get_u8(store::ORIGIN).await.unwrap_or(0));
+        let (certificate, chain_length) = match chain.as_deref() {
+            Some(chain) => (
+                check::stored_leaf(chain)
+                    .map(|leaf| (info(&leaf), check::status(&leaf, &fqdn, clock), origin)),
+                split_concatenated(chain).count(),
+            ),
+            None => (None, 0),
+        };
+        let anchors = store::TRUST_ANCHOR.read().await;
+        let (trust_anchor, trust_anchor_count) = match anchors.as_deref() {
+            Some(anchors) => (
+                check::stored_leaf(anchors).map(|c| info(&c)),
+                split_concatenated(anchors).count(),
+            ),
+            None => (None, 0),
+        };
+        let identity = store::IDENTITY.read().await;
+        let est_identity = identity
+            .as_deref()
+            .and_then(check::stored_leaf)
+            .map(|c| info(&c));
 
-    Status {
-        settings,
-        effective_fqdn: fqdn,
-        https_enabled: https_enabled().await,
-        time_known: clock.known().is_some(),
-        certificate,
-        chain_length,
-        trust_anchor,
-        trust_anchor_count,
-        est_identity,
-        est: EST.lock().await.clone(),
-    }
+        Box::new(Status {
+            settings,
+            effective_fqdn: fqdn,
+            https_enabled: https_enabled().await,
+            time_known: clock.known().is_some(),
+            certificate,
+            chain_length,
+            trust_anchor,
+            trust_anchor_count,
+            est_identity,
+            est: EST.lock().await.clone(),
+        })
+    })
+    .await
 }
 
 /// What the web server presents: the active chain and the device key, as
@@ -811,7 +819,7 @@ pub async fn manager_task(stack: Stack<'static>) {
 
         // On the heap: the checks hold certificates and settings, which
         // the task's static storage would otherwise keep room for always.
-        alloc::boxed::Box::pin(async {
+        crate::heap::boxed(|| async {
             ensure_usable().await;
             if settings().await.mode == Mode::Est {
                 est_step(stack).await;

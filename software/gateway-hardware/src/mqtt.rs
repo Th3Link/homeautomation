@@ -47,6 +47,7 @@ use rust_mqtt::client::options::{
 use rust_mqtt::client::Client;
 use rust_mqtt::io::Transport;
 use rust_mqtt::types::{MqttBinary, MqttString, PacketIdentifier, TopicFilter, TopicName};
+use static_cell::ConstStaticCell;
 
 /// The gateway's client instantiation: a little headroom (4) for
 /// in-flight un-acked SUBSCRIBE/incoming-QoS/outgoing-QoS packets, and
@@ -335,12 +336,39 @@ async fn session<N: Transport>(
     Timer::after(Duration::from_secs(2)).await;
 }
 
+/// The buffers of one broker connection. Static, in place from the start:
+/// in the task's future they would make it ~16 KB larger, and a task's
+/// future is built on the main stack when it is spawned.
+struct Buffers {
+    rx: [u8; 2048],
+    tx: [u8; 2048],
+    read_record: [u8; tls::READ_RECORD_BYTES],
+    write_record: [u8; tls::WRITE_RECORD_BYTES],
+    captured: Vec<u8, { tls::CERT_CAP }>,
+}
+
+impl Buffers {
+    const fn new() -> Self {
+        Self {
+            rx: [0; 2048],
+            tx: [0; 2048],
+            read_record: [0; tls::READ_RECORD_BYTES],
+            write_record: [0; tls::WRITE_RECORD_BYTES],
+            captured: Vec::new(),
+        }
+    }
+}
+
+static BUFFERS: [ConstStaticCell<Buffers>; MQTT_BROKERS] =
+    [const { ConstStaticCell::new(Buffers::new()) }; MQTT_BROKERS];
+
 /// The connection to one broker (slot 0 or 1), kept up forever: connects,
 /// serves, and reconnects after a pause when the connection is lost or the
 /// configuration changes. A slot that isn't enabled just idles.
 #[embassy_executor::task(pool_size = 2)]
 pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
     let broker = slot + 1;
+    let buffers = BUFFERS[slot].take();
     loop {
         let cfg = config().await.load_or_init().await;
         let settings = &cfg.brokers[slot];
@@ -388,9 +416,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         };
 
-        let mut rx_buf = [0u8; 2048];
-        let mut tx_buf = [0u8; 2048];
-        let mut socket = TcpSocket::new(stack, &mut rx_buf, &mut tx_buf);
+        let mut socket = TcpSocket::new(stack, &mut buffers.rx, &mut buffers.tx);
         if let Err(e) = socket.connect((addr, address.port)).await {
             console_log!("mqtt{broker}: tcp connect failed: {e:?}");
             Timer::after(Duration::from_secs(5)).await;
@@ -402,11 +428,9 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         }
 
-        let mut read_record = [0u8; tls::READ_RECORD_BYTES];
-        let mut write_record = [0u8; tls::WRITE_RECORD_BYTES];
-        let mut captured: Vec<u8, { tls::CERT_CAP }> = Vec::new();
+        buffers.captured.clear();
         let trust = if capturing {
-            Trust::Capture(&mut captured)
+            Trust::Capture(&mut buffers.captured)
         } else if let Some(certificate) = &pinned {
             Trust::Pinned(certificate)
         } else {
@@ -414,13 +438,18 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         };
         let opened = embassy_time::with_timeout(
             TLS_HANDSHAKE_TIMEOUT,
-            tls::open(socket, &mut read_record, &mut write_record, trust),
+            tls::open(
+                socket,
+                &mut buffers.read_record,
+                &mut buffers.write_record,
+                trust,
+            ),
         )
         .await;
         match opened {
             Ok(Ok(connection)) if capturing => {
                 drop(connection);
-                pin_captured(slot, &captured).await;
+                pin_captured(slot, &buffers.captured).await;
                 Timer::after(Duration::from_secs(1)).await;
             }
             Ok(Ok(connection)) => session(connection, settings, slot, &address).await,

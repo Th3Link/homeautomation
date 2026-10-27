@@ -35,6 +35,9 @@ pub struct System {
     uptime_s: u64,
     heap_used: usize,
     heap_free: usize,
+    /// Main stack bytes never used since boot: the margin left.
+    stack_untouched: usize,
+    stack_size: usize,
 }
 
 pub async fn get_system() -> Result<impl IntoResponse, ApiError> {
@@ -43,6 +46,8 @@ pub async fn get_system() -> Result<impl IntoResponse, ApiError> {
         uptime_s: embassy_time::Instant::now().as_secs(),
         heap_used: esp_alloc::HEAP.used(),
         heap_free: esp_alloc::HEAP.free(),
+        stack_untouched: crate::stack::untouched(),
+        stack_size: crate::stack::size(),
     })
     .await
 }
