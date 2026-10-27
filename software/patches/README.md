@@ -21,12 +21,12 @@ all of its fixes.
 | `embassy-net` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease` | Needs the smoltcp patches above; no PR yet |
 
 Building a copy on its own (tests, clippy) uses the other copies through
-`software/patches/.cargo/config.toml`. The smoltcp copy has its own tests (`cargo test --lib` in
-`software/patches/smoltcp`, about 670). Building the gateway shows a dozen
-warnings from it: they are upstream's, for the feature set the gateway
-uses, and don't fail `clippy -D warnings` (the copy is no workspace
-member). smoltcp's `main` differs little from 0.13.1 in the changed files,
-so the patches go upstream as they are.
+`software/patches/.cargo/config.toml`. The smoltcp copy has its own tests
+(`cargo test --lib` in `software/patches/smoltcp`, about 670). Building
+the gateway shows a dozen warnings from it: they are upstream's, for the
+feature set the gateway uses, and don't fail `clippy -D warnings` (the
+copy is no workspace member). smoltcp's `main` differs little from 0.13.1
+in the changed files, so the patches go upstream as they are.
 
 ## Updating
 

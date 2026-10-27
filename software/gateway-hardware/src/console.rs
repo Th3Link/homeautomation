@@ -753,49 +753,52 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         None => respond(writer, "ipv4: no DHCP lease").await?,
     }
 
-    // The link-local address embassy-net derives from the MAC (EUI-64).
-    let link_local = core::net::Ipv6Addr::from([
-        0xfe,
-        0x80,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        m[0] ^ 0x02,
-        m[1],
-        m[2],
-        0xff,
-        0xfe,
-        m[3],
-        m[4],
-        m[5],
-    ]);
+    let lease_address = net.dhcpv6.as_ref().and_then(|lease| lease.address);
+    for cidr in &net.v6_addresses {
+        let origin = if cidr.address().is_unicast_link_local() {
+            "link-local"
+        } else if Some(*cidr) == lease_address {
+            "DHCPv6"
+        } else {
+            "SLAAC"
+        };
+        respond(writer, &fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
+    }
+    match net.v6.as_ref().and_then(|v6| v6.gateway) {
+        Some(gateway) => respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?,
+        None => respond(writer, "ipv6 gateway: none").await?,
+    }
+    let rdnss = net.v6.iter().flat_map(|v6| v6.dns_servers.iter());
+    for server in rdnss {
+        respond(writer, &fmt_msg(format_args!("ipv6 dns: {server} (RDNSS)"))).await?;
+    }
+    for server in net.dhcpv6.iter().flat_map(|lease| lease.dns_servers.iter()) {
+        respond(
+            writer,
+            &fmt_msg(format_args!("ipv6 dns: {server} (DHCPv6)")),
+        )
+        .await?;
+    }
+    let flags = net.router_flags;
     respond(
         writer,
-        &fmt_msg(format_args!("ipv6 link-local: {link_local}/64")),
+        &fmt_msg(format_args!(
+            "ipv6 routers: {}{}",
+            if flags.managed {
+                "M (DHCPv6 addresses) "
+            } else {
+                ""
+            },
+            if flags.other {
+                "O (DHCPv6 configuration)"
+            } else if flags.managed {
+                ""
+            } else {
+                "no DHCPv6"
+            }
+        )),
     )
     .await?;
-    match net.v6 {
-        Some(v6) => {
-            respond(
-                writer,
-                &fmt_msg(format_args!("ipv6: {} (SLAAC)", v6.address)),
-            )
-            .await?;
-            match v6.gateway {
-                Some(gateway) => {
-                    respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?
-                }
-                None => respond(writer, "ipv6 gateway: none").await?,
-            }
-            for server in &v6.dns_servers {
-                respond(writer, &fmt_msg(format_args!("ipv6 dns: {server}"))).await?;
-            }
-        }
-        None => respond(writer, "ipv6: no global address (no router advertisement)").await?,
-    }
 
     let ntp = crate::cert::ntp_server().await;
     match crate::wall_clock::now() {
