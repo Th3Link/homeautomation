@@ -29,7 +29,7 @@ jobs:
       run:
         working-directory: software/${{ matrix.crate }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: esp32
