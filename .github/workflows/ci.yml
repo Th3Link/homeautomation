@@ -14,7 +14,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The *-core crates (common-core, gateway-core, cancomponents-core) are
+  # The *-core crates (common-core, gateway-core, cancomponents-core) and
+  # dhcpv6-client are
   # plain #![no_std]-but-host-testable Rust: fmt, clippy, and the test
   # suite all run on a normal stable toolchain, no ESP toolchain needed.
   core-fmt-clippy:
@@ -22,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [common-core, gateway-core, cancomponents-core]
+        crate: [common-core, dhcpv6-client, gateway-core, cancomponents-core]
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}
@@ -39,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [common-core, gateway-core, cancomponents-core]
+        crate: [common-core, dhcpv6-client, gateway-core, cancomponents-core]
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}
@@ -73,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [common-core, gateway-core, cancomponents-core]
+        crate: [common-core, dhcpv6-client, gateway-core, cancomponents-core]
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}

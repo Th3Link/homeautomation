@@ -1,0 +1,10 @@
+[package]
+name = "dhcpv6-client"
+description = "Sans-IO DHCPv6 client (RFC 8415): stateful IA_NA and stateless configuration, no_std, no allocator"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+heapless = { version = "0.9" }
