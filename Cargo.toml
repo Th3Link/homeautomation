@@ -14,7 +14,9 @@ exclude = ["software/patches"]
 
 [patch.crates-io]
 esp-hal = { path = "software/patches/esp-hal" }
-embassy-net = { path = "software/patches/embassy-net" }
+# Fork: every SLAAC address, RDNSS, the M/O flags, a DHCPv6 lease; branch
+# embassy-net-v0.9.1-gateway; see software/patches/README.md.
+embassy-net = { git = "https://github.com/Th3Link/embassy", rev = "8b544c3c4d8b5952073420d17396e30700c46190" }
 # Fork with the SLAAC fixes (multiple prefixes, M/O flags, RDNSS), branch
 # v0.13.1-gateway; see software/patches/README.md.
 smoltcp = { git = "https://github.com/Th3Link/smoltcp", rev = "dfe04756328dac94bc227c1e6f151280a13e24d4" }
