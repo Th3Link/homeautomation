@@ -15,7 +15,9 @@ exclude = ["software/patches"]
 [patch.crates-io]
 esp-hal = { path = "software/patches/esp-hal" }
 embassy-net = { path = "software/patches/embassy-net" }
-smoltcp = { path = "software/patches/smoltcp" }
+# Fork with the SLAAC fixes (multiple prefixes, M/O flags, RDNSS), branch
+# v0.13.1-gateway; see software/patches/README.md.
+smoltcp = { git = "https://github.com/Th3Link/smoltcp", rev = "dfe04756328dac94bc227c1e6f151280a13e24d4" }
 
 [workspace.package]
 edition = "2021"

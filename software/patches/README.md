@@ -1,9 +1,23 @@
 # Patched upstream crates
 
-Copies of crates.io releases with fixes the gateway needs before upstream
-releases them. The workspace uses them through `[patch.crates-io]` in the
-root `Cargo.toml`; they are excluded from the workspace, so `cargo` treats
-each as a package of its own.
+Crates.io releases with fixes the gateway needs before upstream releases
+them. The workspace uses them through `[patch.crates-io]` in the root
+`Cargo.toml`, either from a fork (by git revision) or from a copy here.
+
+## Forks
+
+| Crate | Fork, branch | Base | Fixes | Upstream |
+|---|---|---|---|---|
+| `smoltcp` | [Th3Link/smoltcp](https://github.com/Th3Link/smoltcp), `v0.13.1-gateway` | 0.13.1 | SLAAC default route next to IPv4 routes (smoltcp-rs/smoltcp#1206, taken over); every prefix of a Router Advertisement (`wire::NdiscOptionIter`, issue #1165); the routers' M/O flags and RDNSS servers (`Interface::slaac_router_flags`, `Interface::slaac_dns_servers`); no endless polling after three unanswered Router Solicitations | PR branches on 0.14 in the fork: `slaac-every-prefix`, `slaac-router-flags-rdnss` (on top of the former), `slaac-solicitation-poll` |
+
+A fork's gateway branch starts at the release tag, so it differs from the
+release by the fixes alone. A new revision goes into the root `Cargo.toml`
+and `.cargo/config.toml` here.
+
+## Copies
+
+The copies are excluded from the workspace, so `cargo` treats each as a
+package of its own.
 
 Each copy is committed unchanged first (the crates.io package as it is in
 `~/.cargo/registry`, without its `Cargo.lock`), and the fixes come as
@@ -14,23 +28,20 @@ all of its fixes.
 | Crate | Base | Fix | Upstream |
 |---|---|---|---|
 | `esp-hal` | 1.2.2 | ESP32: no TX checksum insertion by the MAC; the network stack computes the checksums | Fixed on main in esp-rs/esp-hal@0eb3e53 (option `ethernet.tx_checksum_offload`), not released yet; issue esp-rs/esp-hal#6173 |
-| `smoltcp` | 0.13.1 | SLAAC default route kept next to IPv4 routes | smoltcp-rs/smoltcp#1206 (open, taken over as is), issue #1191 |
-| `smoltcp` | 0.13.1 | SLAAC configures every prefix of a Router Advertisement, not just the last (`wire::NdiscOptionIter`) | Issue smoltcp-rs/smoltcp#1165; no PR yet |
-| `smoltcp` | 0.13.1 | Routers' M/O flags and RDNSS servers (RFC 8106): `Interface::slaac_router_flags`, `Interface::slaac_dns_servers` | No PR yet |
-| `smoltcp` | 0.13.1 | SLAAC no longer polls without end after three unanswered Router Solicitations | No issue or PR yet |
-| `embassy-net` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease` | Needs the smoltcp patches above; no PR yet |
+| `embassy-net` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease` | Needs the smoltcp fork above. No PR possible: embassy-net's `main` has moved from smoltcp to xarxa, and there is no 0.9 maintenance branch; xarxa already has multiple prefixes and the M/O flags, RDNSS is on its to-do list |
 
-Building a copy on its own (tests, clippy) uses the other copies through
-`software/patches/.cargo/config.toml`. The smoltcp copy has its own tests
-(`cargo test --lib` in `software/patches/smoltcp`, about 670). Building
-the gateway shows a dozen warnings from it: they are upstream's, for the
-feature set the gateway uses, and don't fail `clippy -D warnings` (the
-copy is no workspace member). smoltcp's `main` differs little from 0.13.1
-in the changed files, so the patches go upstream as they are.
+Building a copy on its own (tests, clippy) uses the smoltcp fork through
+`software/patches/.cargo/config.toml`. Building the gateway shows a dozen
+warnings from smoltcp: they are upstream's, for the feature set the
+gateway uses, and don't fail `clippy -D warnings` (it is no workspace
+member). The smoltcp fork has its own tests (`cargo test --lib`, about
+670).
 
 ## Updating
 
 When a new release comes out: compare its changelog with the fixes above.
-If it has all of them, delete the copy and its `[patch.crates-io]` line. If
-not, copy the new release in (one commit), reapply the remaining fixes (one
-commit each) and update the table.
+If it has all of them, delete the fork's or copy's `[patch.crates-io]` line
+(and the copy). If not: for a fork, rebase the remaining fixes onto the new
+release's tag in a new gateway branch; for a copy, copy the new release in
+(one commit) and reapply the remaining fixes (one commit each). Then
+update the table.

@@ -37,7 +37,8 @@ setup; neither depends on the other.
   `mqtt://[fd00::1]:1883`, `https://[fd00::1]:8443` for EST.
 - **IPv6-only works:** no part of the gateway waits for DHCPv4.
 
-**Patched copies** (`software/patches`) of esp-hal (no TX checksum
+**Patched versions** (forks by git revision, or copies in
+`software/patches`) of esp-hal (no TX checksum
 insertion on the ESP32), smoltcp (every prefix of an RA, the routers' M/O
 flags and RDNSS, the SLAAC default route next to IPv4's) and embassy-net
 (every address kept, RDNSS as DNS, `set_dhcpv6_lease`), until upstream has
@@ -58,5 +59,5 @@ with theirs, and what DHCPv6 does.
   instead), more than one DHCPv6 address, mDNS.
 - An EST server addressed by an IPv6 (or IPv4) address must have it as a
   SAN IP address in its certificate; MbedTLS also sends it as SNI.
-- The patched copies have to be dropped (or rebased) as upstream releases
-  the fixes; `software/patches/README.md` tracks them.
+- The patched versions have to be dropped (or rebased) as upstream
+  releases the fixes; `software/patches/README.md` tracks them.

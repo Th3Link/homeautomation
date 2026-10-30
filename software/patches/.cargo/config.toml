@@ -1,4 +1,4 @@
 # Building a patched crate here on its own (tests, clippy) uses the other
 # patched crates, like the workspace does.
 [patch.crates-io]
-smoltcp = { path = "smoltcp" }
+smoltcp = { git = "https://github.com/Th3Link/smoltcp", rev = "dfe04756328dac94bc227c1e6f151280a13e24d4" }
