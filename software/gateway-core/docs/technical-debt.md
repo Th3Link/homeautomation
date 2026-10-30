@@ -109,14 +109,15 @@ These aren't "bad", just genuinely unfinished relative to the original's
 feature set — tracked here so they don't get lost, distinct from the
 design-quality complaints above:
 
-- **Patched copy of `esp-hal`.** The ESP32 MAC's checksum insertion is
-  broken: it gets every second checksum or so wrong, and it writes the IPv4
-  checksums into some IPv6 frames, right over their addresses (so IPv6 TCP
-  connections stalled). esp-hal 1.2.2 always switches it on; the fix
-  (esp-rs/esp-hal@0eb3e53) is on esp-hal's main but in no release yet, so
-  the workspace builds a patched copy of 1.2.2
-  ([`software/patches`](../../patches/README.md)). It goes once a release has
-  the fix.
+- **Forks of `esp-hal`, `smoltcp` and `embassy-net`.** The ESP32 MAC's
+  checksum insertion is broken: it gets every second checksum or so wrong,
+  and it writes the IPv4 checksums into some IPv6 frames, right over their
+  addresses (so IPv6 TCP connections stalled). esp-hal 1.2.2 always switches
+  it on; the fix (esp-rs/esp-hal@0eb3e53) is on esp-hal's main but in no
+  release yet. smoltcp and embassy-net 0.9 lack what IPv6 first needs
+  (ADR 0019). The workspace takes all three from forks
+  ([`software/patches`](../../patches/README.md)); each goes once a release
+  has its fixes. embassy-net never will: its main has moved to xarxa.
 - **CAN-bus MQTT logging passthrough** (`canbus/log/0x<hex>`, toggled by
   the `mqtt_logging` RPC verb in the original) is speced in
   [`protocol-mqtt.md`](protocol-mqtt.md#canbuslog0xhex-planned-in-the-original-not-currently-wired-up)
