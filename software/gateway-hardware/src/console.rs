@@ -804,7 +804,7 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     )
     .await?;
 
-    match net.v4 {
+    match &net.v4 {
         Some(v4) => {
             respond(
                 writer,
@@ -824,15 +824,8 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         None => respond(writer, "ipv4: no DHCP lease").await?,
     }
 
-    let lease_address = net.dhcpv6.as_ref().and_then(|lease| lease.address);
     for cidr in &net.v6_addresses {
-        let origin = if cidr.address().is_unicast_link_local() {
-            "link-local"
-        } else if Some(*cidr) == lease_address {
-            "DHCPv6"
-        } else {
-            "SLAAC"
-        };
+        let origin = net.v6_origin(cidr);
         respond(writer, &fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
     }
     match net.v6.as_ref().and_then(|v6| v6.gateway) {

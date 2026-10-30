@@ -4,11 +4,13 @@ import { FirmwareUpload } from '../firmware-upload.js';
 import { html, useLoad, run, notify, duration, Section, Loading, Field, Button } from '../ui.js';
 
 export function Gateway() {
-  return html`<${Info} /><${Settings} /><${Firmware} />`;
+  // One request for both sections: the gateway serves one HTTPS session
+  // at a time.
+  const system = useLoad(api.system.get, 5000);
+  return html`<${Info} ...${system} /><${Network} ...${system} /><${Settings} /><${Firmware} />`;
 }
 
-function Info() {
-  const { data, error } = useLoad(api.system.get, 5000);
+function Info({ data, error }) {
   const restart = async () => {
     if (!confirm('Restart the gateway?')) return;
     await run(api.system.restart, 'Restarting…');
@@ -23,6 +25,26 @@ function Info() {
             <div><dt>Heap</dt><dd>${Math.round(data.heap_used / 1024)} KiB used, ${Math.round(data.heap_free / 1024)} KiB free</dd></div>
             <div><dt>Stack</dt><dd>${Math.round(data.stack_untouched / 1024)} of ${Math.round(data.stack_size / 1024)} KiB never used</dd></div>
           </dl>`}
+    <//>`;
+}
+
+function Network({ data, error }) {
+  if (!data) return html`<${Section} title="Network"><${Loading} error=${error} /><//>`;
+  const n = data.network;
+  if (!n) return html`<${Section} title="Network"><p>No Ethernet.</p><//>`;
+  const list = (items) => items.map((i) => html`<div>${i.address} <span class="muted">(${i.origin})</span></div>`);
+  const dhcpv6 = { off: 'not offered by the routers', stateless: 'configuration only (O)', stateful: 'addresses and configuration (M)' }[n.dhcpv6_mode];
+  return html`
+    <${Section} title="Network" aside=${html`<span class=${'badge ' + (n.link_up ? 'ok' : 'warn')}>${n.link_up ? 'link up' : 'link down'}</span>`}>
+      <dl class="facts">
+        <div><dt>IPv6</dt><dd>${n.ipv6.length ? list(n.ipv6) : 'none'}</dd></div>
+        <div><dt>IPv6 gateway</dt><dd>${n.ipv6_gateway || 'none'}</dd></div>
+        <div><dt>DHCPv6</dt><dd>${dhcpv6}</dd></div>
+        <div><dt>IPv4</dt><dd>${n.ipv4 ? html`${n.ipv4} <span class="muted">(DHCP)</span>` : 'no DHCP lease'}</dd></div>
+        <div><dt>IPv4 gateway</dt><dd>${n.ipv4_gateway || 'none'}</dd></div>
+        <div><dt>DNS servers</dt><dd>${n.dns_servers.length ? list(n.dns_servers) : 'none'}</dd></div>
+        <div><dt>MAC</dt><dd>${n.mac}</dd></div>
+      </dl>
     <//>`;
 }
 

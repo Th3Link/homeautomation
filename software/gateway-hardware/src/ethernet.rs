@@ -131,6 +131,20 @@ pub struct NetInfo {
     pub dhcpv6: Option<Dhcpv6Lease>,
 }
 
+impl NetInfo {
+    /// Where an IPv6 address of [`Self::v6_addresses`] comes from:
+    /// `link-local`, `DHCPv6` or `SLAAC`.
+    pub fn v6_origin(&self, cidr: &Ipv6Cidr) -> &'static str {
+        if cidr.address().is_unicast_link_local() {
+            "link-local"
+        } else if self.dhcpv6.as_ref().and_then(|lease| lease.address) == Some(*cidr) {
+            "DHCPv6"
+        } else {
+            "SLAAC"
+        }
+    }
+}
+
 /// The stack lives in the network tasks (it can't be shared between
 /// tasks), so others ask [`info_task`] for a [`NetInfo`].
 static STARTED: AtomicBool = AtomicBool::new(false);
