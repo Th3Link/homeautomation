@@ -21,8 +21,8 @@ setup; neither depends on the other.
 - **Addresses.** The link-local address, one SLAAC address per prefix the
   routers announce (with their lifetimes), and a DHCPv6 address when the
   routers set `M`. IPv4 from DHCPv4 as before.
-- **DHCPv6** (`software/dhcpv6-client`, a sans-IO client without allocator,
-  written for this after mozim's flow): the routers' flags decide. `M`:
+- **DHCPv6** (`dhcpeav6-client` from github.com/Th3Link/dhcpea, a sans-IO
+  client without allocator, written for this after mozim's flow): the routers' flags decide. `M`:
   an address (IA_NA, as a /128) plus configuration, renewed at T1/T2 and
   given back before every restart. Only `O`: configuration only
   (Information-request). Neither: off. Its DNS servers join the others;

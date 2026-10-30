@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "software/common-core",
-    "software/dhcpv6-client",
     "software/common-hardware",
     "software/gateway-core",
     "software/gateway-hardware",

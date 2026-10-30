@@ -42,7 +42,8 @@ bareminal_macros = { version = "0.3" }
 num_enum = { version = "0.7", default-features = false }
 thiserror = { version = "2", default-features = false }
 gateway-core = { path = "../gateway-core/" }
-dhcpv6-client = { path = "../dhcpv6-client/" }
+# The DHCPv6 client (sans-IO, no allocator), github.com/Th3Link/dhcpea.
+dhcpeav6-client = { git = "https://github.com/Th3Link/dhcpea", rev = "b8fdde858d0025871f1b92d7a1c17acfb173b8e7" }
 common-hardware = { path = "../common-hardware/" }
 # `auto-icmp-echo-reply`: the gateway answers ping (IPv4 and IPv6).
 embassy-net = { version = "0.9.1", features = ["proto-ipv4", "dhcpv4", "dhcpv4-hostname", "slaac", "tcp", "udp", "dns", "medium-ethernet", "auto-icmp-echo-reply"] }
