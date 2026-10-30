@@ -41,7 +41,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot) |
+| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv6` (`address` with prefix length and `origin`: `link-local`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`) |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
 | `POST /bus/ping`, `/bus/refresh`, `/bus/restart` | to every device |
 | `PUT /bus/silence` `{"on": true}` | tells every device to be quiet / talk again |
