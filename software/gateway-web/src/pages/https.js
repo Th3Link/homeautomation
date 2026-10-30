@@ -147,7 +147,7 @@ function Est({ d, reload }) {
   return html`
     <${Section} title="EST">
       <div class="row">
-        <${Field} label="EST server" hint="https://host[:port][/.well-known/est/label]"><input value=${url} onInput=${(ev) => setUrl(ev.target.value)} /><//>
+        <${Field} label="EST server" hint="https://host[:port][/.well-known/est/label]; an IPv6 address in brackets: https://[fd00::1]"><input value=${url} onInput=${(ev) => setUrl(ev.target.value)} /><//>
       </div>
       <label class="check"><input type="checkbox" checked=${auto} onChange=${(ev) => setAuto(ev.target.checked)} /> Renew automatically (30 days before expiry)</label>
       <p>Trust anchor: ${d.trust_anchor ? html`<span class="badge ok">installed</span>` : html`<span class="badge bad">missing</span> (below)`}
