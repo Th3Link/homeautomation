@@ -71,15 +71,10 @@ pub async fn exchange(
     let trust =
         mbedtls_rs::Certificate::new(mbedtls_rs::X509::PEM(trust)).map_err(|_| EstError::Tls)?;
 
-    let address = match server.host.parse() {
-        Ok(address) => address,
-        Err(_) => *stack
-            .dns_query(server.host, embassy_net::dns::DnsQueryType::A)
-            .await
-            .map_err(|_| EstError::Dns)?
-            .first()
-            .ok_or(EstError::Dns)?,
-    };
+    let addresses = crate::resolve::resolve(stack, server.host).await;
+    if addresses.is_empty() {
+        return Err(EstError::Dns);
+    }
 
     let mut host = String::from(server.host);
     host.push('\0');
@@ -89,10 +84,10 @@ pub async fn exchange(
     let mut tx = alloc::vec![0u8; 2048];
     let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
     socket.set_timeout(Some(TIMEOUT));
-    match with_timeout(TIMEOUT, socket.connect((address, server.port))).await {
-        Ok(Ok(())) => {}
-        Ok(Err(_)) => return Err(EstError::Connect),
-        Err(_) => return Err(EstError::Timeout),
+    match crate::resolve::connect(&mut socket, &addresses, server.port).await {
+        Ok(()) => {}
+        Err(crate::resolve::ConnectFailed::Timeout) => return Err(EstError::Timeout),
+        Err(_) => return Err(EstError::Connect),
     }
 
     let mut config = ClientSessionConfig::new();
