@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [common-core, gateway-core, cancomponents-core]
+        crate: [common-core, dhcpv6-client, gateway-core, cancomponents-core]
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}
@@ -95,6 +95,10 @@ jobs:
           path: site/common-hardware
       - uses: actions/download-artifact@v8
         with:
+          name: docs-dhcpv6-client
+          path: site/dhcpv6-client
+      - uses: actions/download-artifact@v8
+        with:
           name: docs-gateway-core
           path: site/gateway-core
       - uses: actions/download-artifact@v8
@@ -157,6 +161,10 @@ jobs:
               <li>
                 <a href="common-hardware/common_hardware/index.html">common-hardware</a>
                 &mdash; shared ESP32 hardware-support helpers
+              </li>
+              <li>
+                <a href="dhcpv6-client/dhcpv6_client/index.html">dhcpv6-client</a>
+                &mdash; the gateway's DHCPv6 client (no_std, no allocator, no I/O)
               </li>
             </ul>
           </body>
