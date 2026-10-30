@@ -16,6 +16,7 @@ static RESTART: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub async fn restart_task() {
     RESTART.wait().await;
     Timer::after(Duration::from_millis(500)).await;
+    crate::dhcpv6::release().await;
     esp_hal::system::software_reset();
 }
 

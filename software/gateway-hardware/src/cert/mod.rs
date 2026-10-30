@@ -173,6 +173,7 @@ pub struct Settings {
     pub validity_years: u8,
     pub est_url: String<URL_CAP>,
     pub est_auto_renew: bool,
+    /// As configured; empty means automatic ([`ntp_server`]).
     pub ntp_server: String<NTP_CAP>,
 }
 
@@ -188,11 +189,7 @@ pub async fn settings() -> Settings {
             .unwrap_or(DEFAULT_VALIDITY_YEARS),
         est_url: store.get_str(store::EST_URL).await.unwrap_or_default(),
         est_auto_renew: store.get_bool(store::EST_AUTO_RENEW).await.unwrap_or(true),
-        ntp_server: store
-            .get_str(store::NTP_SERVER)
-            .await
-            .filter(|s: &String<NTP_CAP>| !s.is_empty())
-            .unwrap_or_else(|| String::try_from(DEFAULT_NTP).unwrap_or_default()),
+        ntp_server: store.get_str(store::NTP_SERVER).await.unwrap_or_default(),
     }
 }
 
@@ -213,8 +210,14 @@ pub async fn effective_fqdn() -> String<FQDN_CAP> {
     fqdn
 }
 
+/// The NTP server SNTP asks: the configured one, else the one DHCPv6
+/// named, else pool.ntp.org.
 pub async fn ntp_server() -> String<NTP_CAP> {
-    settings().await.ntp_server
+    let configured = settings().await.ntp_server;
+    if !configured.is_empty() {
+        return configured;
+    }
+    crate::dhcpv6::ntp_server().unwrap_or_else(|| String::try_from(DEFAULT_NTP).unwrap_or_default())
 }
 
 /// Is HTTPS on? (`web-https off` on the console turns the web server back

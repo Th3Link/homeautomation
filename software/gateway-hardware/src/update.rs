@@ -74,6 +74,7 @@ pub async fn complete() -> bool {
     match ota.ota_flush(true, true) {
         Ok(()) => {
             drop(guard);
+            crate::dhcpv6::release().await;
             esp_hal::system::software_reset();
         }
         Err(e) => {
