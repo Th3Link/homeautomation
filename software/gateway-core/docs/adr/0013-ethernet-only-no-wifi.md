@@ -66,6 +66,7 @@ the serial console.
 - IPv6 addressing is SLAAC only: `embassy-net`/`smoltcp` have no DHCPv6
   client. The MQTT broker may be given as a hostname (A, then AAAA
   lookup) or a bracketed IPv6 literal, `mqtt://[fd00::1]:1883`.
+  (Since [ADR 0019](0019-ipv6-first.md): DHCPv6 as well, and AAAA first.)
 - The APLL/GPIO17 clock wiring facts from ADR 0002 still apply to the
   board, they just no longer constrain anything in software.
 - The original's persisted WiFi settings have no place in the new config
