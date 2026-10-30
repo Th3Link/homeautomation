@@ -182,5 +182,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "a5ab29e161a4636e2e4ec7ceab19f2c10cccc132",
+  "date": "2026-10-30T22:10:11+01:00",
+  "subject": "Merge pull request #17 from Th3Link/feat/restart-on-panic",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 421600,
+    "iram": 19008,
+    "dram_static": 36408,
+    "stack_budget": 160200,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443847,
+    "iram": 16036,
+    "dram_static": 36316,
+    "stack_budget": 160288,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
