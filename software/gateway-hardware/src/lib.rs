@@ -19,6 +19,7 @@ pub mod cert;
 pub mod config;
 pub mod console;
 pub mod device_list;
+pub mod dhcpv6;
 pub mod echo;
 pub mod ethernet;
 pub mod heap;

@@ -10,7 +10,7 @@ whole system, plus the documentation tying it together.
 
 - **The gateway** (`software/gateway-core` + `software/gateway-hardware`)
   — bridges the CAN bus to MQTT, over wired Ethernet
-  (DHCPv4 + SLAAC) (see `software/gateway-core/docs/adr/0013-ethernet-only-no-wifi.md`).
+  (DHCPv4, SLAAC and DHCPv6) (see `software/gateway-core/docs/adr/0013-ethernet-only-no-wifi.md`).
   Start at
   [`software/gateway-core/docs/requirements.md`](../software/gateway-core/docs/requirements.md).
 - **CAN nodes** (`software/cancomponents-core` +

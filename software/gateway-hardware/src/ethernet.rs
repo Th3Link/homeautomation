@@ -4,7 +4,8 @@
 //! ADR 0013 for why WiFi was dropped).
 //!
 //! The network needs no setup: [`init_stack`] runs dual-stack — a DHCPv4
-//! client plus IPv6 SLAAC — so a freshly-flashed gateway just picks up
+//! client plus IPv6 SLAAC, and DHCPv6 where the routers ask for it
+//! ([`crate::dhcpv6`]) — so a freshly-flashed gateway just picks up
 //! addresses from the LAN (announcing its configured hostname over DHCP,
 //! so it's findable by name) and everything else — MQTT broker, credentials — is configured over the
 //! serial console. There's deliberately no link-up wait or timeout either:
@@ -111,10 +112,10 @@ impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareCheck
 // Constructed in place: by value it would pass through the stack.
 static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
-// DHCP, DNS, two MQTT brokers, six web sockets (five HTTPS and the
+// DHCP, DHCPv6, DNS, two MQTT brokers, six web sockets (five HTTPS and the
 // redirect on port 80; plain HTTP uses three), the EST client and SNTP, plus
 // one spare. Keep in step with `web::HTTPS_TASKS`.
-static NET_RESOURCES: StaticCell<StackResources<13>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<StackResources<14>> = StaticCell::new();
 
 /// A look at the network state, for the console's `network`.
 #[derive(Debug, Clone)]
@@ -250,7 +251,7 @@ async fn net_task(mut runner: Runner<'static, EthDriver>) {
 /// Starts the `embassy-net` stack over `eth` — a DHCPv4 client, matching
 /// `LAN.cpp`'s (ESP-IDF default) behavior, announcing `hostname` (DHCP
 /// option 12; silently omitted if it doesn't fit the 32-byte limit), plus
-/// IPv6 SLAAC (smoltcp has no DHCPv6 client).
+/// IPv6 SLAAC (DHCPv6 runs in its own task, [`crate::dhcpv6`]).
 pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> Stack<'static> {
     let mut dhcp = embassy_net::DhcpConfig::default();
     dhcp.hostname = heapless::String::try_from(hostname).ok();

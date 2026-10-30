@@ -9,7 +9,8 @@ use esp_hal::timer::timg::TimerGroup;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
 use gateway_hardware::{
-    can, cert, config, console, console_log, ethernet, flash, https, mqtt, update, wall_clock, web,
+    can, cert, config, console, console_log, dhcpv6, ethernet, flash, https, mqtt, update,
+    wall_clock, web,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -103,6 +104,7 @@ async fn main(spawner: Spawner) -> ! {
         for slot in 0..gateway_core::config::MQTT_BROKERS {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
+        spawner.spawn(dhcpv6::dhcpv6_task(stack).unwrap());
         spawner.spawn(wall_clock::sntp_task(stack).unwrap());
         spawner.spawn(cert::manager_task(stack).unwrap());
         web::spawn(&spawner, stack, cert::https_enabled().await);

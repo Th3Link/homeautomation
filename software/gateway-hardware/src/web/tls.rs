@@ -161,6 +161,7 @@ struct StatusView<'a> {
     https: bool,
     time_known: bool,
     ntp_server: &'a str,
+    ntp_server_in_use: &'a str,
     certificate: Option<CertView<'a>>,
     trust_anchor: Option<CertView<'a>>,
     est: EstView<'a>,
@@ -168,6 +169,7 @@ struct StatusView<'a> {
 
 async fn read() -> Result<impl IntoResponse, ApiError> {
     let status = cert::status().await;
+    let ntp_server_in_use = cert::ntp_server().await;
     let now = embassy_time::Instant::now();
     let view = StatusView {
         fqdn: &status.settings.fqdn,
@@ -177,6 +179,7 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         https: status.https_enabled,
         time_known: status.time_known,
         ntp_server: &status.settings.ntp_server,
+        ntp_server_in_use: &ntp_server_in_use,
         certificate: status
             .certificate
             .as_ref()

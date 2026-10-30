@@ -193,8 +193,9 @@ function Time({ d, reload }) {
     <${Section} title="Time" aside=${html`<span class=${'badge ' + (d.time_known ? 'ok' : 'warn')}>${d.time_known ? 'synchronised' : 'not synchronised'}</span>`}>
       <p class="muted">Certificate dates and EST need the time; the gateway has no clock of its own.</p>
       <div class="row">
-        <${Field} label="NTP server"><input value=${server} onInput=${(e) => setServer(e.target.value)} /><//>
+        <${Field} label="NTP server"><input value=${server} placeholder="automatic" onInput=${(e) => setServer(e.target.value)} /><//>
       </div>
+      <p class="muted">Empty: the server DHCPv6 names, else pool.ntp.org. In use: ${d.ntp_server_in_use}</p>
       <div class="buttons"><${Button} onClick=${save}>Save<//></div>
     <//>`;
 }

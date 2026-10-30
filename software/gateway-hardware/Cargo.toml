@@ -42,6 +42,7 @@ bareminal_macros = { version = "0.3" }
 num_enum = { version = "0.7", default-features = false }
 thiserror = { version = "2", default-features = false }
 gateway-core = { path = "../gateway-core/" }
+dhcpv6-client = { path = "../dhcpv6-client/" }
 common-hardware = { path = "../common-hardware/" }
 embassy-net = { version = "0.9.1", features = ["proto-ipv4", "dhcpv4", "dhcpv4-hostname", "slaac", "tcp", "udp", "dns", "medium-ethernet"] }
 embassy-net-driver = { version = "0.2" }
