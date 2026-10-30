@@ -55,8 +55,7 @@ with theirs, and what DHCPv6 does.
   server keeps the lease, the SLAAC one as long as the MAC and prefix stay.
 - Not supported: temporary addresses (RFC 8981), DHCPv6 prefix delegation,
   DNSSL from Router Advertisements, Confirm after a link change (Rebind
-  instead), more than one DHCPv6 address, mDNS. The gateway doesn't answer
-  ping (smoltcp's `auto-icmp-echo-reply` is off).
+  instead), more than one DHCPv6 address, mDNS.
 - An EST server addressed by an IPv6 (or IPv4) address must have it as a
   SAN IP address in its certificate; MbedTLS also sends it as SNI.
 - The patched copies have to be dropped (or rebased) as upstream releases
