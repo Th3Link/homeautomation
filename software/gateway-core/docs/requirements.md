@@ -44,7 +44,8 @@ specification this section summarizes.
 - **Wired network, zero setup**: Ethernet is the only network path (no
   WiFi — [ADR 0013](adr/0013-ethernet-only-no-wifi.md), a deliberate
   deviation from the original). The gateway runs dual-stack (DHCPv4 plus IPv6
-  SLAAC), announcing its hostname over DHCP, handles the cable being
+  SLAAC, and DHCPv6 stateless or stateful as the routers' M/O flags ask),
+  announcing its hostname over DHCP, handles the cable being
   plugged in or swapped at runtime, and needs no network configuration
   before it is reachable.
 - **Consolidated configuration**: hostname, MQTT broker, web auth,

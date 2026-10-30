@@ -1,0 +1,864 @@
+#![deny(missing_docs)]
+use heapless::{LinearMap, Vec};
+
+use crate::config::{DNS_MAX_SERVER_COUNT, IFACE_MAX_PREFIX_COUNT, IFACE_MAX_ROUTE_COUNT};
+use crate::time::{Duration, Instant};
+use crate::wire::{Ipv6Address, Ipv6Cidr, NdiscPrefixInformation, ipv6::AddressExt};
+use crate::wire::{NdiscOptionRepr, NdiscPrefixInfoFlags, NdiscRouterFlags};
+
+const MAX_RTR_SOLICITATIONS: u8 = 3;
+const RTR_SOLICITATION_INTERVAL: Duration = Duration::from_secs(4);
+const IPV6_DEFAULT: Ipv6Cidr = Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 0);
+/// How long a router's flags count at least after its last advertisement:
+/// the longest a router may wait between two unsolicited ones
+/// (MaxRtrAdvInterval, RFC 4861 § 6.2.1). A router with a lifetime of zero
+/// (no default route) still announces DHCPv6 this way.
+const ROUTER_FLAGS_LIFETIME: Duration = Duration::from_secs(1800);
+
+/// Router solicitation state machine
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Phase {
+    Start,
+    Discovering,
+    Maintaining,
+    None,
+}
+
+/// A prefix of addresses received via router advertisements
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Route {
+    /// IPv6 cidr to route
+    pub cidr: Ipv6Cidr,
+    /// Router, origin of the advertisement
+    pub via_router: Ipv6Address,
+    /// Valid lifetime of the route
+    pub valid_until: Instant,
+}
+
+/// Info associated with a prefix
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct PrefixInfo {
+    preferred_until: Instant,
+    valid_until: Instant,
+}
+
+impl PrefixInfo {
+    fn new(preferred_until: Instant, valid_until: Instant) -> Self {
+        Self {
+            preferred_until,
+            valid_until,
+        }
+    }
+
+    /// Derive the prefix information from the neighbor discovery option.
+    pub(crate) fn from_prefix(prefix: &NdiscPrefixInformation, now: Instant) -> Self {
+        let preferred_until = now + prefix.preferred_lifetime;
+        let valid_until = now + prefix.valid_lifetime;
+
+        Self::new(preferred_until, valid_until)
+    }
+
+    /// Get whether the prefix is still valid.
+    pub(crate) fn is_valid(&self, now: Instant) -> bool {
+        self.valid_until > now
+    }
+}
+
+/// The flags of a router on the link, from its latest advertisement.
+#[derive(Debug, Clone, Copy)]
+struct Router {
+    address: Ipv6Address,
+    flags: NdiscRouterFlags,
+    valid_until: Instant,
+}
+
+/// A DNS server announced by a router (RDNSS, RFC 8106).
+#[derive(Debug, Clone, Copy)]
+struct DnsServer {
+    address: Ipv6Address,
+    valid_until: Instant,
+}
+
+impl Route {
+    /// Compare this route based on the prefix and the next hop router.
+    pub fn same_route(&self, cidr: &Ipv6Cidr, via_router: &Ipv6Address) -> bool {
+        self.cidr == *cidr && self.via_router == *via_router
+    }
+
+    /// Get whether the route is still valid.
+    pub fn is_valid(&self, now: Instant) -> bool {
+        self.valid_until > now
+    }
+}
+
+/// SLAAC runtime state
+///
+/// Tracks router solicitations and collects information from all received
+/// router advertisements.
+///
+/// State must be synchronized with the IP addresses and routes in the `Interface`.
+#[derive(Debug)]
+pub struct Slaac {
+    /// Set of prefixes received.
+    prefix: LinearMap<Ipv6Cidr, PrefixInfo, IFACE_MAX_PREFIX_COUNT>,
+    /// Set of routes received.
+    routes: Vec<Route, IFACE_MAX_ROUTE_COUNT>,
+    /// The routers heard from, with the flags of their latest advertisement.
+    routers: Vec<Router, IFACE_MAX_ROUTE_COUNT>,
+    /// DNS servers received.
+    dns_servers: Vec<DnsServer, DNS_MAX_SERVER_COUNT>,
+    /// Router discovery phase.
+    phase: Phase,
+    /// Signal for address and route updates.
+    sync_required: bool,
+    /// Time to next router solicitation.
+    retry_rs_at: Instant,
+    /// Number of solicitations emitted.
+    num_solicitations: u8,
+}
+
+impl Slaac {
+    pub(super) fn new() -> Self {
+        Self {
+            prefix: LinearMap::new(),
+            routes: Vec::new(),
+            routers: Vec::new(),
+            dns_servers: Vec::new(),
+            phase: Phase::Start,
+            sync_required: false,
+            retry_rs_at: Instant::from_millis(0),
+            num_solicitations: MAX_RTR_SOLICITATIONS,
+        }
+    }
+
+    /// Get whether router advertisement information is updated.
+    ///
+    /// This flags whether new prefixes or routes have been received, or current prefixes and
+    /// routes have expired.
+    pub(crate) fn has_ra_update(&self) -> bool {
+        self.sync_required
+    }
+
+    /// Get a reference to the map of prefixes stored.
+    pub(crate) fn prefix(&self) -> &LinearMap<Ipv6Cidr, PrefixInfo, IFACE_MAX_PREFIX_COUNT> {
+        &self.prefix
+    }
+
+    /// Get a reference to the set of routes stored.
+    pub(crate) fn routes(&self) -> &Vec<Route, IFACE_MAX_ROUTE_COUNT> {
+        &self.routes
+    }
+
+    /// The Managed and Other configuration flags of all routers heard from
+    /// recently, OR-ed: whether DHCPv6 offers addresses (`MANAGED`) or other
+    /// configuration (`OTHER`).
+    pub(crate) fn router_flags(&self, now: Instant) -> NdiscRouterFlags {
+        self.routers
+            .iter()
+            .filter(|router| router.valid_until > now)
+            .fold(NdiscRouterFlags::empty(), |flags, router| {
+                flags | router.flags
+            })
+    }
+
+    /// The DNS servers announced by routers, while their lifetimes last.
+    pub(crate) fn dns_servers(&self, now: Instant) -> impl Iterator<Item = Ipv6Address> + '_ {
+        self.dns_servers
+            .iter()
+            .filter(move |server| server.valid_until > now)
+            .map(|server| server.address)
+    }
+
+    fn add_prefix(&mut self, cidr: &Ipv6Cidr, prefix: &NdiscPrefixInformation, now: Instant) {
+        if cidr.address().is_link_local() {
+            return;
+        }
+        let prefix_info = PrefixInfo::from_prefix(prefix, now);
+        if let Ok(old_info) = self.prefix.insert(*cidr, prefix_info)
+            && old_info.is_none()
+        {
+            self.sync_required = true;
+        }
+    }
+
+    fn expire_prefix(&mut self, cidr: &Ipv6Cidr) {
+        if let Some(info) = self.prefix.get_mut(cidr) {
+            info.valid_until = Instant::from_millis(0);
+            info.preferred_until = Instant::from_millis(0);
+            self.sync_required = true;
+        }
+    }
+
+    fn add_route(&mut self, cidr: &Ipv6Cidr, router: &Ipv6Address, valid_until: Instant) {
+        if let Some(route) = self.routes.iter_mut().find(|r| r.same_route(cidr, router)) {
+            route.valid_until = valid_until;
+        } else {
+            let _ = self.routes.push(Route {
+                cidr: *cidr,
+                via_router: *router,
+                valid_until,
+            });
+            self.sync_required = true;
+        }
+    }
+
+    fn expire_route(&mut self, cidr: &Ipv6Cidr, via_router: &Ipv6Address) {
+        for route in self.routes.iter_mut() {
+            if route.same_route(cidr, via_router) {
+                route.valid_until = Instant::from_millis(0);
+                self.sync_required = true;
+            }
+        }
+    }
+
+    fn process_router_flags(
+        &mut self,
+        source: &Ipv6Address,
+        flags: NdiscRouterFlags,
+        router_lifetime: Duration,
+        now: Instant,
+    ) {
+        let flags = flags & (NdiscRouterFlags::MANAGED | NdiscRouterFlags::OTHER);
+        let before = self.router_flags(now);
+        let valid_until = now + router_lifetime.max(ROUTER_FLAGS_LIFETIME);
+        let known = self.routers.iter().position(|r| r.address == *source);
+        // Only routers with a flag set are kept: the others add nothing.
+        if flags.is_empty() {
+            if let Some(i) = known {
+                self.routers.swap_remove(i);
+            }
+        } else if let Some(i) = known {
+            self.routers[i].flags = flags;
+            self.routers[i].valid_until = valid_until;
+        } else {
+            let router = Router {
+                address: *source,
+                flags,
+                valid_until,
+            };
+            if self.routers.is_full() {
+                // Make room by forgetting the router that expires first.
+                if let Some(i) =
+                    (0..self.routers.len()).min_by_key(|&i| self.routers[i].valid_until)
+                {
+                    self.routers.swap_remove(i);
+                }
+            }
+            let _ = self.routers.push(router);
+        }
+        if self.router_flags(now) != before {
+            self.sync_required = true;
+        }
+    }
+
+    /// Processes one server of a Recursive DNS Server option, following
+    /// RFC 8106 § 5.3.1.
+    fn process_dns_server(&mut self, address: Ipv6Address, lifetime: Duration, now: Instant) {
+        let known = self.dns_servers.iter().position(|s| s.address == address);
+        match known {
+            Some(i) if lifetime == Duration::ZERO => {
+                self.dns_servers.remove(i);
+                self.sync_required = true;
+            }
+            Some(i) => self.dns_servers[i].valid_until = now + lifetime,
+            None if lifetime == Duration::ZERO => {}
+            None => {
+                if self.dns_servers.is_full() {
+                    // "the host SHOULD delete the entry with the shortest
+                    // expiration time"
+                    if let Some(i) =
+                        (0..self.dns_servers.len()).min_by_key(|&i| self.dns_servers[i].valid_until)
+                    {
+                        self.dns_servers.remove(i);
+                    }
+                }
+                let _ = self.dns_servers.push(DnsServer {
+                    address,
+                    valid_until: now + lifetime,
+                });
+                self.sync_required = true;
+            }
+        }
+    }
+
+    fn process_prefix(&mut self, prefix: NdiscPrefixInformation, now: Instant) {
+        if !prefix.flags.contains(NdiscPrefixInfoFlags::ADDRCONF) {
+            return;
+        }
+
+        let cidr = Ipv6Cidr::new(prefix.prefix, prefix.prefix_len);
+
+        if prefix.valid_lifetime > Duration::ZERO {
+            self.add_prefix(&cidr, &prefix, now);
+        } else {
+            self.expire_prefix(&cidr);
+        }
+    }
+
+    /// Process a router advertisement's information.
+    pub(super) fn process_advertisement<'a>(
+        &mut self,
+        source: &Ipv6Address,
+        flags: NdiscRouterFlags,
+        router_lifetime: Duration, // default route lifetime
+        options: impl IntoIterator<Item = NdiscOptionRepr<'a>>, // all its options
+        now: Instant,
+    ) {
+        for option in options {
+            match option {
+                NdiscOptionRepr::PrefixInformation(prefix) if prefix.is_valid_prefix_info() => {
+                    self.process_prefix(prefix, now)
+                }
+                NdiscOptionRepr::RecursiveDnsServer(servers) => {
+                    for address in servers.addresses() {
+                        self.process_dns_server(address, servers.lifetime, now)
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.process_router_flags(source, flags, router_lifetime, now);
+
+        if router_lifetime > Duration::ZERO {
+            self.add_route(&IPV6_DEFAULT, source, now + router_lifetime);
+        } else {
+            self.expire_route(&IPV6_DEFAULT, source);
+        }
+
+        // Advertisement might be unsolicited
+        if self.phase == Phase::Discovering {
+            self.phase = Phase::Maintaining;
+        }
+    }
+
+    fn prefix_expire_sync_required(&self, now: Instant) -> bool {
+        self.prefix.values().any(|info| !info.is_valid(now))
+    }
+
+    fn route_expire_sync_required(&self, now: Instant) -> bool {
+        self.routes.iter().any(|r| !r.is_valid(now))
+    }
+
+    fn router_expire_sync_required(&self, now: Instant) -> bool {
+        self.routers.iter().any(|r| r.valid_until <= now)
+    }
+
+    fn dns_expire_sync_required(&self, now: Instant) -> bool {
+        self.dns_servers.iter().any(|s| s.valid_until <= now)
+    }
+
+    /// Get whether a route and prefix information must be synchronized with the interface.
+    pub(crate) fn sync_required(&self, now: Instant) -> bool {
+        self.has_ra_update()
+            || self.prefix_expire_sync_required(now)
+            || self.route_expire_sync_required(now)
+            || self.router_expire_sync_required(now)
+            || self.dns_expire_sync_required(now)
+    }
+
+    /// Remove expired routes and prefixes.
+    pub(crate) fn update_slaac_state(&mut self, now: Instant) {
+        let removals: Vec<Ipv6Cidr, IFACE_MAX_PREFIX_COUNT> = self
+            .prefix
+            .iter()
+            .filter_map(|(cidr, info)| {
+                if info.is_valid(now) {
+                    None
+                } else {
+                    Some(*cidr)
+                }
+            })
+            .collect();
+        for cidr in removals.iter() {
+            self.prefix.remove(cidr);
+        }
+        self.routes.retain(|r| r.is_valid(now));
+        self.routers.retain(|r| r.valid_until > now);
+        self.dns_servers.retain(|s| s.valid_until > now);
+        self.sync_required = false;
+    }
+
+    /// Get whether a router solicitation must be emitted.
+    pub(crate) fn rs_required(&self, now: Instant) -> bool {
+        match self.phase {
+            Phase::Start | Phase::Discovering
+                if self.retry_rs_at <= now && self.num_solicitations > 0 =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Update router solicitation tracking state
+    ///
+    /// Must be called after sending a router solicitation on the interface.
+    pub(crate) fn rs_sent(&mut self, now: Instant) {
+        match self.phase {
+            Phase::Start | Phase::Discovering if self.retry_rs_at <= now => {
+                if self.num_solicitations == 0 {
+                    self.phase = Phase::None;
+                } else {
+                    self.num_solicitations -= 1;
+                    self.phase = Phase::Discovering;
+                    self.retry_rs_at = now + RTR_SOLICITATION_INTERVAL;
+                }
+            }
+            _ => (),
+        }
+    }
+
+    /// Get the next time the SLAAC state must be polled for updates.
+    pub(crate) fn poll_at(&self, now: Instant) -> Option<Instant> {
+        // The next solicitation, while there are any left: after the last
+        // one, `retry_rs_at` stays in the past.
+        let solicitation_at = match self.phase {
+            Phase::Discovering | Phase::Start if self.num_solicitations > 0 => {
+                Some(self.retry_rs_at)
+            }
+            _ => None,
+        };
+        // Expiries; advertisements may also come unsolicited, before the
+        // solicitations are done.
+        let prefix_at = self
+            .prefix
+            .values()
+            .filter(|info| info.is_valid(now))
+            .map(|info| info.valid_until);
+        let routes_at = self
+            .routes
+            .iter()
+            .filter(|r| r.is_valid(now))
+            .map(|r| r.valid_until);
+        let routers_at = self
+            .routers
+            .iter()
+            .filter(|r| r.valid_until > now)
+            .map(|r| r.valid_until);
+        let dns_at = self
+            .dns_servers
+            .iter()
+            .filter(|s| s.valid_until > now)
+            .map(|s| s.valid_until);
+        solicitation_at
+            .into_iter()
+            .chain(prefix_at)
+            .chain(routes_at)
+            .chain(routers_at)
+            .chain(dns_at)
+            .min()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    mod mock {
+        use super::super::*;
+        pub const SOURCE: Ipv6Address = Ipv6Address::new(0xfe80, 0xdb8, 0, 0, 0, 0, 0, 0);
+        pub const PREFIX: NdiscPrefixInformation = NdiscPrefixInformation {
+            prefix_len: 64,
+            flags: NdiscPrefixInfoFlags::ADDRCONF,
+            valid_lifetime: Duration::from_secs(700),
+            preferred_lifetime: Duration::from_secs(300),
+            prefix: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0),
+        };
+        pub const VALID: Duration = Duration::from_secs(600);
+        pub const PREFIX_OPTION: NdiscOptionRepr = NdiscOptionRepr::PrefixInformation(PREFIX);
+
+        pub const ROUTE: Route = Route {
+            cidr: Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 0),
+            via_router: SOURCE,
+            valid_until: Instant::from_millis_const(100000),
+        };
+    }
+    use mock::*;
+
+    #[test]
+    fn test_route() {
+        assert!(ROUTE.same_route(&Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 0), &SOURCE));
+        assert!(!ROUTE.same_route(&Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 64), &SOURCE));
+        assert!(!ROUTE.same_route(
+            &Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 0),
+            &Ipv6Address::UNSPECIFIED
+        ));
+        assert!(!ROUTE.same_route(&Ipv6Cidr::new(SOURCE, 0), &Ipv6Address::UNSPECIFIED));
+        assert!(!ROUTE.same_route(&Ipv6Cidr::new(SOURCE, 64), &Ipv6Address::UNSPECIFIED));
+    }
+
+    #[test]
+    fn test_route_valid() {
+        assert!(ROUTE.is_valid(Instant::ZERO));
+        assert!(!ROUTE.is_valid(Instant::from_secs(200)));
+    }
+
+    #[test]
+    fn test_solicitation() {
+        let mut slaac = Slaac::new();
+        let now = Instant::from_millis(1);
+        assert!(slaac.rs_required(now));
+
+        slaac.rs_sent(now);
+        assert_eq!(slaac.num_solicitations, 2);
+        assert!(!slaac.rs_required(now));
+
+        let next_poll = slaac.poll_at(now).unwrap();
+        assert_eq!(next_poll, now + RTR_SOLICITATION_INTERVAL);
+
+        let now = next_poll;
+        assert!(slaac.rs_required(now));
+
+        slaac.num_solicitations = 0;
+        assert!(!slaac.rs_required(now));
+        slaac.rs_sent(now);
+        assert_eq!(slaac.phase, Phase::None);
+        assert!(slaac.poll_at(now).is_none());
+    }
+
+    #[test]
+    fn test_no_polling_after_the_last_solicitation() {
+        let mut slaac = Slaac::new();
+        let mut now = Instant::from_millis(1);
+        for _ in 0..MAX_RTR_SOLICITATIONS {
+            assert!(slaac.rs_required(now));
+            slaac.rs_sent(now);
+            now += RTR_SOLICITATION_INTERVAL;
+        }
+        // No router answered: nothing left to do, so no time to be woken
+        // at (it used to stay at the last retry time, in the past).
+        assert!(!slaac.rs_required(now));
+        assert_eq!(slaac.poll_at(now), None);
+        assert_eq!(slaac.poll_at(now + Duration::from_secs(60)), None);
+
+        // A router that comes up later is still taken.
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+        assert_eq!(slaac.phase, Phase::Maintaining);
+        assert_eq!(slaac.poll_at(now), Some(now + VALID));
+    }
+
+    #[test]
+    fn test_ra_state() {
+        let mut slaac = Slaac::new();
+        assert_eq!(slaac.phase, Phase::Start);
+        let now = Instant::from_millis(1);
+        assert!(!slaac.has_ra_update());
+
+        // Unsolicited advertisement
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+        assert_eq!(slaac.phase, Phase::Start);
+        assert!(slaac.has_ra_update());
+
+        let now = Instant::from_secs(300);
+        slaac.rs_sent(now);
+        assert_eq!(slaac.phase, Phase::Discovering);
+
+        // Solicited advertisement
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+        assert_eq!(slaac.phase, Phase::Maintaining);
+        let poll_at = slaac.poll_at(now).unwrap();
+        assert_eq!(poll_at, now + VALID);
+
+        for (prefix, info) in slaac.prefix() {
+            assert_eq!(prefix.address(), PREFIX.prefix);
+            assert_eq!(prefix.prefix_len(), PREFIX.prefix_len);
+            assert_eq!(info.valid_until, now + PREFIX.valid_lifetime);
+            assert_eq!(info.preferred_until, now + PREFIX.preferred_lifetime);
+            assert!(info.is_valid(now));
+        }
+
+        for route in slaac.routes() {
+            assert_eq!(route.cidr, Ipv6Cidr::new(Ipv6Address::UNSPECIFIED, 0));
+            assert_eq!(route.via_router, SOURCE);
+            assert_eq!(route.valid_until, now + VALID);
+            assert!(route.is_valid(now));
+        }
+        assert_eq!(slaac.prefix().len(), 1);
+        assert_eq!(slaac.routes().len(), 1);
+        assert!(slaac.sync_required(now));
+
+        slaac.update_slaac_state(now);
+        assert!(!slaac.sync_required(now));
+
+        // Skip time until the route expires
+        let now = poll_at;
+        assert!(slaac.sync_required(now));
+        for (_prefix, info) in slaac.prefix() {
+            assert!(info.is_valid(now));
+        }
+        for route in slaac.routes() {
+            assert!(!route.is_valid(now));
+        }
+
+        slaac.update_slaac_state(now);
+        assert!(!slaac.sync_required(now));
+        assert_eq!(slaac.routes().len(), 0);
+
+        // Skip time until the prefix expires
+        let poll_at = slaac.poll_at(now).unwrap();
+        let now = poll_at;
+        assert!(slaac.sync_required(now));
+        for (_prefix, info) in slaac.prefix() {
+            assert!(!info.is_valid(now));
+        }
+        // Should already return None
+        assert!(slaac.poll_at(now).is_none());
+        slaac.update_slaac_state(now);
+        assert!(!slaac.sync_required(now));
+        assert_eq!(slaac.routes().len(), 0);
+        assert_eq!(slaac.prefix().len(), 0);
+
+        // No state remaining, nothing to wait on
+        assert!(slaac.poll_at(now).is_none());
+    }
+
+    #[test]
+    fn test_ra_expire() {
+        let mut slaac = Slaac::new();
+        let now = Instant::from_millis(1);
+        slaac.rs_sent(now);
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [PREFIX_OPTION],
+            now,
+        );
+
+        let now = Instant::from_secs(300);
+
+        assert!(slaac.sync_required(now));
+        for (_prefix, info) in slaac.prefix() {
+            assert!(info.is_valid(now));
+        }
+        for route in slaac.routes() {
+            assert!(route.is_valid(now));
+        }
+        slaac.update_slaac_state(now);
+
+        let mut expire_prefix = PREFIX;
+        expire_prefix.preferred_lifetime = Duration::ZERO;
+        expire_prefix.valid_lifetime = Duration::ZERO;
+
+        // Invalidate the prefix, but not the route
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [NdiscOptionRepr::PrefixInformation(expire_prefix)],
+            now,
+        );
+
+        assert!(slaac.sync_required(now));
+        for (_prefix, info) in slaac.prefix() {
+            assert!(!info.is_valid(now));
+        }
+        for route in slaac.routes() {
+            assert!(route.is_valid(now));
+        }
+        slaac.update_slaac_state(now);
+        assert_eq!(slaac.prefix().len(), 0);
+        assert_eq!(slaac.routes().len(), 1);
+
+        assert!(!slaac.sync_required(now));
+        // Invalidate also the route
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            Duration::ZERO,
+            [NdiscOptionRepr::PrefixInformation(expire_prefix)],
+            now,
+        );
+        assert!(slaac.sync_required(now));
+        for route in slaac.routes() {
+            assert!(!route.is_valid(now));
+        }
+        assert!(slaac.poll_at(now).is_none());
+
+        slaac.update_slaac_state(now);
+        assert_eq!(slaac.prefix().len(), 0);
+        assert_eq!(slaac.routes().len(), 0);
+        assert!(!slaac.sync_required(now));
+        // No state remaining, nothing to wait on
+        assert!(slaac.poll_at(now).is_none());
+    }
+
+    const OTHER_ROUTER: Ipv6Address = Ipv6Address::new(0xfe80, 0xdb8, 0, 0, 0, 0, 0, 2);
+    const DNS_1: Ipv6Address = Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x53);
+    const DNS_2: Ipv6Address = Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x54);
+
+    /// Starts maintaining, with the state synchronized.
+    fn maintaining(now: Instant) -> Slaac {
+        let mut slaac = Slaac::new();
+        slaac.rs_sent(now);
+        slaac.process_advertisement(&SOURCE, NdiscRouterFlags::empty(), VALID, [], now);
+        slaac.update_slaac_state(now);
+        slaac
+    }
+
+    fn rdnss(addresses: &[u8], lifetime: Duration) -> NdiscOptionRepr<'_> {
+        NdiscOptionRepr::RecursiveDnsServer(crate::wire::NdiscRecursiveDnsServer {
+            lifetime,
+            addresses,
+        })
+    }
+
+    #[test]
+    fn test_router_flags() {
+        let now = Instant::from_secs(1);
+        let mut slaac = maintaining(now);
+        assert_eq!(slaac.router_flags(now), NdiscRouterFlags::empty());
+
+        // Flags are OR-ed over the routers, also over one with a router
+        // lifetime of zero.
+        slaac.process_advertisement(&SOURCE, NdiscRouterFlags::OTHER, VALID, [], now);
+        assert!(slaac.sync_required(now));
+        slaac.update_slaac_state(now);
+        slaac.process_advertisement(
+            &OTHER_ROUTER,
+            NdiscRouterFlags::MANAGED,
+            Duration::ZERO,
+            [],
+            now,
+        );
+        assert!(slaac.sync_required(now));
+        slaac.update_slaac_state(now);
+        assert_eq!(
+            slaac.router_flags(now),
+            NdiscRouterFlags::MANAGED | NdiscRouterFlags::OTHER
+        );
+
+        // The same flags again change nothing.
+        slaac.process_advertisement(&SOURCE, NdiscRouterFlags::OTHER, VALID, [], now);
+        assert!(!slaac.sync_required(now));
+
+        // A router that clears its flags no longer counts.
+        slaac.process_advertisement(&SOURCE, NdiscRouterFlags::empty(), VALID, [], now);
+        assert!(slaac.sync_required(now));
+        slaac.update_slaac_state(now);
+        assert_eq!(slaac.router_flags(now), NdiscRouterFlags::MANAGED);
+
+        // Without advertisements, the flags count for ROUTER_FLAGS_LIFETIME.
+        let poll_at = slaac.poll_at(now).unwrap();
+        assert_eq!(poll_at, now + VALID);
+        let expiry = now + ROUTER_FLAGS_LIFETIME;
+        slaac.update_slaac_state(poll_at);
+        assert_eq!(slaac.poll_at(poll_at), Some(expiry));
+        assert!(!slaac.sync_required(expiry - Duration::from_millis(1)));
+        assert!(slaac.sync_required(expiry));
+        assert_eq!(slaac.router_flags(expiry), NdiscRouterFlags::empty());
+        slaac.update_slaac_state(expiry);
+        assert!(slaac.poll_at(expiry).is_none());
+    }
+
+    #[test]
+    fn test_router_flags_follow_a_long_router_lifetime() {
+        let now = Instant::from_secs(1);
+        let mut slaac = maintaining(now);
+        let lifetime = ROUTER_FLAGS_LIFETIME * 2;
+        slaac.process_advertisement(&SOURCE, NdiscRouterFlags::OTHER, lifetime, [], now);
+        let later = now + ROUTER_FLAGS_LIFETIME + Duration::from_secs(1);
+        assert_eq!(slaac.router_flags(later), NdiscRouterFlags::OTHER);
+        assert_eq!(
+            slaac.router_flags(now + lifetime),
+            NdiscRouterFlags::empty()
+        );
+    }
+
+    #[test]
+    fn test_dns_servers() {
+        let now = Instant::from_secs(1);
+        let mut slaac = maintaining(now);
+        let servers = [DNS_1.octets(), DNS_2.octets()].concat();
+        let servers = &servers[..16 * DNS_MAX_SERVER_COUNT.min(2)];
+        let lifetime = Duration::from_secs(900);
+
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [rdnss(servers, lifetime)],
+            now,
+        );
+        assert!(slaac.sync_required(now));
+        slaac.update_slaac_state(now);
+        let expected: std::vec::Vec<_> = [DNS_1, DNS_2][..servers.len() / 16].to_vec();
+        assert_eq!(
+            slaac.dns_servers(now).collect::<std::vec::Vec<_>>(),
+            expected
+        );
+
+        // Refreshing a server's lifetime is no change to report, but moves
+        // its expiry.
+        let later = now + Duration::from_secs(600);
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [rdnss(&DNS_1.octets(), lifetime)],
+            later,
+        );
+        assert!(!slaac.has_ra_update());
+        assert_eq!(slaac.dns_servers(now + lifetime).next(), Some(DNS_1));
+
+        // A lifetime of zero removes it.
+        slaac.process_advertisement(
+            &SOURCE,
+            NdiscRouterFlags::empty(),
+            VALID,
+            [rdnss(&DNS_1.octets(), Duration::ZERO)],
+            later,
+        );
+        assert!(slaac.has_ra_update());
+        assert!(!slaac.dns_servers(later).any(|server| server == DNS_1));
+        slaac.update_slaac_state(later);
+
+        // The rest expire on their own.
+        let expiry = now + lifetime;
+        assert!(slaac.dns_servers(expiry).next().is_none());
+        slaac.update_slaac_state(expiry);
+        assert!(slaac.dns_servers.is_empty());
+    }
+
+    #[test]
+    fn test_dns_servers_full() {
+        let now = Instant::from_secs(1);
+        let mut slaac = maintaining(now);
+        // Fill the list, the first server expiring first.
+        for i in 0..DNS_MAX_SERVER_COUNT {
+            let address = Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 1, i as u16);
+            slaac.process_dns_server(address, Duration::from_secs(100 + i as u64), now);
+        }
+        slaac.process_dns_server(DNS_1, Duration::from_secs(900), now);
+        let servers: std::vec::Vec<_> = slaac.dns_servers(now).collect();
+        assert_eq!(servers.len(), DNS_MAX_SERVER_COUNT);
+        assert!(servers.contains(&DNS_1));
+        assert!(!servers.contains(&Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 1, 0)));
+    }
+}

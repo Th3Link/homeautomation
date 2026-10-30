@@ -65,6 +65,27 @@ minimum: separate concerns instead of one verb-dispatch endpoint, have
 one consistent targeting mechanism instead of four, and report errors
 instead of silently dropping malformed requests.
 
+## One main stack for everything (gateway)
+
+Every task's poll, MbedTLS's handshake and the flash access run on the one
+main stack (~47 KB, what DRAM leaves after the statics). Rust's async code
+needs much more of it than the future sizes suggest: a poll function keeps
+room for every future it builds by value, and `Box::pin(f())` builds `f`'s
+future on the stack before moving it to the heap. The HTTPS request path
+went past 60 KB that way and wrote below the stack into the statics
+without hitting esp-hal's stack guard (one word): random crashes on the
+first authenticated request. It is down to ~32 KB now: large futures are
+built through `heap::boxed` (in their own frame, polled through `dyn`, so
+no caller keeps room for them), the certificate status is boxed, flash
+reads and writes skip `esp-storage`'s 4 KiB stack buffer, and the MQTT
+buffers are static.
+
+The margin is measured, not computed: the stack is painted at boot and
+`GET /system` reports `stack_untouched`. ~14 KB were left after HTTPS
+requests, uploads and a firmware update over HTTPS; MQTT over TLS (RSA
+signature check on the stack) is not measured yet. A new large future in
+a handler or task shows up there first.
+
 ## Single gateway, too many nodes, no gateway-to-gateway coordination
 
 The one gateway that exists today controls every node in the
@@ -88,17 +109,14 @@ These aren't "bad", just genuinely unfinished relative to the original's
 feature set — tracked here so they don't get lost, distinct from the
 design-quality complaints above:
 
-- **HTTPS.** The web server (REST API and UI, [`api-rest.md`](api-rest.md))
-  speaks plain HTTP only, so the Basic Auth password crosses the LAN in the
-  clear. `embedded-tls` is client-only; a server needs another TLS library
-  (`mbedtls-rs` is the candidate, not tried on this chip and `esp-hal`) or an
-  own server handshake. picoserve takes any socket that implements its
-  `io::Socket` trait, so a TLS socket can slot in.
-- **Ethernet checksums.** The `esp-hal` Ethernet driver leaves the TCP/IP
-  checksums to the MAC, and the MAC gets them wrong for much of the traffic:
-  responses over a few hundred bytes never arrived. The stack computes them
-  itself now (`SoftwareChecksums` in `gateway-hardware/src/ethernet.rs`); the
-  cause in the driver or the silicon wasn't found.
+- **Patched copy of `esp-hal`.** The ESP32 MAC's checksum insertion is
+  broken: it gets every second checksum or so wrong, and it writes the IPv4
+  checksums into some IPv6 frames, right over their addresses (so IPv6 TCP
+  connections stalled). esp-hal 1.2.2 always switches it on; the fix
+  (esp-rs/esp-hal@0eb3e53) is on esp-hal's main but in no release yet, so
+  the workspace builds a patched copy of 1.2.2
+  ([`software/patches`](../../patches/README.md)). It goes once a release has
+  the fix.
 - **CAN-bus MQTT logging passthrough** (`canbus/log/0x<hex>`, toggled by
   the `mqtt_logging` RPC verb in the original) is speced in
   [`protocol-mqtt.md`](protocol-mqtt.md#canbuslog0xhex-planned-in-the-original-not-currently-wired-up)

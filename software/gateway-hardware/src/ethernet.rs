@@ -4,7 +4,8 @@
 //! ADR 0013 for why WiFi was dropped).
 //!
 //! The network needs no setup: [`init_stack`] runs dual-stack — a DHCPv4
-//! client plus IPv6 SLAAC — so a freshly-flashed gateway just picks up
+//! client plus IPv6 SLAAC, and DHCPv6 where the routers ask for it
+//! ([`crate::dhcpv6`]) — so a freshly-flashed gateway just picks up
 //! addresses from the LAN (announcing its configured hostname over DHCP,
 //! so it's findable by name) and everything else — MQTT broker, credentials — is configured over the
 //! serial console. There's deliberately no link-up wait or timeout either:
@@ -32,7 +33,10 @@
 use crate::console_log;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
-use embassy_net::{Runner, Stack, StackResources, StaticConfigV4, StaticConfigV6};
+use embassy_net::{
+    Dhcpv6Lease, Ipv6Cidr, Ipv6RouterFlags, Runner, Stack, StackResources, StaticConfigV4,
+    StaticConfigV6,
+};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
@@ -56,13 +60,13 @@ type RawDriver = Ethernet<'static, Async, GenericPhy>;
 type EthDriver = SoftwareChecksums<RawDriver>;
 
 /// Passes everything through to the Ethernet driver, but has the network
-/// stack compute the checksums itself.
+/// stack compute and check all checksums itself.
 ///
-/// The driver leaves them to the MAC (descriptor "checksum insertion"), and
-/// that produces wrong TCP checksums for a good part of the segments: the
-/// peer drops them, so responses of more than a few hundred bytes never
-/// arrived (and uploads crawled along on retransmissions). With a correct
-/// checksum already in the frame, what the MAC then inserts is right.
+/// The MAC's checksum insertion gets a good part of them wrong (and writes
+/// into the addresses of IPv6 frames); the patched esp-hal in
+/// `software/patches` switches it off, which makes the stack fill them in.
+/// This also has the stack check received ones, rather than trusting the
+/// same MAC's receive checksum engine alone.
 pub struct SoftwareChecksums<D>(D);
 
 impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareChecksums<D> {
@@ -108,10 +112,10 @@ impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareCheck
 // Constructed in place: by value it would pass through the stack.
 static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
-// DHCP, DNS, two MQTT brokers, six web sockets (five HTTPS and the
+// DHCP, DHCPv6, DNS, two MQTT brokers, six web sockets (five HTTPS and the
 // redirect on port 80; plain HTTP uses three), the EST client and SNTP, plus
 // one spare. Keep in step with `web::HTTPS_TASKS`.
-static NET_RESOURCES: StaticCell<StackResources<13>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<StackResources<14>> = StaticCell::new();
 
 /// A look at the network state, for the console's `network`.
 #[derive(Debug, Clone)]
@@ -119,8 +123,26 @@ pub struct NetInfo {
     pub link_up: bool,
     pub mac: [u8; 6],
     pub v4: Option<StaticConfigV4>,
-    /// The global address (SLAAC), its router and DNS servers.
+    /// The first SLAAC address, the router and the RDNSS DNS servers.
     pub v6: Option<StaticConfigV6>,
+    /// All IPv6 addresses: link-local, SLAAC (one per prefix), DHCPv6.
+    pub v6_addresses: heapless::Vec<Ipv6Cidr, 5>,
+    pub router_flags: Ipv6RouterFlags,
+    pub dhcpv6: Option<Dhcpv6Lease>,
+}
+
+impl NetInfo {
+    /// Where an IPv6 address of [`Self::v6_addresses`] comes from:
+    /// `link-local`, `DHCPv6` or `SLAAC`.
+    pub fn v6_origin(&self, cidr: &Ipv6Cidr) -> &'static str {
+        if cidr.address().is_unicast_link_local() {
+            "link-local"
+        } else if self.dhcpv6.as_ref().and_then(|lease| lease.address) == Some(*cidr) {
+            "DHCPv6"
+        } else {
+            "SLAAC"
+        }
+    }
 }
 
 /// The stack lives in the network tasks (it can't be shared between
@@ -153,6 +175,9 @@ async fn info_task(stack: Stack<'static>) {
             mac,
             v4: stack.config_v4(),
             v6: stack.config_v6(),
+            v6_addresses: stack.ipv6_addresses().into_iter().take(5).collect(),
+            router_flags: stack.ipv6_router_flags(),
+            dhcpv6: stack.dhcpv6_lease(),
         });
     }
 }
@@ -240,7 +265,7 @@ async fn net_task(mut runner: Runner<'static, EthDriver>) {
 /// Starts the `embassy-net` stack over `eth` — a DHCPv4 client, matching
 /// `LAN.cpp`'s (ESP-IDF default) behavior, announcing `hostname` (DHCP
 /// option 12; silently omitted if it doesn't fit the 32-byte limit), plus
-/// IPv6 SLAAC (smoltcp has no DHCPv6 client).
+/// IPv6 SLAAC (DHCPv6 runs in its own task, [`crate::dhcpv6`]).
 pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> Stack<'static> {
     let mut dhcp = embassy_net::DhcpConfig::default();
     dhcp.hostname = heapless::String::try_from(hostname).ok();

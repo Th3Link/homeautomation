@@ -142,7 +142,8 @@ enum Commands<'a> {
     TlsFqdn(&'a str),
     /// Make a new self-signed HTTPS certificate (and switch to that mode).
     TlsSelfSigned,
-    /// Set the NTP server the time comes from (default pool.ntp.org).
+    /// Set the NTP server the time comes from; `auto`: the one DHCPv6
+    /// names, else pool.ntp.org.
     NtpServer(&'a str),
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
@@ -354,7 +355,10 @@ async fn handle_command(
             respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
         }
         Commands::Network => cmd_network(writer).await,
-        Commands::TlsStatus => cmd_tls_status(writer).await,
+        // ~15 KB of state (the certificate status): on the heap while it
+        // runs, rather than in this task's static memory, which comes out
+        // of the main stack's room.
+        Commands::TlsStatus => crate::heap::boxed(|| cmd_tls_status(writer)).await,
         Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
         Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,
@@ -365,6 +369,7 @@ async fn handle_command(
         Commands::Restart => {
             respond(writer, "restarting...").await.ok();
             embassy_time::Timer::after(Duration::from_millis(50)).await;
+            crate::dhcpv6::release().await;
             esp_hal::system::software_reset();
         }
         Commands::Exit => Ok(()),
@@ -700,14 +705,83 @@ async fn cmd_tls_self_signed() -> String<LINE_CAP> {
 }
 
 async fn cmd_ntp_server(server: &str) -> String<LINE_CAP> {
+    let auto = server == "auto";
     let update = crate::cert::SettingsUpdate {
-        ntp_server: Some(server),
+        ntp_server: Some(if auto { "" } else { server }),
         ..Default::default()
     };
     match crate::cert::update_settings(update).await {
+        Ok(()) if auto => fmt_msg(format_args!(
+            "ntp server: automatic, now {} (next sync)",
+            crate::cert::ntp_server().await
+        )),
         Ok(()) => fmt_msg(format_args!("ntp server: {server} (next sync)")),
         Err(e) => fmt_msg(format_args!("ntp server refused: {}", e.code())),
     }
+}
+
+/// The DHCPv6 client's state, and what it got beyond the address and DNS
+/// servers (shown above with the others).
+fn dhcpv6_lines() -> heapless::Vec<String<LINE_CAP>, 3> {
+    use core::fmt::Write;
+    use dhcpv6_client::{Mode, State};
+
+    let now = embassy_time::Instant::now().as_millis();
+    let seconds_until = |at: dhcpv6_client::Instant| at.as_millis().saturating_sub(now) / 1000;
+    crate::dhcpv6::with_status(|status| {
+        let mut lines = heapless::Vec::new();
+        let state = match status.state {
+            State::Idle => "idle",
+            State::Soliciting => "looking for a server",
+            State::Requesting => "requesting an address",
+            State::Bound => "bound",
+            State::Renewing => "renewing",
+            State::Rebinding => "rebinding",
+            State::InformationRequesting => "asking for configuration",
+            State::Informed => "configured",
+            State::Releasing => "releasing",
+        };
+        let mode = match status.mode {
+            Mode::Off => "off",
+            Mode::Stateless => "stateless",
+            Mode::Stateful => "stateful",
+        };
+        let mut line = String::new();
+        let _ = write!(line, "dhcpv6: {state} ({mode})");
+        if let Some(config) = &status.configuration {
+            let _ = write!(line, ", server {}", config.server_id);
+            if config.renew_at != dhcpv6_client::Instant::NEVER {
+                let _ = write!(line, ", renew in {} s", seconds_until(config.renew_at));
+            }
+            if config.rebind_at != dhcpv6_client::Instant::NEVER {
+                let _ = write!(line, ", rebind in {} s", seconds_until(config.rebind_at));
+            }
+        }
+        let _ = lines.push(line);
+        let Some(config) = &status.configuration else {
+            return lines;
+        };
+        if !config.domains.is_empty() {
+            let mut line = String::new();
+            let _ = write!(line, "dhcpv6 domains:");
+            for domain in config.domains.iter() {
+                let _ = write!(line, " {domain}");
+            }
+            let _ = lines.push(line);
+        }
+        if !config.ntp_servers.is_empty() || !config.ntp_names.is_empty() {
+            let mut line = String::new();
+            let _ = write!(line, "dhcpv6 ntp:");
+            for server in &config.ntp_servers {
+                let _ = write!(line, " {server}");
+            }
+            for name in config.ntp_names.iter() {
+                let _ = write!(line, " {name}");
+            }
+            let _ = lines.push(line);
+        }
+        lines
+    })
 }
 
 async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
@@ -730,7 +804,7 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     )
     .await?;
 
-    match net.v4 {
+    match &net.v4 {
         Some(v4) => {
             respond(
                 writer,
@@ -750,48 +824,47 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         None => respond(writer, "ipv4: no DHCP lease").await?,
     }
 
-    // The link-local address embassy-net derives from the MAC (EUI-64).
-    let link_local = core::net::Ipv6Addr::from([
-        0xfe,
-        0x80,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        m[0] ^ 0x02,
-        m[1],
-        m[2],
-        0xff,
-        0xfe,
-        m[3],
-        m[4],
-        m[5],
-    ]);
+    for cidr in &net.v6_addresses {
+        let origin = net.v6_origin(cidr);
+        respond(writer, &fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
+    }
+    match net.v6.as_ref().and_then(|v6| v6.gateway) {
+        Some(gateway) => respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?,
+        None => respond(writer, "ipv6 gateway: none").await?,
+    }
+    let rdnss = net.v6.iter().flat_map(|v6| v6.dns_servers.iter());
+    for server in rdnss {
+        respond(writer, &fmt_msg(format_args!("ipv6 dns: {server} (RDNSS)"))).await?;
+    }
+    for server in net.dhcpv6.iter().flat_map(|lease| lease.dns_servers.iter()) {
+        respond(
+            writer,
+            &fmt_msg(format_args!("ipv6 dns: {server} (DHCPv6)")),
+        )
+        .await?;
+    }
+    let flags = net.router_flags;
     respond(
         writer,
-        &fmt_msg(format_args!("ipv6 link-local: {link_local}/64")),
+        &fmt_msg(format_args!(
+            "ipv6 routers: {}{}",
+            if flags.managed {
+                "M (DHCPv6 addresses) "
+            } else {
+                ""
+            },
+            if flags.other {
+                "O (DHCPv6 configuration)"
+            } else if flags.managed {
+                ""
+            } else {
+                "no DHCPv6"
+            }
+        )),
     )
     .await?;
-    match net.v6 {
-        Some(v6) => {
-            respond(
-                writer,
-                &fmt_msg(format_args!("ipv6: {} (SLAAC)", v6.address)),
-            )
-            .await?;
-            match v6.gateway {
-                Some(gateway) => {
-                    respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?
-                }
-                None => respond(writer, "ipv6 gateway: none").await?,
-            }
-            for server in &v6.dns_servers {
-                respond(writer, &fmt_msg(format_args!("ipv6 dns: {server}"))).await?;
-            }
-        }
-        None => respond(writer, "ipv6: no global address (no router advertisement)").await?,
+    for line in dhcpv6_lines() {
+        respond(writer, &line).await?;
     }
 
     let ntp = crate::cert::ntp_server().await;

@@ -87,18 +87,24 @@ struct Brokers {
 }
 
 async fn read_all() -> Result<impl IntoResponse, ApiError> {
-    let cfg = config().await.load_or_init().await;
-    let [primary, secondary] = cfg.brokers;
-    json(&Brokers {
-        primary: view(crate::mqtt::PRIMARY, primary).await,
-        secondary: view(crate::mqtt::SECONDARY, secondary).await,
+    crate::heap::boxed(|| async move {
+        let cfg = config().await.load_or_init().await;
+        let [primary, secondary] = cfg.brokers;
+        json(&Brokers {
+            primary: view(crate::mqtt::PRIMARY, primary).await,
+            secondary: view(crate::mqtt::SECONDARY, secondary).await,
+        })
+        .await
     })
     .await
 }
 
 async fn read(Slot(slot): Slot) -> Result<impl IntoResponse, ApiError> {
-    let cfg = config().await.load_or_init().await;
-    json(&view(slot, cfg.brokers[slot].clone()).await).await
+    crate::heap::boxed(|| async move {
+        let cfg = config().await.load_or_init().await;
+        json(&view(slot, cfg.brokers[slot].clone()).await).await
+    })
+    .await
 }
 
 /// Every field is optional; only the given ones change.
@@ -114,56 +120,59 @@ struct Update {
 }
 
 async fn update(Slot(slot): Slot, Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError> {
-    if let Some(uri) = &body.uri {
-        if parse_broker_uri(uri).is_none() {
-            return Err(ApiError::invalid(
-                "uri: mqtt://host[:port] or mqtts://host[:port]",
-            ));
-        }
-    }
-    if let Some(password) = &body.password {
-        if !password.is_empty() && password.len() < MIN_PASSWORD_LEN {
-            return Err(ApiError::invalid(
-                "password: at least 8 characters, or empty for none",
-            ));
-        }
-    }
-
-    let keys = gateway_core::config::Key::broker(slot);
-    let failed = ApiError::new(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "storage",
-        "could not store the setting",
-    );
-    {
-        let mut store = config().await;
+    crate::heap::boxed(|| async move {
         if let Some(uri) = &body.uri {
-            store.set_str(keys.uri, uri).await.map_err(|_| failed)?;
-        }
-        if let Some(user) = &body.user {
-            store.set_str(keys.user, user).await.map_err(|_| failed)?;
+            if parse_broker_uri(uri).is_none() {
+                return Err(ApiError::invalid(
+                    "uri: mqtt://host[:port] or mqtts://host[:port]",
+                ));
+            }
         }
         if let Some(password) = &body.password {
-            store
-                .set_str(keys.password, password)
-                .await
-                .map_err(|_| failed)?;
+            if !password.is_empty() && password.len() < MIN_PASSWORD_LEN {
+                return Err(ApiError::invalid(
+                    "password: at least 8 characters, or empty for none",
+                ));
+            }
         }
-        if let Some(enabled) = body.enabled {
-            store
-                .set_bool(keys.enabled, enabled)
-                .await
-                .map_err(|_| failed)?;
+
+        let keys = gateway_core::config::Key::broker(slot);
+        let failed = ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage",
+            "could not store the setting",
+        );
+        {
+            let mut store = config().await;
+            if let Some(uri) = &body.uri {
+                store.set_str(keys.uri, uri).await.map_err(|_| failed)?;
+            }
+            if let Some(user) = &body.user {
+                store.set_str(keys.user, user).await.map_err(|_| failed)?;
+            }
+            if let Some(password) = &body.password {
+                store
+                    .set_str(keys.password, password)
+                    .await
+                    .map_err(|_| failed)?;
+            }
+            if let Some(enabled) = body.enabled {
+                store
+                    .set_bool(keys.enabled, enabled)
+                    .await
+                    .map_err(|_| failed)?;
+            }
+            if let Some(insecure) = body.tls_insecure {
+                store
+                    .set_bool(keys.tls_insecure, insecure)
+                    .await
+                    .map_err(|_| failed)?;
+            }
         }
-        if let Some(insecure) = body.tls_insecure {
-            store
-                .set_bool(keys.tls_insecure, insecure)
-                .await
-                .map_err(|_| failed)?;
-        }
-    }
-    crate::mqtt::reconnect(slot);
-    read(Slot(slot)).await
+        crate::mqtt::reconnect(slot);
+        read(Slot(slot)).await
+    })
+    .await
 }
 
 /// The next connection to the broker takes the certificate it presents and

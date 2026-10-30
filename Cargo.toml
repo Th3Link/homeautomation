@@ -2,12 +2,21 @@
 resolver = "2"
 members = [
     "software/common-core",
+    "software/dhcpv6-client",
     "software/common-hardware",
     "software/gateway-core",
     "software/gateway-hardware",
     "software/cancomponents-core",
     "software/cancomponents-hardware",
 ]
+# Patched copies of upstream crates (see software/patches/README.md); each is
+# its own package, tested on its own.
+exclude = ["software/patches"]
+
+[patch.crates-io]
+esp-hal = { path = "software/patches/esp-hal" }
+embassy-net = { path = "software/patches/embassy-net" }
+smoltcp = { path = "software/patches/smoltcp" }
 
 [workspace.package]
 edition = "2021"
