@@ -37,8 +37,7 @@ setup; neither depends on the other.
   `mqtt://[fd00::1]:1883`, `https://[fd00::1]:8443` for EST.
 - **IPv6-only works:** no part of the gateway waits for DHCPv4.
 
-**Patched versions** (forks by git revision, or copies in
-`software/patches`) of esp-hal (no TX checksum
+**Forks** (by git revision, `software/patches/README.md`) of esp-hal (no TX checksum
 insertion on the ESP32), smoltcp (every prefix of an RA, the routers' M/O
 flags and RDNSS, the SLAAC default route next to IPv4's) and embassy-net
 (every address kept, RDNSS as DNS, `set_dhcpv6_lease`), until upstream has

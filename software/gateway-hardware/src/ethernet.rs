@@ -63,8 +63,9 @@ type EthDriver = SoftwareChecksums<RawDriver>;
 /// stack compute and check all checksums itself.
 ///
 /// The MAC's checksum insertion gets a good part of them wrong (and writes
-/// into the addresses of IPv6 frames); the patched esp-hal in
-/// `software/patches` switches it off, which makes the stack fill them in.
+/// into the addresses of IPv6 frames); the patched esp-hal (a fork, see
+/// `software/patches/README.md`) switches it off, which makes the stack
+/// fill them in.
 /// This also has the stack check received ones, rather than trusting the
 /// same MAC's receive checksum engine alone.
 pub struct SoftwareChecksums<D>(D);

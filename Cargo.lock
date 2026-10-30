@@ -1467,6 +1467,7 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "1.2.2"
+source = "git+https://github.com/Th3Link/esp-hal?rev=475cf2f76be9b03acf8da92b66b466c2ccf0d051#475cf2f76be9b03acf8da92b66b466c2ccf0d051"
 dependencies = [
  "bitfield",
  "bytemuck",
