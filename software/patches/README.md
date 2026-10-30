@@ -9,10 +9,11 @@ them. The workspace uses them through `[patch.crates-io]` in the root
 | Crate | Fork, branch | Base | Fixes | Upstream |
 |---|---|---|---|---|
 | `smoltcp` | [Th3Link/smoltcp](https://github.com/Th3Link/smoltcp), `v0.13.1-gateway` | 0.13.1 | SLAAC default route next to IPv4 routes (smoltcp-rs/smoltcp#1206, taken over); every prefix of a Router Advertisement (`wire::NdiscOptionIter`, issue #1165); the routers' M/O flags and RDNSS servers (`Interface::slaac_router_flags`, `Interface::slaac_dns_servers`); no endless polling after three unanswered Router Solicitations | PR branches on 0.14 in the fork: `slaac-every-prefix`, `slaac-router-flags-rdnss` (on top of the former), `slaac-solicitation-poll` |
+| `embassy-net` | [Th3Link/embassy](https://github.com/Th3Link/embassy), `embassy-net-v0.9.1-gateway` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease`. A second commit drops the path dependencies on the sibling crates (they come from crates.io) | Needs the smoltcp fork. No PR possible: embassy-net's `main` moved from smoltcp to xarxa, and there is no 0.9 maintenance branch; xarxa already has multiple prefixes and the M/O flags, RDNSS is on its to-do list |
 
 A fork's gateway branch starts at the release tag, so it differs from the
-release by the fixes alone. A new revision goes into the root `Cargo.toml`
-and `.cargo/config.toml` here.
+release by the fixes alone. A new revision goes into the root
+`Cargo.toml`.
 
 ## Copies
 
@@ -28,14 +29,11 @@ all of its fixes.
 | Crate | Base | Fix | Upstream |
 |---|---|---|---|
 | `esp-hal` | 1.2.2 | ESP32: no TX checksum insertion by the MAC; the network stack computes the checksums | Fixed on main in esp-rs/esp-hal@0eb3e53 (option `ethernet.tx_checksum_offload`), not released yet; issue esp-rs/esp-hal#6173 |
-| `embassy-net` | 0.9.1 | All SLAAC addresses kept (one per prefix), link-local first; SLAAC's routes left to smoltcp; RDNSS servers as DNS servers; `Stack::ipv6_addresses`, `Stack::ipv6_router_flags`, `Stack::wait_ipv6_router_flags_change`, `Stack::set_dhcpv6_lease` | Needs the smoltcp fork above. No PR possible: embassy-net's `main` has moved from smoltcp to xarxa, and there is no 0.9 maintenance branch; xarxa already has multiple prefixes and the M/O flags, RDNSS is on its to-do list |
 
-Building a copy on its own (tests, clippy) uses the smoltcp fork through
-`software/patches/.cargo/config.toml`. Building the gateway shows a dozen
-warnings from smoltcp: they are upstream's, for the feature set the
-gateway uses, and don't fail `clippy -D warnings` (it is no workspace
-member). The smoltcp fork has its own tests (`cargo test --lib`, about
-670).
+Building the gateway shows a dozen warnings from smoltcp: they are
+upstream's, for the feature set the gateway uses, and don't fail `clippy
+-D warnings` (it is no workspace member). The smoltcp fork has its own
+tests (`cargo test --lib`, about 670).
 
 ## Updating
 
