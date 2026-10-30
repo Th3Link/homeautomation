@@ -35,7 +35,7 @@ jobs:
       run:
         working-directory: software/${{ matrix.crate }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --no-deps
       - uses: actions/upload-artifact@v7
@@ -57,7 +57,7 @@ jobs:
       run:
         working-directory: software/${{ matrix.crate }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: esp32
@@ -84,7 +84,7 @@ jobs:
     needs: [docs-core, docs-hardware]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: docs-common-core
@@ -165,7 +165,7 @@ jobs:
       # Firmware memory history, one point per main commit — written by
       # ci.yml's firmware-history job onto the `metrics` branch. Absent until
       # the first main push after that landed; the page is just skipped then.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         id: metrics
         continue-on-error: true
         with:
