@@ -1,4 +1,4 @@
-//! DHCPv6 (the `dhcpv6-client` crate) on the gateway's network stack.
+//! DHCPv6 (the `dhcpeav6-client` crate of dhcpea) on the gateway's network stack.
 //!
 //! The routers' Router Advertisements decide what it does: with `M` set it
 //! leases an address (stateful), with only `O` it fetches the other
@@ -12,7 +12,7 @@ use crate::console_log;
 use core::cell::RefCell;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
-use dhcpv6_client::{
+use dhcpeav6_client::{
     Client, ClientConfig, Configuration, Duid, Mode, State, ALL_DHCP_RELAY_AGENTS_AND_SERVERS,
     CLIENT_PORT, SERVER_PORT,
 };
@@ -82,8 +82,8 @@ pub async fn release() {
     let _ = embassy_time::with_timeout(Duration::from_secs(1), RELEASED.wait()).await;
 }
 
-fn now() -> dhcpv6_client::Instant {
-    dhcpv6_client::Instant::from_millis(Instant::now().as_millis())
+fn now() -> dhcpeav6_client::Instant {
+    dhcpeav6_client::Instant::from_millis(Instant::now().as_millis())
 }
 
 #[embassy_executor::task]

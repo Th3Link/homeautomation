@@ -110,9 +110,9 @@ async fn network() -> Option<Network> {
         ipv6_managed: net.router_flags.managed,
         ipv6_other: net.router_flags.other,
         dhcpv6_mode: crate::dhcpv6::with_status(|status| match status.mode {
-            dhcpv6_client::Mode::Off => "off",
-            dhcpv6_client::Mode::Stateless => "stateless",
-            dhcpv6_client::Mode::Stateful => "stateful",
+            dhcpeav6_client::Mode::Off => "off",
+            dhcpeav6_client::Mode::Stateless => "stateless",
+            dhcpeav6_client::Mode::Stateful => "stateful",
         }),
     })
 }

@@ -904,8 +904,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
-name = "dhcpv6-client"
+name = "dhcpeav6-client"
 version = "0.1.0"
+source = "git+https://github.com/Th3Link/dhcpea?rev=b8fdde858d0025871f1b92d7a1c17acfb173b8e7#b8fdde858d0025871f1b92d7a1c17acfb173b8e7"
 dependencies = [
  "heapless 0.9.3",
 ]
@@ -1908,7 +1909,7 @@ dependencies = [
  "bareminal_macros",
  "common-hardware",
  "critical-section",
- "dhcpv6-client",
+ "dhcpeav6-client",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",

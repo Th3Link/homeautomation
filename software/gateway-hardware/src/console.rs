@@ -724,10 +724,10 @@ async fn cmd_ntp_server(server: &str) -> String<LINE_CAP> {
 /// servers (shown above with the others).
 fn dhcpv6_lines() -> heapless::Vec<String<LINE_CAP>, 3> {
     use core::fmt::Write;
-    use dhcpv6_client::{Mode, State};
+    use dhcpeav6_client::{Mode, State};
 
     let now = embassy_time::Instant::now().as_millis();
-    let seconds_until = |at: dhcpv6_client::Instant| at.as_millis().saturating_sub(now) / 1000;
+    let seconds_until = |at: dhcpeav6_client::Instant| at.as_millis().saturating_sub(now) / 1000;
     crate::dhcpv6::with_status(|status| {
         let mut lines = heapless::Vec::new();
         let state = match status.state {
@@ -750,10 +750,10 @@ fn dhcpv6_lines() -> heapless::Vec<String<LINE_CAP>, 3> {
         let _ = write!(line, "dhcpv6: {state} ({mode})");
         if let Some(config) = &status.configuration {
             let _ = write!(line, ", server {}", config.server_id);
-            if config.renew_at != dhcpv6_client::Instant::NEVER {
+            if config.renew_at != dhcpeav6_client::Instant::NEVER {
                 let _ = write!(line, ", renew in {} s", seconds_until(config.renew_at));
             }
-            if config.rebind_at != dhcpv6_client::Instant::NEVER {
+            if config.rebind_at != dhcpeav6_client::Instant::NEVER {
                 let _ = write!(line, ", rebind in {} s", seconds_until(config.rebind_at));
             }
         }
