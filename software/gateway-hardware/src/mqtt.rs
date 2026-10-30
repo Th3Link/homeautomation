@@ -26,9 +26,7 @@ use crate::console_log;
 use crate::tls::{self, Trust};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::{select3, Either3};
-use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::TcpSocket;
-use embassy_net::IpAddress;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -258,22 +256,6 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     CONNECTED[slot].store(false, Ordering::Relaxed);
 }
 
-/// Resolves `host`: IPv4 first, IPv6 (AAAA) as the fallback; IP literals of
-/// either family resolve to themselves.
-async fn resolve(stack: Stack<'static>, host: &str) -> Option<IpAddress> {
-    if let Ok(addrs) = stack.dns_query(host, DnsQueryType::A).await {
-        if let Some(addr) = addrs.first() {
-            return Some(*addr);
-        }
-    }
-    if let Ok(addrs) = stack.dns_query(host, DnsQueryType::Aaaa).await {
-        if let Some(addr) = addrs.first() {
-            return Some(*addr);
-        }
-    }
-    None
-}
-
 /// How long a TLS handshake may take (the key exchange and, for RSA, the
 /// signature check are slow on this CPU, so be generous).
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -410,14 +392,15 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             None
         };
 
-        let Some(addr) = resolve(stack, address.host).await else {
+        let addresses = crate::resolve::resolve(stack, address.host).await;
+        if addresses.is_empty() {
             console_log!("mqtt{broker}: could not resolve \"{}\"", address.host);
             Timer::after(Duration::from_secs(10)).await;
             continue;
-        };
+        }
 
         let mut socket = TcpSocket::new(stack, &mut buffers.rx, &mut buffers.tx);
-        if let Err(e) = socket.connect((addr, address.port)).await {
+        if let Err(e) = crate::resolve::connect(&mut socket, &addresses, address.port).await {
             console_log!("mqtt{broker}: tcp connect failed: {e:?}");
             Timer::after(Duration::from_secs(5)).await;
             continue;
