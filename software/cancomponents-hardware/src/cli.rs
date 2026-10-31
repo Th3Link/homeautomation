@@ -135,6 +135,10 @@ enum Commands<'a> {
     TankRef(u8),
     /// Heating controller: show what it is doing and why.
     Heating,
+    /// Bring-up: light 0-3 LEDs of the sensor board's night light, as the
+    /// `Nightlight` message from the gateway does.
+    #[set(min = 0, max = 3)]
+    Nightlight(u8),
     /// Bring-up: feed the heating controller a HeatingTarget as if it had
     /// arrived over CAN (flow target in °C, tank operation 0/1). Expires
     /// after 30 s like the real message.
@@ -432,6 +436,10 @@ async fn handle_command(
         Commands::TankTarget(celsius) => respond(writer, &cmd_tank_target(celsius).await).await,
         Commands::TankRef(index) => respond(writer, &cmd_tank_ref(index).await).await,
         Commands::Heating => cmd_heating(writer).await,
+        Commands::Nightlight(level) => {
+            crate::sensors::nightlight(&[level], false).await;
+            respond(writer, "night light set (if the sensor board has one)").await
+        }
         Commands::SimTarget { celsius, tank } => {
             respond(writer, &cmd_sim_target(celsius, tank != 0).await).await
         }
