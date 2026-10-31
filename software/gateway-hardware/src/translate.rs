@@ -120,7 +120,11 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                         .and_then(|sensor| sensor.name)
                         .map(|name| HString::<8>::try_from(name.as_str()).unwrap_or_default())
                         .unwrap_or_default();
-                    let ask = info.should_ask(key, crate::sensor_list::now_seconds());
+                    // Only DS18B20s have names on their node.
+                    let ask =
+                        gateway_core::sensor_table::SensorKind::from_message(msg_type).is_some_and(
+                            |kind| gateway_core::sensor_table::named_by_node(kind, reading.sub_id),
+                        ) && info.should_ask(key, crate::sensor_list::now_seconds());
                     drop(info);
                     if ask {
                         let id = key + u32::from(u8::from(CanMessageType::SensorConfig));
@@ -149,6 +153,14 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 let mut body: HString<16> = HString::new();
                 let _ = core::fmt::write(&mut body, format_args!("{value}"));
                 let key = id.device_key();
+                // One light sensor per device: sub_id 0.
+                crate::sensor_list::SENSOR_LIST.lock().await.observe(
+                    key,
+                    gateway_core::sensor_table::SensorKind::Brightness,
+                    0,
+                    value as f32,
+                    crate::sensor_list::now_seconds(),
+                );
                 publish_with_custom_string(
                     key,
                     |cs| device::ambient_light_topic(key, cs),

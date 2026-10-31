@@ -8,6 +8,9 @@ import { html, useLoad, run, notify, ago, Section, Loading, Field, Button } from
 const HAS_RELAYS = [2, 5, 8, 9];
 const HAS_ROLLERSHUTTERS = [7];
 const HAS_LAMPS = [3];
+// A light switch (type 4) drives lamps only through PCA9685 boards on its
+// extension (extension mode 3, PWM), banks 1-16.
+const EXTENSION_PWM = 3;
 const IS_HEATING = [9];
 
 const RELAIS_MODES = ['OFF', 'RELAIS', 'SWROLLERSHUTTER', 'HWROLLERSHUTTER'];
@@ -22,6 +25,7 @@ export function Device({ device }) {
     ${HAS_RELAYS.includes(data.device_type) && html`<${Relays} d=${data} kind="relay" />`}
     ${HAS_ROLLERSHUTTERS.includes(data.device_type) && html`<${Relays} d=${data} kind="rollershutter" />`}
     ${HAS_LAMPS.includes(data.device_type) && html`<${Lamps} d=${data} />`}
+    ${data.device_type === 4 && data.extension_mode === EXTENSION_PWM && html`<${Lamps} d=${data} firstBank=${1} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${Heating} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${SensorAssignment} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
@@ -93,9 +97,9 @@ function Relays({ d, kind }) {
     <//>`;
 }
 
-function Lamps({ d }) {
+function Lamps({ d, firstBank = 0 }) {
   const id = d.name || d.key;
-  const [bank, setBank] = useState(0);
+  const [bank, setBank] = useState(firstBank);
   const [value, setValue] = useState(255);
   const [lamps, setLamps] = useState(Array(24).fill(false));
   // Shown most significant bit first, like the old UI did.
@@ -104,7 +108,7 @@ function Lamps({ d }) {
     <${Section} title="Lamps">
       <p class="muted">The numbers are the bits of the bank's lamp mask.</p>
       <div class="row">
-        <${Field} label="Bank"><input type="number" min="0" max="255" value=${bank} onInput=${(e) => setBank(+e.target.value)} /><//>
+        <${Field} label="Bank"><input type="number" min=${firstBank} max="255" value=${bank} onInput=${(e) => setBank(+e.target.value)} /><//>
         <${Field} label="Value (0-255)"><input type="number" min="0" max="255" value=${value} onInput=${(e) => setValue(+e.target.value)} /><//>
       </div>
       <div class="lamps">
