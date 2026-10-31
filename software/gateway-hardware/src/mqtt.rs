@@ -26,9 +26,7 @@ use crate::console_log;
 use crate::tls::{self, Trust};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::{select3, Either3};
-use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::TcpSocket;
-use embassy_net::IpAddress;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -47,6 +45,7 @@ use rust_mqtt::client::options::{
 use rust_mqtt::client::Client;
 use rust_mqtt::io::Transport;
 use rust_mqtt::types::{MqttBinary, MqttString, PacketIdentifier, TopicFilter, TopicName};
+use static_cell::ConstStaticCell;
 
 /// The gateway's client instantiation: a little headroom (4) for
 /// in-flight un-acked SUBSCRIBE/incoming-QoS/outgoing-QoS packets, and
@@ -257,22 +256,6 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     CONNECTED[slot].store(false, Ordering::Relaxed);
 }
 
-/// Resolves `host`: IPv4 first, IPv6 (AAAA) as the fallback; IP literals of
-/// either family resolve to themselves.
-async fn resolve(stack: Stack<'static>, host: &str) -> Option<IpAddress> {
-    if let Ok(addrs) = stack.dns_query(host, DnsQueryType::A).await {
-        if let Some(addr) = addrs.first() {
-            return Some(*addr);
-        }
-    }
-    if let Ok(addrs) = stack.dns_query(host, DnsQueryType::Aaaa).await {
-        if let Some(addr) = addrs.first() {
-            return Some(*addr);
-        }
-    }
-    None
-}
-
 /// How long a TLS handshake may take (the key exchange and, for RSA, the
 /// signature check are slow on this CPU, so be generous).
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -335,12 +318,39 @@ async fn session<N: Transport>(
     Timer::after(Duration::from_secs(2)).await;
 }
 
+/// The buffers of one broker connection. Static, in place from the start:
+/// in the task's future they would make it ~16 KB larger, and a task's
+/// future is built on the main stack when it is spawned.
+struct Buffers {
+    rx: [u8; 2048],
+    tx: [u8; 2048],
+    read_record: [u8; tls::READ_RECORD_BYTES],
+    write_record: [u8; tls::WRITE_RECORD_BYTES],
+    captured: Vec<u8, { tls::CERT_CAP }>,
+}
+
+impl Buffers {
+    const fn new() -> Self {
+        Self {
+            rx: [0; 2048],
+            tx: [0; 2048],
+            read_record: [0; tls::READ_RECORD_BYTES],
+            write_record: [0; tls::WRITE_RECORD_BYTES],
+            captured: Vec::new(),
+        }
+    }
+}
+
+static BUFFERS: [ConstStaticCell<Buffers>; MQTT_BROKERS] =
+    [const { ConstStaticCell::new(Buffers::new()) }; MQTT_BROKERS];
+
 /// The connection to one broker (slot 0 or 1), kept up forever: connects,
 /// serves, and reconnects after a pause when the connection is lost or the
 /// configuration changes. A slot that isn't enabled just idles.
 #[embassy_executor::task(pool_size = 2)]
 pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
     let broker = slot + 1;
+    let buffers = BUFFERS[slot].take();
     loop {
         let cfg = config().await.load_or_init().await;
         let settings = &cfg.brokers[slot];
@@ -382,16 +392,15 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             None
         };
 
-        let Some(addr) = resolve(stack, address.host).await else {
+        let addresses = crate::resolve::resolve(stack, address.host).await;
+        if addresses.is_empty() {
             console_log!("mqtt{broker}: could not resolve \"{}\"", address.host);
             Timer::after(Duration::from_secs(10)).await;
             continue;
-        };
+        }
 
-        let mut rx_buf = [0u8; 2048];
-        let mut tx_buf = [0u8; 2048];
-        let mut socket = TcpSocket::new(stack, &mut rx_buf, &mut tx_buf);
-        if let Err(e) = socket.connect((addr, address.port)).await {
+        let mut socket = TcpSocket::new(stack, &mut buffers.rx, &mut buffers.tx);
+        if let Err(e) = crate::resolve::connect(&mut socket, &addresses, address.port).await {
             console_log!("mqtt{broker}: tcp connect failed: {e:?}");
             Timer::after(Duration::from_secs(5)).await;
             continue;
@@ -402,11 +411,9 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         }
 
-        let mut read_record = [0u8; tls::READ_RECORD_BYTES];
-        let mut write_record = [0u8; tls::WRITE_RECORD_BYTES];
-        let mut captured: Vec<u8, { tls::CERT_CAP }> = Vec::new();
+        buffers.captured.clear();
         let trust = if capturing {
-            Trust::Capture(&mut captured)
+            Trust::Capture(&mut buffers.captured)
         } else if let Some(certificate) = &pinned {
             Trust::Pinned(certificate)
         } else {
@@ -414,13 +421,18 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         };
         let opened = embassy_time::with_timeout(
             TLS_HANDSHAKE_TIMEOUT,
-            tls::open(socket, &mut read_record, &mut write_record, trust),
+            tls::open(
+                socket,
+                &mut buffers.read_record,
+                &mut buffers.write_record,
+                trust,
+            ),
         )
         .await;
         match opened {
             Ok(Ok(connection)) if capturing => {
                 drop(connection);
-                pin_captured(slot, &captured).await;
+                pin_captured(slot, &buffers.captured).await;
                 Timer::after(Duration::from_secs(1)).await;
             }
             Ok(Ok(connection)) => session(connection, settings, slot, &address).await,

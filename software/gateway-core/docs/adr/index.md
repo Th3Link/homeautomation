@@ -19,3 +19,4 @@ globally-numbered list including cross-cutting decisions.
 | [0016](0016-op-coded-heating-and-sensor-messages.md) | Op-coded heating and sensor messages, state by R frame | Accepted |
 | [0017](0017-block-ota.md) | Firmware update over CAN in acknowledged blocks | Accepted |
 | [0018](0018-https-certificate-management.md) | HTTPS for the web UI, with central certificate management | Accepted |
+| [0019](0019-ipv6-first.md) | IPv6 first, with SLAAC and DHCPv6 | Accepted |

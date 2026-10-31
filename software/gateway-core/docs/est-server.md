@@ -9,8 +9,9 @@ implementation (`gateway-hardware/src/cert/`, `gateway-core/src/est.rs`,
 
 ## In short
 
-- HTTPS on IPv4, TLS 1.2 or 1.3, a certificate that chains to a CA the user
-  installs on the gateway as the trust anchor, for the host name in the URL.
+- HTTPS over IPv6 or IPv4, TLS 1.2 or 1.3, a certificate that chains to a
+  CA the user installs on the gateway as the trust anchor, for the host
+  name (or address) in the URL.
 - `POST …/simpleenroll` and `POST …/simplereenroll` with a base64 PKCS#10
   request; the answer is a base64 certs-only PKCS#7.
 - Client authentication only by TLS client certificate: the device
@@ -23,16 +24,16 @@ implementation (`gateway-hardware/src/cert/`, `gateway-core/src/est.rs`,
 
 | | |
 |---|---|
-| URL | `https://host[:port][/path]`, configured on the gateway. Without a path the gateway uses `/.well-known/est`; a path replaces it completely (e.g. `/.well-known/est/gateways` for a CA label). Port 443 unless given. No user name in the URL, no query |
-| Address | The host is resolved with a DNS **A** query (IPv4 only), or is an IPv4 address. The server must be reachable over IPv4 |
+| URL | `https://host[:port][/path]`, configured on the gateway. The host is a DNS name, an IPv4 address or an IPv6 address in brackets (`https://[fd00::1]:8443`). Without a path the gateway uses `/.well-known/est`; a path replaces it completely (e.g. `/.well-known/est/gateways` for a CA label). Port 443 unless given. No user name in the URL, no query |
+| Address | A name is resolved with AAAA and A queries ([ADR 0019](adr/0019-ipv6-first.md)): the IPv6 addresses are tried first when the gateway has an IPv6 address beyond link-local, otherwise the IPv4 ones; a family the gateway has no address in is not asked for. Each address gets 10 s to accept the connection |
 | TLS versions | TLS 1.2 or TLS 1.3 |
 | Cipher suites | TLS 1.3: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`. TLS 1.2: ECDHE with ECDSA or RSA authentication and AES-GCM (`ECDHE-ECDSA-AES128-GCM-SHA256`, `ECDHE-RSA-AES128-GCM-SHA256` and their AES-256/SHA-384 variants). No ChaCha20, no CBC, no static RSA key exchange |
 | Key exchange groups | x25519, secp256r1, secp384r1 |
 | Server certificate | ECDSA (P-256, P-384) or RSA key; signed with SHA-256/384/512 (ECDSA, RSA PKCS#1 v1.5 or RSA-PSS). Certificates signed with SHA-1 or MD5, and Ed25519 keys, are not accepted |
-| Verification | Always on, can't be switched off: the server's chain must lead to a trust anchor installed on the gateway (the server's root or an intermediate CA, PEM/DER, up to 6 KiB in all), the certificate must name the URL's host (SAN DNS name; use a DNS name in the URL rather than an IP address), and it must be within its validity. The gateway sends the host as SNI |
+| Verification | Always on, can't be switched off: the server's chain must lead to a trust anchor installed on the gateway (the server's root or an intermediate CA, PEM/DER, up to 6 KiB in all), the certificate must name the URL's host (a SAN DNS name; for an address in the URL a SAN IP address), and it must be within its validity. The gateway sends the host as SNI, an address too (MbedTLS does; servers that only expect names in SNI ignore it) |
 | Certificate message | The server's whole certificate chain must fit 16 KiB |
 | Time | The gateway checks dates against SNTP time and makes no EST request before the time is known, so the gateway's NTP server must be reachable |
-| Timeouts | 30 s to connect, 30 s for handshake, request and answer together. The gateway's TLS handshake is done in software and takes a moment |
+| Timeouts | 10 s to connect per address, 30 s for handshake, request and answer together. The gateway's TLS handshake is done in software and takes a moment |
 | Not used | `/cacerts` (the trust anchor is installed by hand), `/csrattrs`, `/serverkeygen`, `/fullcmc`, session resumption, ALPN |
 
 ## Authentication
@@ -123,8 +124,9 @@ in the UI (`POST /api/v1/tls/est/enroll`).
 
 ## Checklist for setting up a server
 
-- [ ] Reachable over IPv4 under a DNS name; the server certificate has that
-      name as a SAN DNS name and offers one of the cipher suites above.
+- [ ] Reachable over IPv6 or IPv4 under a DNS name (or an address); the
+      server certificate has that name as a SAN DNS name (an address as a SAN
+      IP address) and offers one of the cipher suites above.
 - [ ] The issuing CA (or its root) is installed on the gateway as trust anchor.
 - [ ] `simpleenroll` and `simplereenroll` are offered under the configured path.
 - [ ] Answers are base64, certs-only PKCS#7, with the intermediate CAs.

@@ -147,7 +147,7 @@ function Est({ d, reload }) {
   return html`
     <${Section} title="EST">
       <div class="row">
-        <${Field} label="EST server" hint="https://host[:port][/.well-known/est/label]"><input value=${url} onInput=${(ev) => setUrl(ev.target.value)} /><//>
+        <${Field} label="EST server" hint="https://host[:port][/.well-known/est/label]; an IPv6 address in brackets: https://[fd00::1]"><input value=${url} onInput=${(ev) => setUrl(ev.target.value)} /><//>
       </div>
       <label class="check"><input type="checkbox" checked=${auto} onChange=${(ev) => setAuto(ev.target.checked)} /> Renew automatically (30 days before expiry)</label>
       <p>Trust anchor: ${d.trust_anchor ? html`<span class="badge ok">installed</span>` : html`<span class="badge bad">missing</span> (below)`}
@@ -193,8 +193,9 @@ function Time({ d, reload }) {
     <${Section} title="Time" aside=${html`<span class=${'badge ' + (d.time_known ? 'ok' : 'warn')}>${d.time_known ? 'synchronised' : 'not synchronised'}</span>`}>
       <p class="muted">Certificate dates and EST need the time; the gateway has no clock of its own.</p>
       <div class="row">
-        <${Field} label="NTP server"><input value=${server} onInput=${(e) => setServer(e.target.value)} /><//>
+        <${Field} label="NTP server"><input value=${server} placeholder="automatic" onInput=${(e) => setServer(e.target.value)} /><//>
       </div>
+      <p class="muted">Empty: the server DHCPv6 names, else pool.ntp.org. In use: ${d.ntp_server_in_use}</p>
       <div class="buttons"><${Button} onClick=${save}>Save<//></div>
     <//>`;
 }

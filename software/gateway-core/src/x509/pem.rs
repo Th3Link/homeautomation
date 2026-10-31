@@ -19,36 +19,98 @@ fn sextet(c: u8) -> Option<u32> {
     } as u32)
 }
 
-/// Decodes base64 into `out`, skipping whitespace; returns the length.
-pub fn decode(text: &[u8], out: &mut [u8]) -> Result<usize, Invalid> {
-    let mut len = 0;
-    let mut acc = 0u32;
-    let mut bits = 0;
-    let mut padding = 0;
-    for &c in text {
+/// Base64 decoding, one character at a time.
+#[derive(Default)]
+struct Decoder {
+    acc: u32,
+    bits: u32,
+    padding: u32,
+}
+
+impl Decoder {
+    /// Takes one character; returns the byte it completes, if any.
+    fn push(&mut self, c: u8) -> Result<Option<u8>, Invalid> {
         if c.is_ascii_whitespace() {
-            continue;
+            return Ok(None);
         }
         if c == b'=' {
-            padding += 1;
-            continue;
+            self.padding += 1;
+            return Ok(None);
         }
         // Nothing may follow the padding.
-        if padding > 0 {
+        if self.padding > 0 {
             return Err(Invalid);
         }
-        acc = (acc << 6) | sextet(c).ok_or(Invalid)?;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            *out.get_mut(len).ok_or(Invalid)? = (acc >> bits) as u8;
+        self.acc = (self.acc << 6) | sextet(c).ok_or(Invalid)?;
+        self.bits += 6;
+        if self.bits >= 8 {
+            self.bits -= 8;
+            Ok(Some((self.acc >> self.bits) as u8))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn finish(self) -> Result<(), Invalid> {
+        if self.padding > 2 || self.bits >= 6 {
+            Err(Invalid)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Decodes base64 into `out`, skipping whitespace; returns the length.
+pub fn decode(text: &[u8], out: &mut [u8]) -> Result<usize, Invalid> {
+    let mut decoder = Decoder::default();
+    let mut len = 0;
+    for &c in text {
+        if let Some(byte) = decoder.push(c)? {
+            *out.get_mut(len).ok_or(Invalid)? = byte;
             len += 1;
         }
     }
-    if padding > 2 || bits >= 6 {
-        return Err(Invalid);
-    }
+    decoder.finish()?;
     Ok(len)
+}
+
+/// Decodes the PEM blocks labelled `label` in `data` where they are: their
+/// DER ends up one after the other at the start of `data`, and the rest of
+/// `data` is garbage afterwards. Returns where each block's DER ends (the
+/// first starts at 0); other blocks and text around them are dropped.
+///
+/// Base64 is longer than what it encodes, so the output never overtakes
+/// the input: no second buffer is needed. That matters for uploads on a
+/// small heap.
+pub fn decode_in_place<const N: usize>(
+    data: &mut [u8],
+    label: &str,
+) -> Result<heapless::Vec<usize, N>, Invalid> {
+    let text = core::str::from_utf8(data).map_err(|_| Invalid)?;
+    let mut bodies: heapless::Vec<core::ops::Range<usize>, N> = heapless::Vec::new();
+    for (_, body) in blocks(text).filter(|(l, _)| *l == label) {
+        let start = body.as_ptr() as usize - text.as_ptr() as usize;
+        bodies
+            .push(start..start + body.len())
+            .map_err(|_| Invalid)?;
+    }
+    let mut ends = heapless::Vec::new();
+    let mut len = 0;
+    for body in bodies {
+        let mut decoder = Decoder::default();
+        for i in body {
+            if let Some(byte) = decoder.push(data[i])? {
+                // `len` < `i`: four characters in, at most three bytes out,
+                // and every earlier block's output ended before this one.
+                data[len] = byte;
+                len += 1;
+            }
+        }
+        decoder.finish()?;
+        // The length of `bodies` bounds that of `ends`.
+        let _ = ends.push(len);
+    }
+    Ok(ends)
 }
 
 /// Base64 of some bytes, for formatting; `line` breaks the text every that
@@ -235,5 +297,51 @@ mod tests {
         assert_eq!(decode(found[1].1.as_bytes(), &mut out), Ok(70));
         assert!(is_pem(text.as_bytes()));
         assert!(!is_pem(&[0x30, 0x82, 1, 0]));
+    }
+
+    #[test]
+    fn decoding_in_place() {
+        let mut text = std::string::String::new();
+        text.push_str("subject=CN = leaf\n");
+        for (label, der) in [
+            ("CERTIFICATE", &[1u8, 2, 3, 4, 5][..]),
+            ("EC PRIVATE KEY", &[7; 40][..]),
+            ("CERTIFICATE", &[9; 70][..]),
+        ] {
+            write!(text, "{}", Pem { label, der }).unwrap();
+        }
+        let mut data = text.into_bytes();
+
+        let ends = decode_in_place::<4>(&mut data, "CERTIFICATE").unwrap();
+        assert_eq!(ends, [5, 75]);
+        assert_eq!(&data[..5], &[1, 2, 3, 4, 5]);
+        assert_eq!(&data[5..75], &[9; 70]);
+    }
+
+    #[test]
+    fn decoding_in_place_rejects_bad_blocks() {
+        let mut too_many = std::string::String::new();
+        for _ in 0..3 {
+            write!(
+                too_many,
+                "{}",
+                Pem {
+                    label: "CERTIFICATE",
+                    der: &[1, 2, 3]
+                }
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            decode_in_place::<2>(&mut too_many.into_bytes(), "CERTIFICATE"),
+            Err(Invalid)
+        );
+
+        let mut junk =
+            b"-----BEGIN CERTIFICATE-----\nZm9v*mFy\n-----END CERTIFICATE-----\n".to_vec();
+        assert_eq!(decode_in_place::<2>(&mut junk, "CERTIFICATE"), Err(Invalid));
+
+        let mut none = b"no PEM here".to_vec();
+        assert_eq!(decode_in_place::<2>(&mut none, "CERTIFICATE").unwrap(), []);
     }
 }

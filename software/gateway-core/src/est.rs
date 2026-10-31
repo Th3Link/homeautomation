@@ -6,9 +6,11 @@ use core::fmt;
 
 /// An EST server: `https://host[:port][/path]`. Without a path the
 /// well-known one is used; a path is the server's EST base, e.g.
-/// `/.well-known/est/arbitrary-label`.
+/// `/.well-known/est/arbitrary-label`. The host is a name, an IPv4 address
+/// or an IPv6 address in brackets (`https://[fd00::1]:8443`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Server<'a> {
+    /// A name or an address; an IPv6 address without its brackets.
     pub host: &'a str,
     pub port: u16,
     pub base_path: &'a str,
@@ -26,17 +28,28 @@ pub fn parse_url(url: &str) -> Option<Server<'_>> {
     if authority.contains('@') {
         return None;
     }
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((host, port)) => (host, port.parse().ok().filter(|p| *p != 0)?),
-        None => (authority, 443),
+    let port = |port: &str| port.parse().ok().filter(|p| *p != 0);
+    let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
+        let (host, after) = bracketed.split_once(']')?;
+        host.parse::<core::net::Ipv6Addr>().ok()?;
+        match after {
+            "" => (host, 443),
+            _ => (host, port(after.strip_prefix(':')?)?),
+        }
+    } else {
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, p)) => (host, port(p)?),
+            None => (authority, 443),
+        };
+        if host.is_empty()
+            || !host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        {
+            return None;
+        }
+        (host, port)
     };
-    if host.is_empty()
-        || !host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
-    {
-        return None;
-    }
     if path.contains(['?', '#', ' ']) {
         return None;
     }
@@ -77,11 +90,15 @@ impl fmt::Display for RequestHead<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "POST {}/{} HTTP/1.1\r\nHost: {}",
+            "POST {}/{} HTTP/1.1\r\nHost: ",
             self.server.base_path,
             self.operation.path(),
-            self.server.host
         )?;
+        if self.server.host.contains(':') {
+            write!(f, "[{}]", self.server.host)?;
+        } else {
+            f.write_str(self.server.host)?;
+        }
         if self.server.port != 443 {
             write!(f, ":{}", self.server.port)?;
         }
@@ -229,6 +246,40 @@ mod tests {
     }
 
     #[test]
+    fn ip_urls() {
+        assert_eq!(
+            parse_url("https://192.0.2.7:8443"),
+            Some(Server {
+                host: "192.0.2.7",
+                port: 8443,
+                base_path: WELL_KNOWN
+            })
+        );
+        assert_eq!(
+            parse_url("https://[fd77:77:77::1]:8443/.well-known/est/gw"),
+            Some(Server {
+                host: "fd77:77:77::1",
+                port: 8443,
+                base_path: "/.well-known/est/gw"
+            })
+        );
+        assert_eq!(
+            parse_url("https://[2001:db8::5]"),
+            Some(Server {
+                host: "2001:db8::5",
+                port: 443,
+                base_path: WELL_KNOWN
+            })
+        );
+        // Unbracketed, not an address, a port without its colon, no port.
+        assert_eq!(parse_url("https://fd77:77:77::1"), None);
+        assert_eq!(parse_url("https://[est.example.com]"), None);
+        assert_eq!(parse_url("https://[fd77::1]8443"), None);
+        assert_eq!(parse_url("https://[fd77::1]:"), None);
+        assert_eq!(parse_url("https://[fd77::1"), None);
+    }
+
+    #[test]
     fn request_head() {
         let head = RequestHead {
             server: parse_url("https://est.example.com:8443").unwrap(),
@@ -238,6 +289,13 @@ mod tests {
         .to_string();
         assert!(head.starts_with("POST /.well-known/est/simplereenroll HTTP/1.1\r\n"));
         assert!(head.contains("Host: est.example.com:8443\r\n"));
+        let head = RequestHead {
+            server: parse_url("https://[fd77::1]").unwrap(),
+            operation: Operation::Enroll,
+            body_len: 600,
+        }
+        .to_string();
+        assert!(head.contains("Host: [fd77::1]\r\n"));
         assert!(head.contains("Content-Length: 600\r\n"));
         assert!(head.contains("Content-Type: application/pkcs10\r\n"));
         assert!(head.ends_with("\r\n\r\n"));

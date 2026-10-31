@@ -9,6 +9,19 @@ members = [
     "software/cancomponents-hardware",
 ]
 
+# Forks of upstream releases with the fixes the gateway needs, until
+# upstream releases them; software/patches/README.md tracks them.
+[patch.crates-io]
+# Fork: no TX checksum insertion by the ESP32's MAC; branch
+# esp-hal-v1.2.2-gateway.
+esp-hal = { git = "https://github.com/Th3Link/esp-hal", rev = "475cf2f76be9b03acf8da92b66b466c2ccf0d051" }
+# Fork: every SLAAC address, RDNSS, the M/O flags, a DHCPv6 lease; branch
+# embassy-net-v0.9.1-gateway.
+embassy-net = { git = "https://github.com/Th3Link/embassy", rev = "8b544c3c4d8b5952073420d17396e30700c46190" }
+# Fork with the SLAAC fixes (multiple prefixes, M/O flags, RDNSS); branch
+# v0.13.1-gateway.
+smoltcp = { git = "https://github.com/Th3Link/smoltcp", rev = "dfe04756328dac94bc227c1e6f151280a13e24d4" }
+
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"

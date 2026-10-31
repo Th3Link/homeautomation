@@ -59,7 +59,7 @@ pub async fn sntp_task(stack: Stack<'static>) {
         let synced = match socket.bind(0) {
             // On the heap, like the EST client: the DNS lookup's future is
             // large and only needed for a moment.
-            Ok(()) => alloc::boxed::Box::pin(query(stack, &mut socket, &server)).await,
+            Ok(()) => crate::heap::boxed(|| query(stack, &mut socket, &server)).await,
             Err(_) => false,
         };
         drop(socket);
@@ -67,21 +67,23 @@ pub async fn sntp_task(stack: Stack<'static>) {
     }
 }
 
+/// Asks the addresses of `server` in turn (IPv6 first, see
+/// [`crate::resolve`]) until one answers.
 async fn query(stack: Stack<'static>, socket: &mut UdpSocket<'_>, server: &str) -> bool {
-    let address = match server.parse::<IpAddress>() {
-        Ok(address) => address,
-        Err(_) => match stack
-            .dns_query(server, embassy_net::dns::DnsQueryType::A)
-            .await
-        {
-            Ok(addresses) if !addresses.is_empty() => addresses[0],
-            _ => {
-                console_log!("sntp: cannot resolve {server}");
-                return false;
-            }
-        },
-    };
+    let addresses = crate::resolve::resolve(stack, server).await;
+    if addresses.is_empty() {
+        console_log!("sntp: cannot resolve {server}");
+        return false;
+    }
+    for address in addresses {
+        if ask(socket, address, server).await {
+            return true;
+        }
+    }
+    false
+}
 
+async fn ask(socket: &mut UdpSocket<'_>, address: IpAddress, server: &str) -> bool {
     // Version 4, mode 3 (client); everything else zero.
     let mut request = [0u8; 48];
     request[0] = 0x23;

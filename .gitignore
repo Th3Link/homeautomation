@@ -8,3 +8,4 @@ software/*/target/
 software/**/*.bin
 software/**/*.hexdump
 **/nvs.csv
+
