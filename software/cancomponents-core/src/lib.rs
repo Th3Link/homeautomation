@@ -21,6 +21,7 @@ pub use common_core::{
     ota_sender, sensor_config,
 };
 
+pub mod ambient_light;
 pub mod button_fsm;
 pub mod button_message;
 pub mod docs;
@@ -29,6 +30,9 @@ pub mod error;
 pub mod extension;
 pub mod heating;
 pub mod heating_manual;
+pub mod pca9685;
+pub mod presence;
 pub mod relais;
 pub mod relais_manager;
+pub mod sensor_board;
 pub mod sensor_names;

@@ -220,11 +220,31 @@ dependencies = [
 
 [[package]]
 name = "bitfield"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7e6caee68becd795bfd65f1a026e4d00d8f0c2bc9be5eb568e1015f9ce3c34"
+dependencies = [
+ "bitfield-macros 0.18.1",
+]
+
+[[package]]
+name = "bitfield"
 version = "0.19.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b45721c9db4c7a20899d05efb7ad9235f50b256e980db30ffb229abf732934c3"
 dependencies = [
- "bitfield-macros",
+ "bitfield-macros 0.19.5",
+]
+
+[[package]]
+name = "bitfield-macros"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "331afbb18ce7b644c0b428726d369c5dd37ca0b815d72a459fcc2896c3c8ad32"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -301,6 +321,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bosch-bme680"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c7d78aa5cc3efa061c1514ea12a3e43ef7ece82f784fceb1dd31c12f9d3c011"
+dependencies = [
+ "bitfield 0.18.1",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "log",
+]
+
+[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -357,6 +389,7 @@ dependencies = [
  "async-trait",
  "bareminal_cli",
  "bareminal_macros",
+ "bosch-bme680",
  "cancomponents-core",
  "common-hardware",
  "critical-section",
@@ -366,6 +399,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-can",
+ "embedded-hal-async",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "esp-backtrace",
@@ -1469,7 +1503,7 @@ name = "esp-hal"
 version = "1.2.2"
 source = "git+https://github.com/Th3Link/esp-hal?rev=475cf2f76be9b03acf8da92b66b466c2ccf0d051#475cf2f76be9b03acf8da92b66b466c2ccf0d051"
 dependencies = [
- "bitfield",
+ "bitfield 0.19.5",
  "bytemuck",
  "critical-section",
  "delegate",

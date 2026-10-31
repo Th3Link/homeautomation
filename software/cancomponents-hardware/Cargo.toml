@@ -37,6 +37,8 @@ esp-rtos            = { version = "0.4", features = ["esp32", "embassy"] }
 xtensa-lx           = { version = "0.13" }
 embedded-can        = { version = "0.4" }
 embedded-io-async   = { version = "0.7" }
+embedded-hal-async  = { version = "1.0" }
+bosch-bme680        = { version = "1.0.4", features = ["embedded-hal-async"] }
 embedded-storage    = { version = "0.3" }
 static_cell         = { version = "2.1", features = ["nightly"] }
 heapless            = { version = "0.9" }

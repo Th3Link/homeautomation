@@ -40,7 +40,8 @@ impl Extension {
                     Output::new(vcc, Level::High, OutputConfig::default());
                     Output::new(gnd, Level::Low, OutputConfig::default());
                 }
-                Button::init(pin0, pin1, pin2, pin3, spawner);
+                // Reported as buttons 4-7, after the board's 0-3.
+                Button::init(pin0, pin1, pin2, pin3, 4, spawner);
             }
             Mode::Sensors => {
                 if let Some((vcc, gnd)) = vcc_gnd {
@@ -52,18 +53,13 @@ impl Extension {
                     .with_sda(pin0)
                     .with_scl(pin1)
                     .into_async();
-                Sensors::init(i2c, pin2, pin3, spawner);
+                Sensors::init(i2c, pin2, pin3, spawner).await;
             }
             Mode::LegacySensors => {
-                // NOTE: unlike the Button/Sensors branches above, this binds
-                // vcc_gnd's tuple elements as `(pin3, vcc)` rather than
-                // `(vcc, gnd)` — the opposite order/naming used everywhere
-                // else in this function. Left as-is (not touching GPIO
-                // output-level wiring logic without hardware to verify
-                // against), but this looks like it was meant to say
-                // `(vcc, gnd)` here too. Currently harmless in practice only
-                // because `Sensors::init` is a no-op stub that ignores its
-                // pin arguments.
+                // The original firmware's `leg_sen` wiring of hwrev 1
+                // boards: the board is powered from GPIO2 (VCC) and GPIO18
+                // (GND), and the PIR moves to GPIO5 (the `vcc_gnd` pair's
+                // first pin). Not verified on such a board.
                 let gnd = pin3;
                 if let Some((pin3, vcc)) = vcc_gnd {
                     Output::new(vcc, Level::High, OutputConfig::default());
@@ -73,7 +69,7 @@ impl Extension {
                         .with_sda(pin0)
                         .with_scl(pin1)
                         .into_async();
-                    Sensors::init(i2c, pin2, pin3, spawner);
+                    Sensors::init(i2c, pin2, pin3, spawner).await;
                 } else {
                     // Legacy Sensors are only compatible with hwrev 1
                     // From hwrev 2 on vcc and gnd are hard wired

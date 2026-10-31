@@ -11,7 +11,6 @@ use cancomponents::device;
 use cancomponents::echo_guard;
 use cancomponents::extension::Extension;
 use cancomponents::flash;
-use cancomponents::gpio_interrupt;
 use cancomponents::heating;
 use cancomponents::relais::Relais;
 use cancomponents::temperature;
@@ -52,7 +51,6 @@ async fn main(spawner: Spawner) -> ! {
     config::init().await;
     device::init().await;
     update::init(&spawner).await;
-    gpio_interrupt::init(peripherals.IO_MUX);
     can::init(
         peripherals.TWAI0,
         peripherals.GPIO14,
@@ -159,6 +157,7 @@ async fn main(spawner: Spawner) -> ! {
                 peripherals.GPIO35,
                 peripherals.GPIO12,
                 peripherals.GPIO34,
+                0,
                 &spawner,
             );
             Extension::init(
@@ -178,6 +177,7 @@ async fn main(spawner: Spawner) -> ! {
                 peripherals.GPIO26,
                 peripherals.GPIO5,
                 peripherals.GPIO15,
+                0,
                 &spawner,
             );
             Extension::init(

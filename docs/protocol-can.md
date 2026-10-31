@@ -430,6 +430,21 @@ button id `8` in its MQTT body regardless of the frame's actual
 [`protocol-mqtt.md`](protocol-mqtt.md#canbuspresence)), and collapses
 every event kind other than `Released` to a single "hold" state.
 
+How the node sends them (the original firmware's behaviour, kept by the
+Rust node firmware, `cancomponents-core/src/button_fsm.rs` and
+`presence.rs`):
+
+- **Buttons** 0-3 on the board, 4-7 on the extension (`ExtensionMode`
+  button), polled every 10 ms. A press sends `Pressed` (count 0); 50 ms
+  after it the level is ignored. Releasing opens a 250 ms window: `Single`
+  or `Double` when it closes, `Tripple` right at the third release (count
+  0); further presses within a click sequence aren't sent. Held, the
+  button sends `Hold` from 2 s on every 500 ms with count 1, 2, …, and
+  `Released` with the last count when let go.
+- **Presence** (`PirSensor`, `button_id` 8): once a second while there is
+  motion, `Pressed` with count 1, then `Hold` with count 2, 3, …; the
+  first second without motion sends `Released` with count 0.
+
 ## Environmental sensors
 
 Fixed-point readings (`TemperatureSensor`, `PressureSensor`,
@@ -459,6 +474,14 @@ measured every 10 s; the frames go out every 30 s by default (CLI:
 (`FixedPointReading::signed_value`). The other fixed-point sensors are
 unsigned.
 
+### Temperature, humidity and pressure from a BME680
+
+The light switch's sensor board (`ExtensionMode` sensors) sends its
+BME680's temperature (°C, signed), humidity (%) and pressure (hPa) as
+`TemperatureSensor`, `HumiditySensor` and `PressureSensor` once per send
+interval (`sensor-interval`, default 30 s). `sub_id` is `0x6800_00xx`, the
+low byte the chip's I2C address (0x76 or 0x77): topic id `0x68000077`.
+
 On the gateway the sensor shows up as `canbus/temperature/<device>/0x<id>`,
 where `<id>` is the low 32 bits of `sub_id` in lowercase hex — for a sensor
 with ROM `28 22 B0 C3 32 20 01 36` that is `0x32c3b022`. The node's
@@ -467,7 +490,12 @@ current temperature, to map physical sensors to topics.
 
 Ambient light (`AmbientLightSensor`, and nominally
 `AmbientLightSensorWhite` though nothing in the live gateway actually
-dispatches that message type) — 4 bytes, raw and **unscaled**:
+dispatches that message type) — 4 bytes. The Rust node firmware sends lux
+from the sensor board's VEML7700, measured every 2 s in one of two ranges
+(up to ~550 lx finely, up to ~35 klx coarsely), on a change of more than
+10 % (at least 2 lx) and otherwise once per send interval
+(`cancomponents-core/src/ambient_light.rs`). The gateway passes the value
+on unscaled:
 
 ```text
 byte:  0..3
