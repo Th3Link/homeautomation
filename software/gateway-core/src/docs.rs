@@ -85,6 +85,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0019-ipv6-first.md")]
     pub mod adr_0019_ipv6_first {}
+
+    #[doc = include_str!("../docs/adr/0020-trusted-certificate-authorities.md")]
+    pub mod adr_0020_trusted_certificate_authorities {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with

@@ -45,7 +45,8 @@ with `308 Permanent Redirect` to the same path on `https://` (308, unlike
   *EST* (`simpleenroll` for the first certificate and after an FQDN change,
   `simplereenroll` 30 days before `notAfter`, retries with backoff from one
   minute to six hours). The EST server is always verified against the
-  installed **trust anchor** and the URL's host name; there is no switch to
+  installed **trust anchor** (since [ADR 0020](0020-trusted-certificate-authorities.md)
+  also the built-in Let's Encrypt roots) and the URL's host name; there is no switch to
   turn that off. A first enrollment authenticates with an installed device
   identity (mTLS) if there is one; a renewal with the certificate being
   renewed (RFC 7030 4.2.2). What the server has to support:

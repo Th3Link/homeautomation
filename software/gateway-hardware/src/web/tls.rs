@@ -80,7 +80,7 @@ fn api_error(error: CertError) -> ApiError {
         CertError::BadUrl => "est_url: https://host[:port][/path]",
         CertError::BadValidity => "validity_years: 1-30",
         CertError::BadInput => "expected PEM or DER",
-        CertError::NoTrustAnchor => "no trust anchor installed",
+        CertError::NoTrustAnchor => "no trusted CA (built-in roots off, none installed)",
         CertError::Key => "the device key is not usable",
         CertError::Storage => "could not store",
         CertError::NoMemory => "out of memory",
@@ -164,6 +164,9 @@ struct StatusView<'a> {
     ntp_server_in_use: &'a str,
     certificate: Option<CertView<'a>>,
     trust_anchor: Option<CertView<'a>>,
+    /// Whether the built-in root certificates are trusted, and which.
+    built_in_roots: bool,
+    built_in_root_names: [&'static str; cert::roots::BUILT_IN.len()],
     est: EstView<'a>,
 }
 
@@ -193,6 +196,8 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
             count: Some(status.trust_anchor_count),
             ..CertView::new(info)
         }),
+        built_in_roots: status.settings.built_in_roots,
+        built_in_root_names: cert::roots::BUILT_IN.map(|root| root.name),
         est: EstView {
             url: &status.settings.est_url,
             auto_renew: status.settings.est_auto_renew,
@@ -220,6 +225,7 @@ struct Update {
     est_url: Option<String<{ cert::URL_CAP }>>,
     est_auto_renew: Option<bool>,
     ntp_server: Option<String<{ cert::NTP_CAP }>>,
+    built_in_roots: Option<bool>,
 }
 
 async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError> {
@@ -237,6 +243,7 @@ async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError>
             est_url: body.est_url.as_deref(),
             est_auto_renew: body.est_auto_renew,
             ntp_server: body.ntp_server.as_deref(),
+            built_in_roots: body.built_in_roots,
         })
     })
     .await

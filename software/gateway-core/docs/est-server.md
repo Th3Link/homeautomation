@@ -10,7 +10,8 @@ implementation (`gateway-hardware/src/cert/`, `gateway-core/src/est.rs`,
 ## In short
 
 - HTTPS over IPv6 or IPv4, TLS 1.2 or 1.3, a certificate that chains to a
-  CA the user installs on the gateway as the trust anchor, for the host
+  CA the gateway trusts (Let's Encrypt's are built in, others the user
+  installs), for the host
   name (or address) in the URL.
 - `POST …/simpleenroll` and `POST …/simplereenroll` with a base64 PKCS#10
   request; the answer is a base64 certs-only PKCS#7.
@@ -30,11 +31,11 @@ implementation (`gateway-hardware/src/cert/`, `gateway-core/src/est.rs`,
 | Cipher suites | TLS 1.3: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`. TLS 1.2: ECDHE with ECDSA or RSA authentication and AES-GCM (`ECDHE-ECDSA-AES128-GCM-SHA256`, `ECDHE-RSA-AES128-GCM-SHA256` and their AES-256/SHA-384 variants). No ChaCha20, no CBC, no static RSA key exchange |
 | Key exchange groups | x25519, secp256r1, secp384r1 |
 | Server certificate | ECDSA (P-256, P-384) or RSA key; signed with SHA-256/384/512 (ECDSA, RSA PKCS#1 v1.5 or RSA-PSS). Certificates signed with SHA-1 or MD5, and Ed25519 keys, are not accepted |
-| Verification | Always on, can't be switched off: the server's chain must lead to a trust anchor installed on the gateway (the server's root or an intermediate CA, PEM/DER, up to 6 KiB in all), the certificate must name the URL's host (a SAN DNS name; for an address in the URL a SAN IP address), and it must be within its validity. The gateway sends the host as SNI, an address too (MbedTLS does; servers that only expect names in SNI ignore it) |
+| Verification | Always on, can't be switched off: the server's chain must lead to a CA the gateway trusts: the built-in Let's Encrypt roots (ISRG Root X1, X2, YE, YR; can be switched off) or one installed on the gateway (the server's root or an intermediate CA, PEM/DER, up to 6 KiB in all, [ADR 0020](adr/0020-trusted-certificate-authorities.md)), the certificate must name the URL's host (a SAN DNS name; for an address in the URL a SAN IP address), and it must be within its validity. The gateway sends the host as SNI, an address too (MbedTLS does; servers that only expect names in SNI ignore it) |
 | Certificate message | The server's whole certificate chain must fit 16 KiB |
 | Time | The gateway checks dates against SNTP time and makes no EST request before the time is known, so the gateway's NTP server must be reachable |
 | Timeouts | 10 s to connect per address, 30 s for handshake, request and answer together. The gateway's TLS handshake is done in software and takes a moment |
-| Not used | `/cacerts` (the trust anchor is installed by hand), `/csrattrs`, `/serverkeygen`, `/fullcmc`, session resumption, ALPN |
+| Not used | `/cacerts` (CAs are built in or installed by hand), `/csrattrs`, `/serverkeygen`, `/fullcmc`, session resumption, ALPN |
 
 ## Authentication
 
@@ -127,7 +128,8 @@ in the UI (`POST /api/v1/tls/est/enroll`).
 - [ ] Reachable over IPv6 or IPv4 under a DNS name (or an address); the
       server certificate has that name as a SAN DNS name (an address as a SAN
       IP address) and offers one of the cipher suites above.
-- [ ] The issuing CA (or its root) is installed on the gateway as trust anchor.
+- [ ] The CA of the server's certificate (or its root) is trusted by the gateway:
+      built in (Let's Encrypt) or installed.
 - [ ] `simpleenroll` and `simplereenroll` are offered under the configured path.
 - [ ] Answers are base64, certs-only PKCS#7, with the intermediate CAs.
 - [ ] Issued certificates carry the requested SAN, `serverAuth` and

@@ -64,10 +64,15 @@ struct Broker {
     /// Accept any certificate on `mqtts://` instead of the pinned one.
     tls_insecure: bool,
     certificate_pinned: bool,
+    /// How an `mqtts://` broker's certificate is checked: `pinned` (its
+    /// key), `ca` (against the trusted CAs and the host name) or
+    /// `insecure` (not at all).
+    tls_check: &'static str,
     connected: bool,
 }
 
 async fn view(slot: usize, settings: BrokerConfig) -> Broker {
+    let certificate_pinned = config::pinned_certificate(slot).await.is_some();
     Broker {
         slot: role(slot),
         enabled: settings.enabled,
@@ -75,7 +80,14 @@ async fn view(slot: usize, settings: BrokerConfig) -> Broker {
         user: settings.user,
         password_set: !settings.password.is_empty(),
         tls_insecure: settings.tls_insecure,
-        certificate_pinned: config::pinned_certificate(slot).await.is_some(),
+        certificate_pinned,
+        tls_check: if settings.tls_insecure {
+            "insecure"
+        } else if certificate_pinned {
+            "pinned"
+        } else {
+            "ca"
+        },
         connected: crate::mqtt::is_connected(slot),
     }
 }
