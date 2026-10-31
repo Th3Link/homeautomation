@@ -21,6 +21,7 @@
 //! EMQX, HiveMQ, ...) speaks both, so this is a wire-version change with
 //! no expected behavioral difference for pub/sub against a real broker.
 
+use crate::cert::roots::Trusted;
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::tls::{self, Trust};
@@ -367,16 +368,29 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
 
         // What an `mqtts://` connection has to satisfy, decided before
         // connecting at all.
+        // A pinned key if there is one, else the certificate authorities.
         let capturing = address.tls && TRUST_REQUESTED[slot].swap(false, Ordering::Relaxed);
-        let pinned = if address.tls && !capturing && !settings.tls_insecure {
-            let pinned = crate::config::pinned_certificate(slot).await;
-            if pinned.is_none() {
+        let checked = address.tls && !capturing && !settings.tls_insecure;
+        let pinned = if checked {
+            crate::config::pinned_certificate(slot).await
+        } else {
+            None
+        };
+        let roots = if checked && pinned.is_none() {
+            let roots = Trusted::load().await;
+            let waiting = if roots.is_empty() {
+                Some("no certificate authority to check it against")
+            } else if crate::wall_clock::now().is_none() {
+                Some("the time isn't known yet (SNTP) to check its certificate")
+            } else {
+                None
+            };
+            if let Some(why) = waiting {
+                let name = if slot == 0 { "mqtt" } else { "mqtt2" };
                 console_log!(
-                    "mqtt{broker}: no certificate pinned for {} - run mqtt{}-trust \
-                     (or turn mqtt{}-insecure on)",
+                    "mqtt{broker}: {}: {why} - trust its CA on the HTTPS page, or pin its \
+                     certificate ({name}-trust)",
                     address.host,
-                    if slot == 0 { "" } else { "2" },
-                    if slot == 0 { "" } else { "2" },
                 );
                 // Wake up early if the user asks to pin the certificate now.
                 for _ in 0..30 {
@@ -387,7 +401,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                 }
                 continue;
             }
-            pinned
+            Some(roots)
         } else {
             None
         };
@@ -412,10 +426,17 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         }
 
         buffers.captured.clear();
+        let mut problems = 0;
         let trust = if capturing {
             Trust::Capture(&mut buffers.captured)
         } else if let Some(certificate) = &pinned {
             Trust::Pinned(certificate)
+        } else if let Some(roots) = &roots {
+            Trust::Authority {
+                roots,
+                host: address.host,
+                problems: &mut problems,
+            }
         } else {
             Trust::AnyCertificate
         };
@@ -442,6 +463,12 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                     console_log!(
                         "mqtt{broker}: the broker's certificate doesn't match the pinned one \
                          (new key? run mqtt-trust again)"
+                    );
+                } else if problems != 0 {
+                    console_log!(
+                        "mqtt{broker}: the certificate of {}: {}",
+                        address.host,
+                        tls::ChainProblems(problems)
                     );
                 }
                 Timer::after(Duration::from_secs(10)).await;
