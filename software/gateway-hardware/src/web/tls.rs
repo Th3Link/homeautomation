@@ -17,6 +17,7 @@ use super::error::ApiError;
 use crate::cert::{self, CertError, CertInfo, Mode, SettingsUpdate};
 use alloc::vec::Vec;
 use core::fmt::Write as _;
+use gateway_core::x509::pem::Base64;
 use gateway_core::x509::time::Rfc3339;
 use heapless::String;
 use picoserve::extract::Json;
@@ -104,6 +105,12 @@ fn hex(bytes: &[u8; 32]) -> Text<64> {
     text
 }
 
+fn base64(bytes: &[u8; 32]) -> Text<44> {
+    let mut text = String::new();
+    let _ = write!(text, "{}", Base64 { bytes, line: 0 });
+    text
+}
+
 #[derive(Serialize)]
 struct CertView<'a> {
     subject: &'a str,
@@ -162,6 +169,8 @@ struct StatusView<'a> {
     time_known: bool,
     ntp_server: &'a str,
     ntp_server_in_use: &'a str,
+    /// The device key's `pin-sha256` (RFC 7469), base64.
+    key_pin_sha256: Option<Text<44>>,
     certificate: Option<CertView<'a>>,
     trust_anchor: Option<CertView<'a>>,
     /// Whether the built-in root certificates are trusted, and which.
@@ -183,6 +192,7 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         time_known: status.time_known,
         ntp_server: &status.settings.ntp_server,
         ntp_server_in_use: &ntp_server_in_use,
+        key_pin_sha256: status.key_pin.as_ref().map(base64),
         certificate: status
             .certificate
             .as_ref()

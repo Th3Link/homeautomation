@@ -61,6 +61,15 @@ fn spki(w: &mut Writer<'_>, point: &[u8; 65]) -> Result<(), Overflow> {
     })
 }
 
+/// The `SubjectPublicKeyInfo` (DER) of the key `point` (uncompressed
+/// SEC1), as it is in the CSR and the certificates; its SHA-256 is the
+/// key's `pin-sha256` (RFC 7469). Returns the length written to `out`.
+pub fn public_key_info(out: &mut [u8], point: &[u8; 65]) -> Result<usize, IssueError> {
+    let mut w = Writer::new(out);
+    spki(&mut w, point)?;
+    Ok(w.len())
+}
+
 /// `CN=<fqdn>`, or the empty name if the FQDN is too long for a CN.
 fn name(w: &mut Writer<'_>, fqdn: &str) -> Result<(), Overflow> {
     w.nested(tag::SEQUENCE, |w| {
@@ -357,8 +366,11 @@ mod tests {
             crate::x509::cert::common_name(subject),
             Some("gw.example.com")
         );
-        let (_, spki, rest) = tlv(rest).unwrap();
+        let (spki, rest) = crate::x509::der::element(rest).unwrap();
         assert!(spki.ends_with(&point));
+        let mut own = [0u8; 128];
+        let n = public_key_info(&mut own, &point).unwrap();
+        assert_eq!(&own[..n], spki);
         let (t, attributes, _) = tlv(rest).unwrap();
         assert_eq!(t, 0xA0);
         let needle = b"gw.example.com";
