@@ -76,6 +76,10 @@ function Certificate({ d }) {
         ? html`<${CertFacts} c=${c} />
             <p class="muted">Made: ${ORIGIN[c.origin] || c.origin}; ${c.count} certificate${c.count === 1 ? '' : 's'} in the chain.</p>`
         : html`<p class="error">No certificate. The gateway makes a self-signed one at the next start.</p>`}
+      ${d.key_pin_sha256 && html`<dl class="facts">
+        <div><dt>Key pin</dt><dd><code>${d.key_pin_sha256}</code></dd></div>
+      </dl>
+      <p class="muted">The pin-sha256 (RFC 7469) of the gateway's own key, the same for every certificate and CSR. An EST server that registers clients by their key wants this.</p>`}
       ${!d.https && html`<p class="error">HTTPS is switched off (console: web-https on, then restart).</p>`}
     <//>`;
 }

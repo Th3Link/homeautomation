@@ -136,7 +136,8 @@ enum Commands<'a> {
     /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
     /// servers and the time.
     Network,
-    /// Show the HTTPS certificate: mode, FQDN, validity, status.
+    /// Show the HTTPS certificate: mode, FQDN, validity, status, and the
+    /// device key's pin-sha256 (to register it with an EST server).
     TlsStatus,
     /// Set the FQDN the HTTPS certificate is for (empty: the hostname). In
     /// self-signed mode a new certificate is made right away.
@@ -696,6 +697,19 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             .await?;
         }
         None => respond(writer, "certificate: none").await?,
+    }
+    if let Some(pin) = &status.key_pin {
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "key pin-sha256 {}",
+                gateway_core::x509::pem::Base64 {
+                    bytes: pin,
+                    line: 0
+                }
+            )),
+        )
+        .await?;
     }
     respond(
         writer,
