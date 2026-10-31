@@ -232,6 +232,7 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
         // A retained restart request would restart the gateway again after
         // every reconnect, forever.
         if !retained {
+            crate::dhcpv6::release().await;
             esp_hal::system::software_reset();
         }
         return;

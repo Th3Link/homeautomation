@@ -41,7 +41,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free` |
+| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv6` (`address` with prefix length and `origin`: `link-local`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`) |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
 | `POST /bus/ping`, `/bus/refresh`, `/bus/restart` | to every device |
 | `PUT /bus/silence` `{"on": true}` | tells every device to be quiet / talk again |
@@ -120,13 +120,15 @@ over EST. A new certificate replaces the active one only if it parses,
 carries the device key, names the FQDN and isn't expired; without a usable
 certificate the gateway makes a self-signed one. Certificates and keys are
 uploaded as the raw request body (PEM, or DER for a single certificate),
-up to 16 KiB. What an EST server has to support:
+up to 10 KiB (a stored chain holds at most 6 KiB of DER); `503` with
+`no_memory` if the heap is short right then. What an EST server has to
+support:
 [`est-server.md`](est-server.md).
 
 | Route | |
 |---|---|
-| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `ntp_server`, `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the same facts, `count` CA certificates) or `null`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
-| `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server`. A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
+| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `ntp_server` (as set; empty: automatic), `ntp_server_in_use` (the set one, else the one DHCPv6 names, else `pool.ntp.org`), `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the same facts, `count` CA certificates) or `null`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
+| `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server` (empty: automatic). A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
 | `POST /tls/self-signed` | `{"validity_years"}` (optional): a new self-signed certificate. `204` |
 | `GET /tls/csr` | the PKCS#10 request for the device key and the FQDN, `application/pkcs10` PEM |
 | `PUT /tls/certificate` | the signed certificate with its chain (switches the mode to `manual`); `422` with `key_mismatch`, `fqdn_mismatch`, `expired`, `not_yet_valid`, `unparsable` or `chain_too_long` if it isn't usable. `204` |

@@ -92,70 +92,73 @@ struct Page {
 }
 
 async fn list(Query(query): Query<ListQuery>) -> Result<impl IntoResponse, ApiError> {
-    let buffer = acquire().await;
-    let now = now_seconds();
+    crate::heap::boxed(|| async move {
+        let buffer = acquire().await;
+        let now = now_seconds();
 
-    let wanted_key = match &query.device {
-        Some(name) => Some(
-            DEVICE_LIST
-                .lock()
-                .await
-                .resolve(name)
-                .ok_or(ApiError::not_found("no such device"))?,
-        ),
-        None => None,
-    };
-
-    let (total, entries) = {
-        let table = SENSOR_LIST.lock().await;
-        let matching = || {
-            table
-                .iter()
-                .filter(|e| wanted_key.is_none_or(|key| e.device_key == key))
+        let wanted_key = match &query.device {
+            Some(name) => Some(
+                DEVICE_LIST
+                    .lock()
+                    .await
+                    .resolve(name)
+                    .ok_or(ApiError::not_found("no such device"))?,
+            ),
+            None => None,
         };
-        let entries: Vec<_, PAGE> = matching().skip(query.offset).take(PAGE).copied().collect();
-        (matching().count(), entries)
-    };
 
-    let mut sensors = Vec::new();
-    {
-        let devices = DEVICE_LIST.lock().await;
-        let info = SENSOR_INFO.lock().await;
-        for entry in &entries {
-            let known = info.find(entry.device_key, entry.sub_id);
-            let mut device_key = String::new();
-            let _ = write!(device_key, "0x{:08x}", entry.device_key);
-            let name = devices.entry(entry.device_key);
-            let mut sensor_id = String::new();
-            let _ = write!(sensor_id, "0x{:012x}", entry.sub_id);
-            let _ = sensors.push(Sensor {
-                device: String::try_from(if name.is_empty() {
-                    device_key.as_str()
-                } else {
-                    name
-                })
-                .unwrap_or_default(),
-                device_key,
-                kind: entry.kind.name(),
-                unit: entry.kind.unit(),
-                sensor_id,
-                slot: known.map(|k| k.slot),
-                name: known
-                    .and_then(|k| k.name)
-                    .and_then(|name| String::try_from(name.as_str()).ok()),
-                role: known.map(|k| k.role.name()),
-                lost: known.is_some_and(|k| k.lost),
-                value: entry.value,
-                age_s: now.saturating_sub(entry.last_seen_s),
-            });
+        let (total, entries) = {
+            let table = SENSOR_LIST.lock().await;
+            let matching = || {
+                table
+                    .iter()
+                    .filter(|e| wanted_key.is_none_or(|key| e.device_key == key))
+            };
+            let entries: Vec<_, PAGE> = matching().skip(query.offset).take(PAGE).copied().collect();
+            (matching().count(), entries)
+        };
+
+        let mut sensors = Vec::new();
+        {
+            let devices = DEVICE_LIST.lock().await;
+            let info = SENSOR_INFO.lock().await;
+            for entry in &entries {
+                let known = info.find(entry.device_key, entry.sub_id);
+                let mut device_key = String::new();
+                let _ = write!(device_key, "0x{:08x}", entry.device_key);
+                let name = devices.entry(entry.device_key);
+                let mut sensor_id = String::new();
+                let _ = write!(sensor_id, "0x{:012x}", entry.sub_id);
+                let _ = sensors.push(Sensor {
+                    device: String::try_from(if name.is_empty() {
+                        device_key.as_str()
+                    } else {
+                        name
+                    })
+                    .unwrap_or_default(),
+                    device_key,
+                    kind: entry.kind.name(),
+                    unit: entry.kind.unit(),
+                    sensor_id,
+                    slot: known.map(|k| k.slot),
+                    name: known
+                        .and_then(|k| k.name)
+                        .and_then(|name| String::try_from(name.as_str()).ok()),
+                    role: known.map(|k| k.role.name()),
+                    lost: known.is_some_and(|k| k.lost),
+                    value: entry.value,
+                    age_s: now.saturating_sub(entry.last_seen_s),
+                });
+            }
         }
-    }
 
-    buffer.render(&Page {
-        total,
-        offset: query.offset,
-        sensors,
+        buffer.render(&Page {
+            total,
+            offset: query.offset,
+            sensors,
+        })
     })
+    .await
 }
 
 /// Asks the node for its sensor list again: the answer fills the slots, names
