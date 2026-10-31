@@ -69,3 +69,4 @@ mod ota_loopback;
 pub mod ota_receiver;
 pub mod ota_sender;
 pub mod sensor_config;
+pub mod sensor_id;

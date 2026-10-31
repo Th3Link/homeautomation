@@ -7,12 +7,7 @@
 //! `PressureSensor` (hPa). Their `sub_id` is [`bme680_sub_id`]: stable per
 //! device, and distinct from any DS18B20 serial.
 
-/// `sub_id` of a BME680 at I2C address `address` (0x76 or 0x77):
-/// `0x6800_00xx`, "68" for the chip, the address in the low byte (the
-/// gateway names a sensor by the low 32 bits: `0x68000077`).
-pub fn bme680_sub_id(address: u8) -> u64 {
-    0x6800_0000 | u64::from(address)
-}
+pub use common_core::sensor_id::bme680 as bme680_sub_id;
 
 /// A fixed-point sensor frame.
 pub fn frame(sub_id: u64, raw: u16) -> [u8; 8] {

@@ -3,7 +3,7 @@ import * as api from '../api.js';
 import { Link } from '../router.js';
 import { html, useLoad, run, ago, Section, Loading, Button } from '../ui.js';
 
-const KINDS = { temperature: 'Temperature', humidity: 'Humidity', pressure: 'Pressure', co2: 'CO₂', voc: 'VOC', air_quality: 'Air quality' };
+const KINDS = { temperature: 'Temperature', humidity: 'Humidity', pressure: 'Pressure', co2: 'CO₂', voc: 'VOC', air_quality: 'Air quality', brightness: 'Brightness' };
 export const ROLES = ['none', 'tank0', 'tank1', 'tank2', 'tank3', 'tank4', 'tank5', 'tank6', 'flow'];
 const ROLE_LABELS = { none: '–', flow: 'Flow', ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((n) => [`tank${n}`, `Tank ${n}${n === 0 ? ' (top)' : n === 6 ? ' (bottom)' : ''}`])) };
 export const roleLabel = (role) => ROLE_LABELS[role] || role;
@@ -49,7 +49,7 @@ function Row({ s, device, reload }) {
       ? html`<select value=${role} onChange=${(e) => setRole(e.target.value)}>${ROLES.map((r) => html`<option value=${r}>${roleLabel(r)}</option>`)}</select>`
       : s.role && s.role !== 'none' ? roleLabel(s.role) : html`<span class="muted">–</span>`}</td>
     <td><code>${s.sensor_id}</code>${s.slot !== null && html` <small class="muted">slot ${s.slot}</small>`}</td>
-    <td>${s.lost ? html`<span class="badge bad">lost</span>` : `${s.kind === 'temperature' ? s.value.toFixed(2) : s.value} ${s.unit}`}</td>
+    <td>${s.lost ? html`<span class="badge bad">lost</span>` : `${['temperature', 'humidity', 'pressure'].includes(s.kind) ? s.value.toFixed(s.kind === 'temperature' ? 2 : 1) : s.value} ${s.unit}`}</td>
     <td>${s.age_s < 60 ? `${s.age_s} s` : ago(Math.floor(s.age_s / 60))}</td>
     <td class="actions">${s.slot === null
       ? ''
@@ -64,7 +64,7 @@ export function SensorTable({ device }) {
   const { data, error, reload, ask } = useSensors(device);
   if (!data) return html`<${Loading} error=${error} />`;
   if (data.length === 0) return html`<p class="muted">No sensor reading seen yet.</p>`;
-  const unknown = data.some((s) => s.slot === null);
+  const unknown = data.some((s) => s.named_by_node && s.slot === null);
   return html`
     ${unknown && html`<p class="muted">The names and roles of some sensors are not known yet. <${Button} onClick=${ask}>Ask the device<//></p>`}
     <div class="table-wrap"><table>
