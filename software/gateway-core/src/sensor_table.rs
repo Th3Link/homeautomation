@@ -66,7 +66,10 @@ impl SensorKind {
             Self::Humidity => "%",
             Self::Pressure => "hPa",
             Self::Brightness => "lx",
-            _ => "",
+            // BSEC's estimates from a BME680's gas sensor.
+            Self::Co2Equivalent | Self::VocBreath => "ppm",
+            // An index, 0-500.
+            Self::AirQuality => "",
         }
     }
 }
@@ -198,5 +201,7 @@ mod tests {
         );
         assert_eq!(SensorKind::from_message(CanMessageType::Relais), None);
         assert_eq!(SensorKind::Temperature.unit(), "°C");
+        assert_eq!(SensorKind::Co2Equivalent.unit(), "ppm");
+        assert_eq!(SensorKind::AirQuality.unit(), "");
     }
 }
