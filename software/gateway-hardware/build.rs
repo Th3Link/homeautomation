@@ -3,6 +3,11 @@ use std::process::Command;
 fn main() {
     vergen().unwrap();
     linker_be_nice();
+    // The ROM's boot stacks as sections of their own (see the script).
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search={manifest_dir}");
+    println!("cargo:rerun-if-changed=rom-boot-stacks.x");
+    println!("cargo:rustc-link-arg=-Trom-boot-stacks.x");
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
     create_esp32_image();
