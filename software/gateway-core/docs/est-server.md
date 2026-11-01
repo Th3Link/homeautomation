@@ -53,6 +53,14 @@ issuing CA for it. For a first enrollment without an identity, the server
 has to accept unauthenticated requests or put them up for approval (`202`,
 see below), e.g. manual approval by an administrator.
 
+A server can also **register clients by their key** instead: as the key
+never changes, its `pin-sha256` (RFC 7469: base64 SHA-256 of the
+`SubjectPublicKeyInfo`) identifies the gateway for good. The gateway shows
+it on the HTTPS page, in `GET /api/v1/tls` (`key_pin_sha256`) and in the
+console's `tls-status`; it is the same pin as that of the CSR or of any of
+its certificates. The CSR's signature proves the gateway holds the key, so
+no device identity is needed for the first enrollment.
+
 The CSR doesn't carry the TLS channel binding (`tls-unique` in
 `challengePassword`, RFC 7030 3.5): a server that requires it for proof of
 possession refuses the gateway.
