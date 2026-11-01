@@ -334,12 +334,15 @@ async fn query(stack: Stack<'static>, association: &mut Association) -> Result<i
     let mut tx_meta = [PacketMetadata::EMPTY; 2];
     let mut rx = alloc::vec![0u8; PACKET_CAP];
     let mut tx = alloc::vec![0u8; PACKET_CAP];
-    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
-    socket.bind(0).map_err(|_| "no socket")?;
     let mut packet = alloc::vec![0u8; PACKET_CAP];
 
     let mut failed = "no answer";
     for address in addresses {
+        // A socket for each address: a request to a neighbour that doesn't
+        // answer neighbour discovery stays queued in its socket, and the
+        // next one would wait behind it.
+        let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
+        socket.bind(0).map_err(|_| "no socket")?;
         let Some(cookie) = association.cookies.take() else {
             return Err("out of cookies");
         };
