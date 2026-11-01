@@ -44,7 +44,7 @@ const MAX_UNANSWERED: u8 = 4;
 /// cookies servers hand out (956 bytes), and its answer.
 const PACKET_CAP: usize = 1024;
 /// The NTS-KE answer: eight cookies and the records around them.
-const KE_ANSWER_CAP: usize = 2048;
+const KE_ANSWER_CAP: usize = 1280;
 /// Seconds from 1900 (NTP's epoch) to 1970.
 const NTP_TO_UNIX: u64 = 2_208_988_800;
 
@@ -116,9 +116,7 @@ pub async fn synchronise(stack: Stack<'static>, host: &str, port: u16) -> Outcom
         .is_some_and(|a| a.ke_host == host && a.ke_port == port && !a.cookies.is_empty());
     if !usable {
         *association = None;
-        // On the heap: the TLS handshake's future is large and only needed
-        // for a moment.
-        match crate::heap::boxed(|| key_exchange(stack, host, port)).await {
+        match key_exchange(stack, host, port).await {
             Ok(established) => {
                 console_log!(
                     "nts: key exchange with {host}: {} cookies, NTP at {}:{}",
@@ -197,20 +195,40 @@ async fn key_exchange(
         return Err("cannot resolve the name");
     }
 
-    // On the heap, for the moment it takes.
-    let mut rx = alloc::vec![0u8; 2048];
-    let mut tx = alloc::vec![0u8; 1024];
-    let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
-    let mut write_record = alloc::vec![0u8; tls::WRITE_RECORD_BYTES];
+    // On the heap, for the moment it takes. The handshake's messages and
+    // the request are small, the answer is under a kilobyte; only the
+    // server's flight with its certificates needs a large record buffer.
+    let mut rx = alloc::vec![0u8; 1024];
+    let mut tx = alloc::vec![0u8; 512];
     let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
     socket.set_timeout(Some(KE_TIMEOUT));
-    crate::resolve::connect(&mut socket, &addresses, port)
-        .await
-        .map_err(|_| "cannot connect")?;
+    if let Err(e) = crate::resolve::connect(&mut socket, &addresses, port).await {
+        console_log!("nts: {host}:{port}: {e:?}");
+        return Err("cannot connect");
+    }
+
+    // One TLS session at a time, with the web server and the EST client:
+    // the handshake's future, its buffers and the certificate check are
+    // another ~25 KB of heap. Taken only now, so that a server that doesn't
+    // answer doesn't hold up the web server.
+    let _slot = crate::https::slot().await;
+    crate::heap::boxed(|| handshake(socket, &roots, host, port)).await
+}
+
+/// NTS-KE over the connected `socket`: TLS, the request, the answer, the
+/// keys.
+async fn handshake(
+    socket: TcpSocket<'_>,
+    roots: &Trusted,
+    host: &str,
+    port: u16,
+) -> Result<Association, &'static str> {
+    let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
+    let mut write_record = alloc::vec![0u8; 1024];
 
     let mut problems = 0;
     let trust = Trust::Authority {
-        roots: &roots,
+        roots,
         host,
         dates: Dates::NowOrBuildTime,
         problems: &mut problems,
