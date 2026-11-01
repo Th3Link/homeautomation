@@ -85,6 +85,14 @@ pub fn reconnect(slot: usize) {
     RECONNECT[slot].signal(());
 }
 
+/// Makes every broker's task reconnect, for settings they share: the
+/// certificate authorities `mqtts://` brokers are checked against.
+pub fn reconnect_all() {
+    for slot in 0..MQTT_BROKERS {
+        reconnect(slot);
+    }
+}
+
 /// Whether broker `slot` is connected and subscribed.
 pub fn is_connected(slot: usize) -> bool {
     CONNECTED[slot].load(Ordering::Relaxed)
@@ -392,9 +400,12 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                      certificate ({name}-trust)",
                     address.host,
                 );
-                // Wake up early if the user asks to pin the certificate now.
+                // Wake up early if the user asks to pin the certificate now,
+                // or changes the settings (trusts a CA, say).
                 for _ in 0..30 {
-                    if TRUST_REQUESTED[slot].load(Ordering::Relaxed) {
+                    if TRUST_REQUESTED[slot].load(Ordering::Relaxed)
+                        || RECONNECT[slot].try_take().is_some()
+                    {
                         break;
                     }
                     Timer::after(Duration::from_secs(1)).await;

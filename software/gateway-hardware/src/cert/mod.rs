@@ -337,6 +337,10 @@ pub async fn update_settings(update: SettingsUpdate<'_>) -> Result<(), CertError
         drop(est);
         WAKE.signal(());
     }
+    // The brokers checked against the CAs connect again with the new ones.
+    if before.built_in_roots != after.built_in_roots {
+        crate::mqtt::reconnect_all();
+    }
     Ok(())
 }
 
@@ -508,10 +512,12 @@ async fn csr_der(fqdn: &str) -> Result<Vec<u8>, CertError> {
 /// empty data removes it.
 pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
     if data.is_empty() {
-        return store::TRUST_ANCHOR
+        store::TRUST_ANCHOR
             .write(&[])
             .await
-            .map_err(|_| CertError::Storage);
+            .map_err(|_| CertError::Storage)?;
+        crate::mqtt::reconnect_all();
+        return Ok(());
     }
     let certs = decode_certificates(data)?;
     let certs = certs.iter().map(|range| &data[range.clone()]);
@@ -526,12 +532,14 @@ pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
         .write(&all)
         .await
         .map_err(|_| CertError::Storage)?;
-    // EST may have been waiting for exactly this: try again now.
+    // EST and the brokers may have been waiting for exactly this: try again
+    // now.
     let mut est = EST.lock().await;
     est.failures = 0;
     est.next_attempt = None;
     drop(est);
     WAKE.signal(());
+    crate::mqtt::reconnect_all();
     Ok(())
 }
 
