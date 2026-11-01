@@ -21,6 +21,10 @@ embassy-net = { git = "https://github.com/Th3Link/embassy", rev = "8b544c3c4d8b5
 # Fork with the SLAAC fixes (multiple prefixes, M/O flags, RDNSS); branch
 # v0.13.1-gateway.
 smoltcp = { git = "https://github.com/Th3Link/smoltcp", rev = "dfe04756328dac94bc227c1e6f151280a13e24d4" }
+# Fork: server authentication required before Finished (upstream #215,
+# backported), the TLS exporter (NTS keys, ADR 0023); branch
+# embedded-tls-v0.19.0-gateway.
+embedded-tls = { git = "https://github.com/Th3Link/embedded-tls", rev = "1531c9e1f4868415686b0a8322425e08e824e53c" }
 
 [workspace.package]
 edition = "2021"
