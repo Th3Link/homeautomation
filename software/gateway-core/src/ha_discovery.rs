@@ -249,7 +249,7 @@ fn device_class(kind: SensorKind) -> Option<&'static str> {
         SensorKind::Brightness => Some("illuminance"),
         SensorKind::Co2Equivalent => Some("carbon_dioxide"),
         SensorKind::AirQuality => Some("aqi"),
-        SensorKind::VocBreath => None,
+        SensorKind::VocBreath => Some("volatile_organic_compounds_parts"),
     }
 }
 
