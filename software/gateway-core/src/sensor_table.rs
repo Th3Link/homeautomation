@@ -1,11 +1,12 @@
 //! The latest reading of every sensor seen on the bus (for the web UI's
 //! sensor list): one entry per device, kind of reading and sensor id, kept
-//! up to date by the fixed-point sensor messages ([`crate::sensor`]).
+//! up to date by the fixed-point sensor messages and the ambient light
+//! ([`crate::sensor`]).
 
 use crate::can_message_type::CanMessageType;
 use heapless::Vec;
 
-/// What a fixed-point sensor message measures.
+/// What a sensor message measures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorKind {
     Temperature,
@@ -14,10 +15,12 @@ pub enum SensorKind {
     Co2Equivalent,
     VocBreath,
     AirQuality,
+    /// Ambient light (`AmbientLightSensor`), lux; one per device.
+    Brightness,
 }
 
 impl SensorKind {
-    /// The kind a message type carries, if it is a fixed-point sensor one.
+    /// The kind a message type carries, if it is a sensor one.
     pub fn from_message(msg_type: CanMessageType) -> Option<Self> {
         Some(match msg_type {
             CanMessageType::TemperatureSensor => Self::Temperature,
@@ -26,6 +29,7 @@ impl SensorKind {
             CanMessageType::Co2Equivalent => Self::Co2Equivalent,
             CanMessageType::VocBreath => Self::VocBreath,
             CanMessageType::AirQuality => Self::AirQuality,
+            CanMessageType::AmbientLightSensor => Self::Brightness,
             _ => return None,
         })
     }
@@ -38,6 +42,7 @@ impl SensorKind {
             Self::Co2Equivalent => "co2",
             Self::VocBreath => "voc",
             Self::AirQuality => "air_quality",
+            Self::Brightness => "brightness",
         }
     }
 
@@ -46,9 +51,18 @@ impl SensorKind {
         match self {
             Self::Temperature => "°C",
             Self::Humidity => "%",
+            Self::Pressure => "hPa",
+            Self::Brightness => "lx",
             _ => "",
         }
     }
+}
+
+/// Whether the node can tell the gateway a slot and name for this sensor
+/// (`SensorConfig`): only for its DS18B20s. The others (a light switch's
+/// BME680 and light sensor) are known by their device.
+pub fn named_by_node(kind: SensorKind, sub_id: u64) -> bool {
+    kind == SensorKind::Temperature && !common_core::sensor_id::is_bme680(sub_id)
 }
 
 /// One sensor and what it reported last.

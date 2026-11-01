@@ -67,11 +67,15 @@ struct Sensor {
     /// The device the sensor is on: its name, or its key if it has none.
     device: String<12>,
     device_key: String<10>,
-    /// `temperature`, `humidity`, `pressure`, `co2`, `voc` or `air_quality`.
+    /// `temperature`, `humidity`, `pressure`, `co2`, `voc`, `air_quality`
+    /// or `brightness`.
     kind: &'static str,
     unit: &'static str,
     /// The sensor's own id; for a DS18B20 its 1-Wire address.
     sensor_id: String<16>,
+    /// Whether its node names it (a DS18B20); the others are known by their
+    /// device and never get a slot.
+    named_by_node: bool,
     /// The sensor's slot on its node (temporary, see the protocol docs), if
     /// the node has told.
     slot: Option<u8>,
@@ -140,6 +144,10 @@ async fn list(Query(query): Query<ListQuery>) -> Result<impl IntoResponse, ApiEr
                     kind: entry.kind.name(),
                     unit: entry.kind.unit(),
                     sensor_id,
+                    named_by_node: gateway_core::sensor_table::named_by_node(
+                        entry.kind,
+                        entry.sub_id,
+                    ),
                     slot: known.map(|k| k.slot),
                     name: known
                         .and_then(|k| k.name)
