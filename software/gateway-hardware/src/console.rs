@@ -279,8 +279,14 @@ async fn run_session(cli: &mut Cli, rx: &mut UartRx) {
     }
 }
 
-async fn respond(writer: &mut CommandWriter<UartTx>, text: &str) -> Result<(), ()> {
-    writer.write_line(text.as_bytes()).await.map_err(|_| ())
+/// Writes one line. A reply built for it is passed by value: as
+/// `&reply()`, the temporary lives across the `.await` and rustc keeps a
+/// slot of its own for it in the caller's future, one per call site.
+async fn respond(writer: &mut CommandWriter<UartTx>, text: impl AsRef<str>) -> Result<(), ()> {
+    writer
+        .write_line(text.as_ref().as_bytes())
+        .await
+        .map_err(|_| ())
 }
 
 fn str_msg(s: &str) -> String<LINE_CAP> {
@@ -301,73 +307,67 @@ async fn handle_command(
 ) -> Result<(), ()> {
     match command {
         Commands::Show => cmd_show(writer).await,
-        Commands::DeviceId(id) => respond(writer, &cmd_device_id(id).await).await,
-        Commands::DeviceType(t) => respond(writer, &cmd_device_type(t.0).await).await,
-        Commands::Hwrev(rev) => respond(writer, &cmd_hwrev(rev).await).await,
-        Commands::EthClock(gpio) => respond(writer, &cmd_eth_clock(gpio).await).await,
-        Commands::CustomString(s) => respond(writer, &cmd_custom_string(s).await).await,
-        Commands::Bitrate(b) => respond(writer, &cmd_bitrate(b.0).await).await,
+        Commands::DeviceId(id) => respond(writer, cmd_device_id(id).await).await,
+        Commands::DeviceType(t) => respond(writer, cmd_device_type(t.0).await).await,
+        Commands::Hwrev(rev) => respond(writer, cmd_hwrev(rev).await).await,
+        Commands::EthClock(gpio) => respond(writer, cmd_eth_clock(gpio).await).await,
+        Commands::CustomString(s) => respond(writer, cmd_custom_string(s).await).await,
+        Commands::Bitrate(b) => respond(writer, cmd_bitrate(b.0).await).await,
         Commands::Hostname(s) => {
             respond(
                 writer,
-                &cmd_str_field(s, config::Key::Hostname, "hostname").await,
+                cmd_str_field(s, config::Key::Hostname, "hostname").await,
             )
             .await
         }
-        Commands::MqttUri(s) => respond(writer, &cmd_mqtt_uri(0, s).await).await,
-        Commands::MqttUser(s) => respond(writer, &cmd_mqtt_user(0, s).await).await,
-        Commands::MqttPassword(s) => respond(writer, &cmd_mqtt_password(0, s).await).await,
+        Commands::MqttUri(s) => respond(writer, cmd_mqtt_uri(0, s).await).await,
+        Commands::MqttUser(s) => respond(writer, cmd_mqtt_user(0, s).await).await,
+        Commands::MqttPassword(s) => respond(writer, cmd_mqtt_password(0, s).await).await,
         Commands::MqttEnabled(v) => {
-            respond(writer, &cmd_mqtt_enabled(0, matches!(v, OnOff::On)).await).await
+            respond(writer, cmd_mqtt_enabled(0, matches!(v, OnOff::On)).await).await
         }
         Commands::MqttInsecure(v) => {
-            respond(writer, &cmd_mqtt_insecure(0, matches!(v, OnOff::On)).await).await
+            respond(writer, cmd_mqtt_insecure(0, matches!(v, OnOff::On)).await).await
         }
-        Commands::MqttTrust => respond(writer, &cmd_mqtt_trust(0).await).await,
-        Commands::MqttUntrust => respond(writer, &cmd_mqtt_untrust(0).await).await,
-        Commands::Mqtt2Trust => respond(writer, &cmd_mqtt_trust(1).await).await,
-        Commands::Mqtt2Untrust => respond(writer, &cmd_mqtt_untrust(1).await).await,
-        Commands::Mqtt2Uri(s) => respond(writer, &cmd_mqtt_uri(1, s).await).await,
-        Commands::Mqtt2User(s) => respond(writer, &cmd_mqtt_user(1, s).await).await,
-        Commands::Mqtt2Password(s) => respond(writer, &cmd_mqtt_password(1, s).await).await,
+        Commands::MqttTrust => respond(writer, cmd_mqtt_trust(0).await).await,
+        Commands::MqttUntrust => respond(writer, cmd_mqtt_untrust(0).await).await,
+        Commands::Mqtt2Trust => respond(writer, cmd_mqtt_trust(1).await).await,
+        Commands::Mqtt2Untrust => respond(writer, cmd_mqtt_untrust(1).await).await,
+        Commands::Mqtt2Uri(s) => respond(writer, cmd_mqtt_uri(1, s).await).await,
+        Commands::Mqtt2User(s) => respond(writer, cmd_mqtt_user(1, s).await).await,
+        Commands::Mqtt2Password(s) => respond(writer, cmd_mqtt_password(1, s).await).await,
         Commands::Mqtt2Enabled(v) => {
-            respond(writer, &cmd_mqtt_enabled(1, matches!(v, OnOff::On)).await).await
+            respond(writer, cmd_mqtt_enabled(1, matches!(v, OnOff::On)).await).await
         }
         Commands::Mqtt2Insecure(v) => {
-            respond(writer, &cmd_mqtt_insecure(1, matches!(v, OnOff::On)).await).await
+            respond(writer, cmd_mqtt_insecure(1, matches!(v, OnOff::On)).await).await
         }
         Commands::WebUsername(s) => {
             respond(
                 writer,
-                &cmd_str_field(s, config::Key::WebUsername, "web_username").await,
+                cmd_str_field(s, config::Key::WebUsername, "web_username").await,
             )
             .await
         }
         Commands::WebPassword(s) => {
             respond(
                 writer,
-                &cmd_str_field(s, config::Key::WebPassword, "web_password").await,
+                cmd_str_field(s, config::Key::WebPassword, "web_password").await,
             )
             .await
         }
-        Commands::WebHttps(v) => {
-            respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
-        }
+        Commands::WebHttps(v) => respond(writer, cmd_web_https(matches!(v, OnOff::On)).await).await,
         Commands::Network => cmd_network(writer).await,
         // ~15 KB of state (the certificate status): on the heap while it
         // runs, rather than in this task's static memory, which comes out
         // of the main stack's room.
         Commands::TlsStatus => crate::heap::boxed(|| cmd_tls_status(writer)).await,
-        Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
-        Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
+        Commands::TlsFqdn(s) => respond(writer, cmd_tls_fqdn(s).await).await,
+        Commands::TlsSelfSigned => respond(writer, cmd_tls_self_signed().await).await,
         Commands::TlsBuiltInRoots(v) => {
-            respond(
-                writer,
-                &cmd_tls_built_in_roots(matches!(v, OnOff::On)).await,
-            )
-            .await
+            respond(writer, cmd_tls_built_in_roots(matches!(v, OnOff::On)).await).await
         }
-        Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,
+        Commands::NtpServer(s) => respond(writer, cmd_ntp_server(s).await).await,
         Commands::Ping => {
             send_can_message(CanMessageType::Available, &[], true).await;
             respond(writer, "ping sent").await
@@ -387,19 +387,19 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     let device_type = DEVICE_TYPE.load(Ordering::Relaxed);
     let cfg = config().await.load_or_init().await;
 
-    respond(writer, &fmt_msg(format_args!("device_id: {device_id}"))).await?;
+    respond(writer, fmt_msg(format_args!("device_id: {device_id}"))).await?;
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "device_type: {device_type} ({})",
             DeviceType::from(device_type).name()
         )),
     )
     .await?;
-    respond(writer, &fmt_msg(format_args!("hwrev: {}", cfg.hw_rev))).await?;
+    respond(writer, fmt_msg(format_args!("hwrev: {}", cfg.hw_rev))).await?;
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "eth_clock: GPIO{}",
             config::eth_clock_gpio().await
         )),
@@ -407,55 +407,60 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     .await?;
     respond(
         writer,
-        &fmt_msg(format_args!("custom_string: {}", cfg.custom_string)),
+        fmt_msg(format_args!("custom_string: {}", cfg.custom_string)),
     )
     .await?;
     respond(
         writer,
-        &fmt_msg(format_args!("can_bitrate: {}", cfg.can_bitrate.as_str())),
+        fmt_msg(format_args!("can_bitrate: {}", cfg.can_bitrate.as_str())),
     )
     .await?;
-    respond(writer, &fmt_msg(format_args!("hostname: {}", cfg.hostname))).await?;
+    respond(writer, fmt_msg(format_args!("hostname: {}", cfg.hostname))).await?;
     for (slot, broker) in cfg.brokers.iter().enumerate() {
         let name = if slot == 0 { "mqtt" } else { "mqtt2" };
         respond(
             writer,
-            &fmt_msg(format_args!("{name}_enabled: {}", broker.enabled)),
+            fmt_msg(format_args!("{name}_enabled: {}", broker.enabled)),
         )
         .await?;
-        respond(writer, &fmt_msg(format_args!("{name}_uri: {}", broker.uri))).await?;
+        respond(writer, fmt_msg(format_args!("{name}_uri: {}", broker.uri))).await?;
         respond(
             writer,
-            &fmt_msg(format_args!("{name}_user: {}", broker.user)),
+            fmt_msg(format_args!("{name}_user: {}", broker.user)),
         )
         .await?;
         if broker.uri.starts_with("mqtts://") {
-            let pinned = crate::config::pinned_certificate(slot).await;
-            let line = if broker.tls_insecure {
-                fmt_msg(format_args!("{name}_tls: insecure (any certificate)"))
-            } else if let Some(certificate) = pinned {
-                let digest = crate::tls::fingerprint(&certificate);
-                fmt_msg(format_args!(
-                    "{name}_tls: pinned, SHA-256 {:02x}{:02x}{:02x}{:02x}...",
-                    digest[0], digest[1], digest[2], digest[3]
-                ))
-            } else {
-                fmt_msg(format_args!(
-                    "{name}_tls: checked against the trusted CAs and the host name \
-                     (or pin it: {name}-trust)"
-                ))
+            // The pinned certificate (2 KiB) in a block of its own: it's
+            // gone before the reply is written, so the future keeps no
+            // room for it across that `.await`.
+            let line = {
+                let pinned = crate::config::pinned_certificate(slot).await;
+                if broker.tls_insecure {
+                    fmt_msg(format_args!("{name}_tls: insecure (any certificate)"))
+                } else if let Some(certificate) = pinned {
+                    let digest = crate::tls::fingerprint(&certificate);
+                    fmt_msg(format_args!(
+                        "{name}_tls: pinned, SHA-256 {:02x}{:02x}{:02x}{:02x}...",
+                        digest[0], digest[1], digest[2], digest[3]
+                    ))
+                } else {
+                    fmt_msg(format_args!(
+                        "{name}_tls: checked against the trusted CAs and the host name \
+                         (or pin it: {name}-trust)"
+                    ))
+                }
             };
-            respond(writer, &line).await?;
+            respond(writer, line).await?;
         }
     }
     respond(
         writer,
-        &fmt_msg(format_args!("web_username: {}", cfg.web_username)),
+        fmt_msg(format_args!("web_username: {}", cfg.web_username)),
     )
     .await?;
     respond(
         writer,
-        &fmt_msg(format_args!("update_delay_ms: {}", cfg.update_delay_ms)),
+        fmt_msg(format_args!("update_delay_ms: {}", cfg.update_delay_ms)),
     )
     .await
 }
@@ -656,7 +661,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     let status = crate::cert::status().await;
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "https: {}, mode {}, fqdn {}",
             if status.https_enabled { "on" } else { "off" },
             status.settings.mode.code(),
@@ -668,7 +673,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         Some((info, state, origin)) => {
             respond(
                 writer,
-                &fmt_msg(format_args!(
+                fmt_msg(format_args!(
                     "certificate: {} ({}), issuer {}",
                     state.code(),
                     origin.code(),
@@ -678,7 +683,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             .await?;
             respond(
                 writer,
-                &fmt_msg(format_args!(
+                fmt_msg(format_args!(
                     "valid {} .. {}",
                     Rfc3339(info.not_before),
                     Rfc3339(info.not_after)
@@ -688,7 +693,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             let f = &info.fingerprint;
             respond(
                 writer,
-                &fmt_msg(format_args!(
+                fmt_msg(format_args!(
                     "SHA-256 {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}...",
                     f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]
                 )),
@@ -699,7 +704,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     }
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "trusted CAs: built-in (Let's Encrypt) {}, {} installed",
             if status.settings.built_in_roots {
                 "on"
@@ -848,7 +853,7 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     let m = net.mac;
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "link: {}, MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
             if net.link_up { "up" } else { "down" },
             m[0],
@@ -863,19 +868,15 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
 
     match &net.v4 {
         Some(v4) => {
-            respond(
-                writer,
-                &fmt_msg(format_args!("ipv4: {} (DHCP)", v4.address)),
-            )
-            .await?;
+            respond(writer, fmt_msg(format_args!("ipv4: {} (DHCP)", v4.address))).await?;
             match v4.gateway {
                 Some(gateway) => {
-                    respond(writer, &fmt_msg(format_args!("ipv4 gateway: {gateway}"))).await?
+                    respond(writer, fmt_msg(format_args!("ipv4 gateway: {gateway}"))).await?
                 }
                 None => respond(writer, "ipv4 gateway: none").await?,
             }
             for server in &v4.dns_servers {
-                respond(writer, &fmt_msg(format_args!("ipv4 dns: {server}"))).await?;
+                respond(writer, fmt_msg(format_args!("ipv4 dns: {server}"))).await?;
             }
         }
         None => respond(writer, "ipv4: no DHCP lease").await?,
@@ -883,27 +884,23 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
 
     for cidr in &net.v6_addresses {
         let origin = net.v6_origin(cidr);
-        respond(writer, &fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
+        respond(writer, fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
     }
     match net.v6.as_ref().and_then(|v6| v6.gateway) {
-        Some(gateway) => respond(writer, &fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?,
+        Some(gateway) => respond(writer, fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?,
         None => respond(writer, "ipv6 gateway: none").await?,
     }
     let rdnss = net.v6.iter().flat_map(|v6| v6.dns_servers.iter());
     for server in rdnss {
-        respond(writer, &fmt_msg(format_args!("ipv6 dns: {server} (RDNSS)"))).await?;
+        respond(writer, fmt_msg(format_args!("ipv6 dns: {server} (RDNSS)"))).await?;
     }
     for server in net.dhcpv6.iter().flat_map(|lease| lease.dns_servers.iter()) {
-        respond(
-            writer,
-            &fmt_msg(format_args!("ipv6 dns: {server} (DHCPv6)")),
-        )
-        .await?;
+        respond(writer, fmt_msg(format_args!("ipv6 dns: {server} (DHCPv6)"))).await?;
     }
     let flags = net.router_flags;
     respond(
         writer,
-        &fmt_msg(format_args!(
+        fmt_msg(format_args!(
             "ipv6 routers: {}{}",
             if flags.managed {
                 "M (DHCPv6 addresses) "
@@ -929,7 +926,7 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         Some(now) => {
             respond(
                 writer,
-                &fmt_msg(format_args!(
+                fmt_msg(format_args!(
                     "time: {} (SNTP from {ntp})",
                     gateway_core::x509::time::Rfc3339(now)
                 )),
@@ -939,7 +936,7 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         None => {
             respond(
                 writer,
-                &fmt_msg(format_args!("time: unknown (no answer from {ntp} yet)")),
+                fmt_msg(format_args!("time: unknown (no answer from {ntp} yet)")),
             )
             .await
         }
