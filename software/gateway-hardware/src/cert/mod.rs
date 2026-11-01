@@ -676,6 +676,9 @@ pub struct Status {
     pub trust_anchor_count: usize,
     pub est_identity: Option<CertInfo>,
     pub est: EstState,
+    /// The device key's `pin-sha256` (RFC 7469), what an EST server that
+    /// registers clients by key is told.
+    pub key_pin: Option<[u8; 32]>,
 }
 
 /// The status, on the heap: it is ~5 KB, and a handler holding it by value
@@ -723,9 +726,20 @@ pub async fn status() -> Box<Status> {
             trust_anchor_count,
             est_identity,
             est: EST.lock().await.clone(),
+            key_pin: key_pin().await,
         })
     })
     .await
+}
+
+/// SHA-256 of the device key's `SubjectPublicKeyInfo`: its `pin-sha256`
+/// (RFC 7469). The same for every certificate and CSR, as the key never
+/// changes.
+pub async fn key_pin() -> Option<[u8; 32]> {
+    let point = key::point().await?;
+    let mut spki = [0u8; 96];
+    let len = issue::public_key_info(&mut spki, &point).ok()?;
+    Some(crate::tls::fingerprint(&spki[..len]))
 }
 
 /// What the web server presents: the active chain and the device key, as
