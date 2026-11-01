@@ -10,7 +10,9 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 pub const CONFIG_PARTITION: Range<u32> = 0x9000..0xFC000;
 
-const BUF: usize = 256;
+/// Room for the largest item, the air quality calibration (422 bytes, see
+/// `environment`).
+const BUF: usize = 512;
 
 /// The flash-backed config store, keyed by [`Key`].
 pub type Config = ConfigStore<BUF>;
@@ -45,6 +47,9 @@ pub enum Key {
     /// Whether missing `Echo` frames restart the device (`u8`, 0 = off;
     /// unset means on). See `echo_guard`.
     EchoRestart = 12,
+    /// The air quality calculation's calibration of the BME680's gas sensor
+    /// (`bme68x_iaq_co2::AirQuality::save`, 422 bytes).
+    AirQualityState = 13,
 }
 
 /// Flash key of the tank sensor at position 0 (top); position `n` lives at

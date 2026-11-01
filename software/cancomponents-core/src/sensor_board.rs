@@ -8,6 +8,7 @@
 //! device, and distinct from any DS18B20 serial.
 
 pub use common_core::sensor_id::bme680 as bme680_sub_id;
+pub use common_core::sensor_id::scd30 as scd30_sub_id;
 
 /// A fixed-point sensor frame.
 pub fn frame(sub_id: u64, raw: u16) -> [u8; 8] {
