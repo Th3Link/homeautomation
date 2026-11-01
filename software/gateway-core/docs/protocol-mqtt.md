@@ -157,6 +157,24 @@ encrypted, but a man in the middle isn't excluded.
 Limits: certificates with ECDSA P-256/P-384 or RSA keys (at most 2048
 bytes), and validity dates, the issuer and the host name are not checked.
 
+### Home Assistant discovery (`homeassistant/…/config`)
+
+Off by default; with it on (console `ha-discovery on`, REST
+`PATCH /mqtt`), the gateway publishes retained Home Assistant discovery
+configurations on the primary broker
+([ADR 0022](adr/0022-home-assistant-discovery.md)):
+
+| Topic | For |
+|---|---|
+| `homeassistant/sensor/canbus_<key>/<kind>_<sub_id>/config` | every sensor reading seen (`<kind>` as in the state topic, `<sub_id>` hex, 0 for brightness) |
+| `homeassistant/binary_sensor/canbus_<key>/presence/config` | a presence sensor seen |
+| `homeassistant/device_automation/canbus_<key>/button<n>_<event>/config` | each button seen, for `single`, `double`, `tripple`, `hold` and `released` |
+
+`<key>` is the device key, 8 hex digits. The configurations point at the
+state topics above; the gateway publishes them again when something they
+describe changes, after connecting, and when Home Assistant publishes
+`online` on `homeassistant/status` (which the gateway subscribes to).
+
 ## Command topics (broker → gateway)
 
 Every command topic below is an MQTT subscription with a `#` wildcard
