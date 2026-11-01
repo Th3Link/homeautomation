@@ -88,6 +88,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0020-trusted-certificate-authorities.md")]
     pub mod adr_0020_trusted_certificate_authorities {}
+
+    #[doc = include_str!("../docs/adr/0023-nts.md")]
+    pub mod adr_0023_nts {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with

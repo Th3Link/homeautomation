@@ -152,6 +152,15 @@ struct EstView<'a> {
     next_attempt_in_s: Option<u64>,
 }
 
+/// NTS, when the time server is an `nts://` one.
+#[derive(Serialize)]
+struct NtsView {
+    cookies: usize,
+    last_key_exchange: Option<Text<20>>,
+    last_answer: Option<Text<20>>,
+    error: Option<&'static str>,
+}
+
 #[derive(Serialize)]
 struct StatusView<'a> {
     fqdn: &'a str,
@@ -160,8 +169,11 @@ struct StatusView<'a> {
     validity_years: u8,
     https: bool,
     time_known: bool,
+    /// Whether the time came from NTS.
+    time_authenticated: bool,
     ntp_server: &'a str,
     ntp_server_in_use: &'a str,
+    nts: Option<NtsView>,
     certificate: Option<CertView<'a>>,
     trust_anchor: Option<CertView<'a>>,
     /// Whether the built-in root certificates are trusted, and which.
@@ -181,8 +193,23 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         validity_years: status.settings.validity_years,
         https: status.https_enabled,
         time_known: status.time_known,
+        time_authenticated: crate::wall_clock::authenticated(),
         ntp_server: &status.settings.ntp_server,
         ntp_server_in_use: &ntp_server_in_use,
+        nts: matches!(
+            gateway_core::nts::parse_server(&ntp_server_in_use),
+            Some(gateway_core::nts::Server::Nts { .. })
+        )
+        .then(|| {
+            let nts = crate::nts::status();
+            let at = |instant| crate::wall_clock::unix_at(instant).map(time_text);
+            NtsView {
+                cookies: nts.cookies,
+                last_key_exchange: nts.key_exchange.and_then(at),
+                last_answer: nts.answer.and_then(at),
+                error: nts.error,
+            }
+        }),
         certificate: status
             .certificate
             .as_ref()
