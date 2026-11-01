@@ -1,21 +1,26 @@
-//! The time of day, from SNTP (RFC 4330). The gateway has no RTC, so until
-//! a server has answered the time is unknown; certificate checks then fall
-//! back to "not before the firmware was built" ([`clock`]).
+//! The time of day, from SNTP (RFC 4330) or, for a server set as
+//! `nts://host[:port]`, from NTS ([`crate::nts`], RFC 8915), which
+//! authenticates it. The gateway has no RTC, so until a server has answered
+//! the time is unknown; certificate checks then fall back to "not before the
+//! firmware was built" ([`clock`]).
 //!
 //! MbedTLS takes its time from here too (the `hook-wall-clock` hooks): it
 //! refuses certificate dates while the time is unknown, which only the EST
 //! client notices (the web server checks no certificates).
 
 use crate::console_log;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, Stack};
 use embassy_time::{Duration, Instant, Timer};
+use gateway_core::nts::{parse_server, Server};
 use gateway_core::x509::check::Clock;
 use gateway_core::x509::time::{parse_rfc3339, DateTime};
 
 /// Unix seconds at boot (`Instant` zero); 0 while unknown.
 static UNIX_AT_BOOT: AtomicU32 = AtomicU32::new(0);
+/// Whether the time was last set by NTS.
+static AUTHENTICATED: AtomicBool = AtomicBool::new(false);
 
 /// Seconds from 1900 (NTP's epoch) to 1970.
 const NTP_TO_UNIX: u64 = 2_208_988_800;
@@ -24,11 +29,23 @@ const RESYNC: Duration = Duration::from_secs(6 * 3600);
 /// Until the first answer: the first request after the link comes up is often
 /// lost while the neighbour is still being resolved.
 const RETRY: Duration = Duration::from_secs(10);
+/// After a failed NTS key exchange (a TLS handshake each time).
+const KE_RETRY: Duration = Duration::from_secs(60);
 
 /// The current Unix time, if a server has answered since boot.
 pub fn now() -> Option<i64> {
     let base = UNIX_AT_BOOT.load(Ordering::Relaxed);
     (base != 0).then(|| i64::from(base) + Instant::now().as_secs() as i64)
+}
+
+/// Whether the current time came from NTS (authenticated).
+pub fn authenticated() -> bool {
+    now().is_some() && AUTHENTICATED.load(Ordering::Relaxed)
+}
+
+/// When `instant` was, in Unix seconds, once the time is known.
+pub fn unix_at(instant: Instant) -> Option<i64> {
+    Some(now()? - Instant::now().saturating_duration_since(instant).as_secs() as i64)
 }
 
 /// When the firmware was built (a lower bound for the time).
@@ -44,8 +61,9 @@ pub fn clock() -> Clock {
     }
 }
 
-/// Asks the configured NTP server for the time, now and every six hours
-/// (every 10 s until a server has answered).
+/// Asks the configured time server for the time, now and every six hours
+/// (until a server has answered: every 10 s, or every minute after a
+/// failed NTS key exchange).
 #[embassy_executor::task]
 pub async fn sntp_task(stack: Stack<'static>) {
     let mut rx_meta = [PacketMetadata::EMPTY; 2];
@@ -55,15 +73,36 @@ pub async fn sntp_task(stack: Stack<'static>) {
     loop {
         stack.wait_config_up().await;
         let server = crate::cert::ntp_server().await;
-        let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
-        let synced = match socket.bind(0) {
-            // On the heap, like the EST client: the DNS lookup's future is
-            // large and only needed for a moment.
-            Ok(()) => crate::heap::boxed(|| query(stack, &mut socket, &server)).await,
-            Err(_) => false,
+        let wait = match parse_server(&server) {
+            Some(Server::Nts { host, port }) => {
+                match crate::nts::synchronise(stack, host, port).await {
+                    crate::nts::Outcome::Synchronised => RESYNC,
+                    crate::nts::Outcome::Failed => RETRY,
+                    crate::nts::Outcome::KeyExchangeFailed => KE_RETRY,
+                }
+            }
+            Some(Server::Plain(host)) => {
+                let mut socket =
+                    UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
+                let synced = match socket.bind(0) {
+                    // On the heap, like the EST client: the DNS lookup's
+                    // future is large and only needed for a moment.
+                    Ok(()) => crate::heap::boxed(|| query(stack, &mut socket, host)).await,
+                    Err(_) => false,
+                };
+                if synced {
+                    RESYNC
+                } else {
+                    RETRY
+                }
+            }
+            // Refused when it's set; only an old setting can get here.
+            None => {
+                console_log!("sntp: \"{server}\" isn't a time server");
+                KE_RETRY
+            }
         };
-        drop(socket);
-        Timer::after(if synced { RESYNC } else { RETRY }).await;
+        Timer::after(wait).await;
     }
 }
 
@@ -107,18 +146,25 @@ async fn ask(socket: &mut UdpSocket<'_>, address: IpAddress, server: &str) -> bo
     let Some(unix) = seconds.checked_sub(NTP_TO_UNIX) else {
         return false;
     };
-    let unix = unix as i64;
+    set(unix as i64, server, false)
+}
+
+/// Sets the clock to `unix` as answered by `server`, `authenticated` by
+/// NTS or not. False if that is before the firmware was built.
+pub fn set(unix: i64, server: &str, authenticated: bool) -> bool {
+    let protocol = if authenticated { "nts" } else { "sntp" };
     if unix < build_time() {
-        console_log!("sntp: {server} answered a time before the firmware was built");
+        console_log!("{protocol}: {server} answered a time before the firmware was built");
         return false;
     }
     let first = now().is_none();
     let base = unix - Instant::now().as_secs() as i64;
     UNIX_AT_BOOT.store(base as u32, Ordering::Relaxed);
+    AUTHENTICATED.store(authenticated, Ordering::Relaxed);
     if first {
         let t = DateTime::from_unix(unix);
         console_log!(
-            "sntp: time is {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+            "{protocol}: time is {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
             t.year,
             t.month,
             t.day,
