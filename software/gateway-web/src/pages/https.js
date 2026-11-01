@@ -173,13 +173,18 @@ function Est({ d, reload }) {
 
 function TrustAnchor({ d, reload }) {
   const t = d.trust_anchor;
+  const builtIn = async (on) => {
+    if (await done(() => api.tls.update({ built_in_roots: on }), on ? 'Built-in CAs trusted' : 'Built-in CAs no longer trusted')) reload();
+  };
   return html`
-    <${Section} title="Trust anchor (CA)">
-      <p class="muted">The CA the EST server's certificate has to chain to. TLS to the EST server is always verified against it.</p>
+    <${Section} title="Trusted certificate authorities">
+      <p class="muted">The EST server's certificate has to chain to one of these, and so has that of an MQTT broker (mqtts://) whose key isn't pinned.</p>
+      <label class="check"><input type="checkbox" checked=${d.built_in_roots} onChange=${(e) => builtIn(e.target.checked)} /> Built in: Let's Encrypt (${d.built_in_root_names.join(', ')})</label>
+      <h3>Installed</h3>
       ${t ? html`<${CertFacts} c=${t} />${t.count > 1 && html`<p class="muted">${t.count} CA certificates installed; the first is shown.</p>`}` : html`<p>None installed.</p>`}
       <div class="buttons">
-        <${FileButton} label=${t ? 'Replace' : 'Upload'} send=${api.tls.setTrustAnchor} success="Trust anchor installed" after=${reload} />
-        ${t && html`<${Button} kind="danger" onClick=${async () => confirm('Remove the trust anchor?') && (await done(api.tls.removeTrustAnchor, 'Removed')) && reload()}>Remove<//>`}
+        <${FileButton} label=${t ? 'Replace' : 'Upload'} send=${api.tls.setTrustAnchor} success="CA certificates installed" after=${reload} />
+        ${t && html`<${Button} kind="danger" onClick=${async () => confirm('Remove the installed CA certificates?') && (await done(api.tls.removeTrustAnchor, 'Removed')) && reload()}>Remove<//>`}
       </div>
     <//>`;
 }
@@ -191,7 +196,7 @@ function Time({ d, reload }) {
   };
   return html`
     <${Section} title="Time" aside=${html`<span class=${'badge ' + (d.time_known ? 'ok' : 'warn')}>${d.time_known ? 'synchronised' : 'not synchronised'}</span>`}>
-      <p class="muted">Certificate dates and EST need the time; the gateway has no clock of its own.</p>
+      <p class="muted">Certificate dates, EST and MQTT brokers checked against a CA need the time; the gateway has no clock of its own.</p>
       <div class="row">
         <${Field} label="NTP server"><input value=${server} placeholder="automatic" onInput=${(e) => setServer(e.target.value)} /><//>
       </div>

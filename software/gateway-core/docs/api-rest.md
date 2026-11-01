@@ -57,11 +57,11 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | Route | |
 |---|---|
 | `GET /mqtt` | `{"primary": {...}, "secondary": {...}}` |
-| `GET /mqtt/:slot` | `slot`, `enabled`, `uri`, `user`, `password_set`, `tls_insecure`, `certificate_pinned`, `connected` |
+| `GET /mqtt/:slot` | `slot`, `enabled`, `uri`, `user`, `password_set`, `tls_insecure`, `certificate_pinned`, `tls_check` (how an `mqtts://` broker is checked: `pinned`, `ca` (against the trusted CAs and the host name) or `insecure`, [ADR 0020](adr/0020-trusted-certificate-authorities.md)), `connected` |
 | `PATCH /mqtt/:slot` | `enabled`, `uri` (`mqtt://host[:1883]` or `mqtts://host[:8883]`), `user`, `password` (8+ characters, or `""`), `tls_insecure`. The broker reconnects with the new settings; the answer is the new state |
 | `POST /mqtt/:slot/trust` | the next connection pins the certificate the broker presents (`202`) |
 | `GET /mqtt/:slot/certificate` | `{"pinned": true, "sha256": "<hex>"}`, the fingerprint `openssl x509 -noout -fingerprint -sha256` shows |
-| `DELETE /mqtt/:slot/certificate` | forgets the pinned certificate (`204`) |
+| `DELETE /mqtt/:slot/certificate` | forgets the pinned certificate (`204`); the broker is then checked against the trusted CAs |
 
 ## Devices
 
@@ -127,12 +127,12 @@ support:
 
 | Route | |
 |---|---|
-| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `ntp_server` (as set; empty: automatic), `ntp_server_in_use` (the set one, else the one DHCPv6 names, else `pool.ntp.org`), `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the same facts, `count` CA certificates) or `null`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
-| `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server` (empty: automatic). A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
+| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `ntp_server` (as set; empty: automatic), `ntp_server_in_use` (the set one, else the one DHCPv6 names, else `pool.ntp.org`), `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the installed CA certificates: the first one's facts, `count`) or `null`, `built_in_roots` (whether the built-in Let's Encrypt roots are trusted), `built_in_root_names`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
+| `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server` (empty: automatic), `built_in_roots`. A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
 | `POST /tls/self-signed` | `{"validity_years"}` (optional): a new self-signed certificate. `204` |
 | `GET /tls/csr` | the PKCS#10 request for the device key and the FQDN, `application/pkcs10` PEM |
 | `PUT /tls/certificate` | the signed certificate with its chain (switches the mode to `manual`); `422` with `key_mismatch`, `fqdn_mismatch`, `expired`, `not_yet_valid`, `unparsable` or `chain_too_long` if it isn't usable. `204` |
-| `PUT /tls/trust-anchor`, `DELETE` | the CA certificate(s) the EST server must chain to. `204` |
+| `PUT /tls/trust-anchor`, `DELETE` | the installed CA certificate(s), trusted besides the built-in ones for the EST server and the MQTT brokers without a pinned key. `204` |
 | `PUT /tls/est/identity`, `DELETE` | the EST device identity: one PEM body with the certificate(s) and the private key; the key can't be read back. `204` |
 | `POST /tls/est/enroll` | enroll (or renew) now; `409 not_est_mode` outside EST mode. `202` |
 

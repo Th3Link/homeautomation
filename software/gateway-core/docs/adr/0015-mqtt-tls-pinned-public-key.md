@@ -1,6 +1,8 @@
 # ADR 0015: MQTT over TLS 1.3 with a pinned broker key
 
-**Status:** Accepted
+**Status:** Accepted, amended by [ADR 0020](0020-trusted-certificate-authorities.md):
+a broker without a pinned key is now checked against trusted certificate
+authorities instead of not being connected to.
 
 ## Context
 

@@ -15,6 +15,13 @@ export function Mqtt() {
     <${Broker} slot="secondary" b=${data.secondary} reload=${reload} />`;
 }
 
+// How the broker's certificate is checked (gateway-hardware src/tls.rs).
+const CHECK = {
+  ca: 'The broker\'s certificate has to come from a trusted CA (HTTPS page) and name the host in the address. For a self-signed certificate, pin it with "Trust".',
+  pinned: 'The broker\'s key is pinned: only a broker with the same key is accepted. "Forget" goes back to checking it against the trusted CAs.',
+  insecure: 'Any certificate is accepted.',
+};
+
 function Broker({ slot, b, reload }) {
   const [form, setForm] = useState({ uri: b.uri, user: b.user, password: '', enabled: b.enabled, tls_insecure: b.tls_insecure });
   const [certificate, setCertificate] = useState(null);
@@ -49,7 +56,7 @@ function Broker({ slot, b, reload }) {
       ${tls && html`
         <div class="tls">
           <h3>Encryption</h3>
-          <p class="muted">The broker's certificate is pinned: after "Trust", only a broker with the same key is accepted.</p>
+          <p class="muted">${CHECK[b.tls_check] || ''}</p>
           <label class="check"><input type="checkbox" checked=${form.tls_insecure} onChange=${set('tls_insecure')} /> Accept any certificate (encrypted, but not authenticated)</label>
           <div class="buttons">
             <${Button} onClick=${async () => { await run(() => api.mqtt.trust(slot), 'The next connection pins the broker\'s certificate'); setTimeout(() => { reload(); showCertificate(); }, 4000); }}>Trust the broker's certificate now<//>

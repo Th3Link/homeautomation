@@ -1,9 +1,21 @@
 //! TLS 1.3 for the `mqtts://` broker connections, on top of
-//! [`embedded-tls`](embedded_tls) (pure Rust, no heap).
+//! [`embedded-tls`](embedded_tls) (pure Rust, no heap for the connection).
 //!
 //! # Trusting a broker
 //!
-//! A broker on the LAN usually has a self-signed certificate, so there's no
+//! A broker is checked in one of three ways (ADR 0015, ADR 0020):
+//!
+//! - **Pinned key**, once one is pinned (below): for a broker with a
+//!   self-signed certificate.
+//! - **Certificate authority**, without a pinned key: the broker's chain
+//!   must lead to one of the trusted CAs ([`crate::cert::roots`]: Let's
+//!   Encrypt's built in, and those the user installs), name the host of the
+//!   broker URI (SAN DNS name, or IP address for an address), be valid now
+//!   (so the time must be known, from SNTP) and allow `serverAuth`. MbedTLS
+//!   checks the chain ([`verify_chain`]); the host name is also sent as SNI.
+//! - **Any certificate** with `mqtt-insecure on`.
+//!
+//! A broker on the LAN often has a self-signed certificate, so there's no
 //! certificate authority to check it against. Instead the gateway *pins* the
 //! certificate (trust on first use, but only when asked to):
 //!
@@ -18,20 +30,26 @@
 //!    is renewed under the same key, and it makes no difference whether the
 //!    certificate is self-signed or issued by a certificate authority.
 //!
-//! `mqtt-untrust` forgets the pinned certificate; `mqtt-insecure on`
-//! instead accepts any certificate (the traffic is encrypted, but a man in
-//! the middle is not excluded).
+//! `mqtt-untrust` forgets the pinned certificate (and so goes back to the
+//! certificate authorities); `mqtt-insecure on` instead accepts any
+//! certificate (the traffic is encrypted, but a man in the middle is not
+//! excluded).
 //!
-//! Certificate validity dates, the issuing authority and the host name aren't
-//! checked: the gateway has no clock, and the pinned key takes the place of
-//! the rest.
+//! With a pinned key, certificate validity dates, the issuing authority and
+//! the host name aren't checked: the pinned key takes the place of the rest.
 //!
 //! # Limits
 //!
 //! TLS 1.3 only (every current Mosquitto/OpenSSL speaks it), one cipher
 //! suite (`TLS_AES_128_GCM_SHA256`), certificates with ECDSA P-256/P-384 or
-//! RSA keys, at most [`CERT_CAP`] bytes long.
+//! RSA keys; a pinned certificate at most [`CERT_CAP`] bytes long, a chain
+//! within one [`READ_RECORD_BYTES`] record.
 
+use crate::cert::roots::Trusted;
+use alloc::boxed::Box;
+use core::ffi::CStr;
+use core::fmt;
+use core::marker::PhantomData;
 use embassy_net::tcp::TcpSocket;
 use embedded_tls::{
     Aes128GcmSha256, CertificateEntryRef, CertificateRef, CertificateVerifyRef, CryptoProvider,
@@ -40,7 +58,8 @@ use embedded_tls::{
 };
 use esp_hal::rng::{Trng, TrngSource};
 use gateway_core::tls_pin;
-use heapless::Vec;
+use heapless::{String, Vec};
+use mbedtls_rs::sys as mbedtls;
 // embedded-tls 0.19 and rsa 0.9 are still on sha2 0.10 (digest 0.10): the
 // handshake transcript and the RSA-PSS digests take the copy rsa re-exports.
 use rsa::sha2 as handshake_sha2;
@@ -62,6 +81,13 @@ pub type Connection<'a> = TlsConnection<'a, TcpSocket<'a>, Aes128GcmSha256>;
 pub enum Trust<'a> {
     /// It has to verify against exactly this pinned certificate (DER).
     Pinned(&'a [u8]),
+    /// Its chain has to lead to one of `roots` and name `host`; why it
+    /// didn't is left in `problems` ([`ChainProblems`]).
+    Authority {
+        roots: &'a Trusted,
+        host: &'a str,
+        problems: &'a mut u32,
+    },
     /// Anything goes: encrypted, but not authenticated.
     AnyCertificate,
     /// Anything goes, and the certificate is copied into the given buffer.
@@ -96,21 +122,39 @@ pub async fn open<'a>(
     trust: Trust<'_>,
 ) -> Result<Connection<'a>, TlsError> {
     let mut connection = Connection::new(socket, read_buffer, write_buffer);
-    // No server name: neither SNI nor host name matching is wanted (see the
-    // module docs). RSA signatures are offered, or an RSA broker would end
-    // the handshake right away.
+    // RSA signatures are offered, or an RSA broker would end the handshake
+    // right away.
     let config = TlsConfig::new().enable_rsa_signatures();
     let rng = Trng::try_new().map_err(|_| TlsError::InternalError)?;
 
     match trust {
         Trust::Pinned(certificate) => {
-            let provider = PinnedProvider {
+            // No server name: the pinned key is all that counts.
+            let provider = KeyProvider {
                 rng,
-                verifier: PinnedVerifier {
-                    pinned: certificate,
-                    transcript: None,
-                    key: Vec::new(),
-                },
+                verifier: KeyVerifier::new(Check::Pinned(certificate)),
+            };
+            connection.open(TlsContext::new(&config, provider)).await?;
+        }
+        Trust::Authority {
+            roots,
+            host,
+            problems,
+        } => {
+            // The host name as SNI (an address isn't sent, RFC 6066), so
+            // that a proxy in front of the broker can route by it.
+            let config = if host.parse::<core::net::IpAddr>().is_ok() {
+                config
+            } else {
+                config.with_server_name(host)
+            };
+            let provider = KeyProvider {
+                rng,
+                verifier: KeyVerifier::new(Check::Authority {
+                    roots,
+                    host,
+                    problems,
+                }),
             };
             connection.open(TlsContext::new(&config, provider)).await?;
         }
@@ -132,13 +176,13 @@ pub async fn open<'a>(
     Ok(connection)
 }
 
-/// Verifies the server against a pinned certificate.
-struct PinnedProvider<'a> {
+/// Verifies the server's certificate and its handshake signature.
+struct KeyProvider<'a> {
     rng: Trng,
-    verifier: PinnedVerifier<'a>,
+    verifier: KeyVerifier<'a>,
 }
 
-impl CryptoProvider for PinnedProvider<'_> {
+impl CryptoProvider for KeyProvider<'_> {
     type CipherSuite = Aes128GcmSha256;
     // No client certificate is ever offered, so no signature is made.
     type Signature = [u8; 0];
@@ -224,19 +268,41 @@ impl TlsVerifier<Aes128GcmSha256> for CaptureVerifier<'_> {
 /// `RSAPublicKey` 526).
 const KEY_CAP: usize = 560;
 
-/// Accepts a server whose certificate has the pinned public key and which
-/// proves it owns that key by signing the handshake.
-struct PinnedVerifier<'a> {
-    /// The pinned certificate (DER).
-    pinned: &'a [u8],
+/// What the server's certificate is checked against.
+enum Check<'a> {
+    /// The pinned certificate (DER): the same public key.
+    Pinned(&'a [u8]),
+    /// The trusted CAs and the host name ([`verify_chain`]).
+    Authority {
+        roots: &'a Trusted,
+        host: &'a str,
+        problems: &'a mut u32,
+    },
+}
+
+/// Accepts a server whose certificate passes the [`Check`] and which proves
+/// it owns the certificate's key by signing the handshake.
+struct KeyVerifier<'a> {
+    check: Check<'a>,
     /// The handshake hash up to the server's `Certificate` message.
     transcript: Option<<Aes128GcmSha256 as TlsCipherSuite>::Hash>,
     /// The server's public key, once its certificate was accepted.
     key: Vec<u8, KEY_CAP>,
 }
 
-impl TlsVerifier<Aes128GcmSha256> for PinnedVerifier<'_> {
+impl<'a> KeyVerifier<'a> {
+    fn new(check: Check<'a>) -> Self {
+        Self {
+            check,
+            transcript: None,
+            key: Vec::new(),
+        }
+    }
+}
+
+impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
     fn set_hostname_verification(&mut self, _hostname: &str) -> Result<(), TlsError> {
+        // The host name is checked by `verify_chain`, where wanted.
         Ok(())
     }
 
@@ -245,13 +311,31 @@ impl TlsVerifier<Aes128GcmSha256> for PinnedVerifier<'_> {
         transcript: &<Aes128GcmSha256 as TlsCipherSuite>::Hash,
         cert: CertificateRef,
     ) -> Result<(), TlsError> {
-        let Some(CertificateEntryRef::X509(presented)) = cert.entries.first() else {
+        let Some(CertificateEntryRef::X509(leaf)) = cert.entries.first() else {
             return Err(TlsError::InvalidCertificate);
         };
-        let presented = tls_pin::public_key(presented).ok_or(TlsError::InvalidCertificate)?;
-        let pinned = tls_pin::public_key(self.pinned).ok_or(TlsError::InvalidCertificate)?;
-        if presented.info != pinned.info {
-            return Err(TlsError::InvalidCertificate);
+        let presented = tls_pin::public_key(leaf).ok_or(TlsError::InvalidCertificate)?;
+        match &mut self.check {
+            Check::Pinned(pinned) => {
+                let pinned = tls_pin::public_key(pinned).ok_or(TlsError::InvalidCertificate)?;
+                if presented.info != pinned.info {
+                    return Err(TlsError::InvalidCertificate);
+                }
+            }
+            Check::Authority {
+                roots,
+                host,
+                problems,
+            } => {
+                let chain = cert.entries.iter().filter_map(|entry| match entry {
+                    CertificateEntryRef::X509(der) => Some(*der),
+                    _ => None,
+                });
+                if let Err(found) = verify_chain(chain, roots.iter(), host) {
+                    **problems = found;
+                    return Err(TlsError::InvalidCertificate);
+                }
+            }
         }
         self.key = Vec::from_slice(presented.key).map_err(|_| TlsError::InsufficientSpace)?;
         self.transcript = Some(transcript.clone());
@@ -311,4 +395,177 @@ where
     let key = VerifyingKey::<D>::new(key);
     let signature = Signature::try_from(signature).map_err(|_| TlsError::DecodeError)?;
     Ok(key.verify(message, &signature).is_ok())
+}
+
+/// The `serverAuth` extended key usage (1.3.6.1.5.5.7.3.1), DER content.
+const SERVER_AUTH: &[u8] = &[0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
+
+/// Checks a server's certificate chain (DER, leaf first) with MbedTLS, as
+/// its TLS client would: signatures up to one of `roots`, every certificate
+/// valid at the current time (from SNTP: without it MbedTLS refuses the
+/// dates), the leaf naming `host` (SAN DNS name, or SAN IP address for an
+/// address) and allowed for `digitalSignature` and `serverAuth` (where it
+/// says). Returns MbedTLS' `MBEDTLS_X509_BADCERT_*` flags on failure,
+/// see [`ChainProblems`].
+///
+/// The certificates aren't copied, only MbedTLS' parsed view of them is on
+/// the heap while this runs.
+pub fn verify_chain<'a>(
+    chain: impl Iterator<Item = &'a [u8]>,
+    roots: impl Iterator<Item = &'a [u8]>,
+    host: &str,
+) -> Result<(), u32> {
+    let mut name: String<256> = String::new();
+    if name.push_str(host).is_err() || name.push('\0').is_err() {
+        return Err(mbedtls::MBEDTLS_X509_BADCERT_CN_MISMATCH);
+    }
+    let name = CStr::from_bytes_with_nul(name.as_bytes())
+        .map_err(|_| mbedtls::MBEDTLS_X509_BADCERT_CN_MISMATCH)?;
+
+    let mut presented = Certificates::new();
+    for der in chain {
+        if !presented.add(der) {
+            return Err(mbedtls::MBEDTLS_X509_BADCERT_OTHER);
+        }
+    }
+    let mut trusted = Certificates::new();
+    for der in roots {
+        // An installed CA certificate was parsed before it was stored; one
+        // that MbedTLS can't read is just not trusted.
+        let _ = trusted.add(der);
+    }
+
+    let mut flags = 0u32;
+    // SAFETY: both lists were set up by `Certificates` and outlive the
+    // call; `name` is NUL-terminated; MbedTLS writes only `flags`.
+    let result = unsafe {
+        mbedtls::mbedtls_x509_crt_verify(
+            presented.as_mut_ptr(),
+            trusted.as_mut_ptr(),
+            core::ptr::null_mut(),
+            name.as_ptr(),
+            &mut flags,
+            None,
+            core::ptr::null_mut(),
+        )
+    };
+    if result != 0 {
+        return Err(if flags == 0 {
+            mbedtls::MBEDTLS_X509_BADCERT_OTHER
+        } else {
+            flags
+        });
+    }
+
+    // What MbedTLS' own TLS client checks of the leaf besides the chain.
+    // SAFETY: `presented` holds at least the leaf (the chain verified).
+    let leaf = presented.as_mut_ptr();
+    let usage = unsafe {
+        mbedtls::mbedtls_x509_crt_check_key_usage(
+            leaf,
+            mbedtls::MBEDTLS_X509_KU_DIGITAL_SIGNATURE as _,
+        )
+    };
+    if usage != 0 {
+        return Err(mbedtls::MBEDTLS_X509_BADCERT_KEY_USAGE);
+    }
+    let extended = unsafe {
+        mbedtls::mbedtls_x509_crt_check_extended_key_usage(
+            leaf,
+            SERVER_AUTH.as_ptr().cast(),
+            SERVER_AUTH.len(),
+        )
+    };
+    if extended != 0 {
+        return Err(mbedtls::MBEDTLS_X509_BADCERT_EXT_KEY_USAGE);
+    }
+    Ok(())
+}
+
+/// A list of certificates parsed by MbedTLS without copying them, so they
+/// have to outlive it.
+struct Certificates<'a> {
+    // Boxed: MbedTLS links to it from the next entry of the list.
+    list: Box<mbedtls::mbedtls_x509_crt>,
+    _der: PhantomData<&'a [u8]>,
+}
+
+impl<'a> Certificates<'a> {
+    fn new() -> Self {
+        // SAFETY: a plain C struct, all-zero is a valid value; `init` sets
+        // it up as an empty list.
+        let mut list = Box::new(unsafe { core::mem::zeroed::<mbedtls::mbedtls_x509_crt>() });
+        unsafe { mbedtls::mbedtls_x509_crt_init(&mut *list) };
+        Self {
+            list,
+            _der: PhantomData,
+        }
+    }
+
+    /// Appends one certificate; false if MbedTLS can't parse it.
+    fn add(&mut self, der: &'a [u8]) -> bool {
+        // SAFETY: `der` outlives the list (the lifetime), which MbedTLS
+        // only reads.
+        unsafe {
+            mbedtls::mbedtls_x509_crt_parse_der_nocopy(&mut *self.list, der.as_ptr(), der.len())
+                == 0
+        }
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut mbedtls::mbedtls_x509_crt {
+        &mut *self.list
+    }
+}
+
+impl Drop for Certificates<'_> {
+    fn drop(&mut self) {
+        // SAFETY: set up by `init`; frees what MbedTLS allocated for it.
+        unsafe { mbedtls::mbedtls_x509_crt_free(&mut *self.list) };
+    }
+}
+
+/// Why a chain wasn't accepted, from [`verify_chain`]'s flags, for the log.
+pub struct ChainProblems(pub u32);
+
+impl fmt::Display for ChainProblems {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const NAMES: [(u32, &str); 10] = [
+            (
+                mbedtls::MBEDTLS_X509_BADCERT_NOT_TRUSTED,
+                "not issued by a trusted CA",
+            ),
+            (
+                mbedtls::MBEDTLS_X509_BADCERT_CN_MISMATCH,
+                "not for this host name",
+            ),
+            (mbedtls::MBEDTLS_X509_BADCERT_EXPIRED, "expired"),
+            (mbedtls::MBEDTLS_X509_BADCERT_FUTURE, "not yet valid"),
+            (mbedtls::MBEDTLS_X509_BADCERT_REVOKED, "revoked"),
+            (
+                mbedtls::MBEDTLS_X509_BADCERT_KEY_USAGE,
+                "key usage doesn't allow signing",
+            ),
+            (
+                mbedtls::MBEDTLS_X509_BADCERT_EXT_KEY_USAGE,
+                "not for TLS servers (extended key usage)",
+            ),
+            (mbedtls::MBEDTLS_X509_BADCERT_BAD_MD, "weak hash"),
+            (mbedtls::MBEDTLS_X509_BADCERT_BAD_KEY, "weak key"),
+            (mbedtls::MBEDTLS_X509_BADCERT_BAD_PK, "unsupported key type"),
+        ];
+        let mut first = true;
+        for (flag, name) in NAMES {
+            if self.0 & flag != 0 {
+                if !first {
+                    f.write_str(", ")?;
+                }
+                f.write_str(name)?;
+                first = false;
+            }
+        }
+        if first {
+            write!(f, "rejected (0x{:x})", self.0)?;
+        }
+        Ok(())
+    }
 }

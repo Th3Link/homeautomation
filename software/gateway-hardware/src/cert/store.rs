@@ -25,6 +25,8 @@ pub const NTP_SERVER: u8 = 0x97;
 pub const IDENTITY_KEY: u8 = 0x9B;
 /// How the active certificate came to be, see [`super::Origin`].
 pub const ORIGIN: u8 = 0x9C;
+/// Whether the built-in root certificates are trusted, see [`super::roots`].
+pub const BUILT_IN_ROOTS: u8 = 0x9D;
 
 /// A value spread over up to `chunks` config items, in one of two slots.
 pub struct Blob {
@@ -39,7 +41,8 @@ pub const CERTIFICATE: Blob = Blob {
     slots: [0xA0, 0xA3],
     chunks: 3,
 };
-/// The trust anchor(s) for the EST server (concatenated DER).
+/// The CA certificates the user installed, trusted for the EST server and
+/// the MQTT brokers (concatenated DER), see [`super::roots`].
 pub const TRUST_ANCHOR: Blob = Blob {
     pointer: 0x99,
     slots: [0xA6, 0xA9],

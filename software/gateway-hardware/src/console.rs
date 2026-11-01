@@ -96,7 +96,7 @@ enum Commands<'a> {
     #[set(one_of = ["on", "off"])]
     MqttEnabled(OnOff),
     /// With `mqtts://`, accept any certificate the first broker presents
-    /// (encrypted, but not authenticated) instead of the pinned one.
+    /// (encrypted, but not authenticated) instead of checking it.
     #[set(one_of = ["on", "off"])]
     MqttInsecure(OnOff),
     /// Pin the first broker's TLS certificate: the next connection to it
@@ -104,7 +104,8 @@ enum Commands<'a> {
     /// stores it; from then on only that certificate is accepted. Check the
     /// SHA-256 fingerprint printed in the log against the broker's own.
     MqttTrust,
-    /// Forget the first broker's pinned certificate.
+    /// Forget the first broker's pinned certificate: it is then checked
+    /// against the trusted CAs (`tls-status`).
     MqttUntrust,
     /// Set the second MQTT broker's URI (see `mqtt-uri`).
     Mqtt2Uri(&'a str),
@@ -142,6 +143,10 @@ enum Commands<'a> {
     TlsFqdn(&'a str),
     /// Make a new self-signed HTTPS certificate (and switch to that mode).
     TlsSelfSigned,
+    /// Trust the built-in root certificates (Let's Encrypt's) for the EST
+    /// server and the MQTT brokers whose key isn't pinned.
+    #[set(one_of = ["on", "off"])]
+    TlsBuiltInRoots(OnOff),
     /// Set the NTP server the time comes from; `auto`: the one DHCPv6
     /// names, else pool.ntp.org.
     NtpServer(&'a str),
@@ -361,6 +366,13 @@ async fn handle_command(
         Commands::TlsStatus => crate::heap::boxed(|| cmd_tls_status(writer)).await,
         Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
+        Commands::TlsBuiltInRoots(v) => {
+            respond(
+                writer,
+                &cmd_tls_built_in_roots(matches!(v, OnOff::On)).await,
+            )
+            .await
+        }
         Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,
         Commands::Ping => {
             send_can_message(CanMessageType::Available, &[], true).await;
@@ -435,7 +447,8 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
                 ))
             } else {
                 fmt_msg(format_args!(
-                    "{name}_tls: NO certificate pinned (run {name}-trust)"
+                    "{name}_tls: checked against the trusted CAs and the host name \
+                     (or pin it: {name}-trust)"
                 ))
             };
             respond(writer, &line).await?;
@@ -558,7 +571,7 @@ async fn cmd_mqtt_uri(slot: usize, value: &str) -> String<LINE_CAP> {
     let key = config::Key::broker(slot).uri;
     let mut message = cmd_str_field(value, key, &format_name(name, "uri")).await;
     if value.starts_with("mqtts://") {
-        let _ = message.push_str(" - run mqtt-trust once to pin its certificate");
+        let _ = message.push_str(" - checked against the trusted CAs, or pin it with mqtt-trust");
     }
     message
 }
@@ -667,6 +680,19 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     }
     respond(
         writer,
+        &fmt_msg(format_args!(
+            "trusted CAs: built-in (Let's Encrypt) {}, {} installed",
+            if status.settings.built_in_roots {
+                "on"
+            } else {
+                "off"
+            },
+            status.trust_anchor_count
+        )),
+    )
+    .await?;
+    respond(
+        writer,
         if status.time_known {
             "time: known (SNTP)"
         } else {
@@ -674,6 +700,18 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         },
     )
     .await
+}
+
+async fn cmd_tls_built_in_roots(on: bool) -> String<LINE_CAP> {
+    let update = crate::cert::SettingsUpdate {
+        built_in_roots: Some(on),
+        ..Default::default()
+    };
+    match crate::cert::update_settings(update).await {
+        Ok(()) if on => str_msg("tls: the built-in root certificates are trusted"),
+        Ok(()) => str_msg("tls: the built-in root certificates are not trusted"),
+        Err(e) => fmt_msg(format_args!("tls: failed: {}", e.code())),
+    }
 }
 
 async fn cmd_tls_fqdn(fqdn: &str) -> String<LINE_CAP> {

@@ -135,27 +135,40 @@ into `gateway-hardware`'s CAN transport.
 ### Encryption (`mqtts://`)
 
 `mqtts://` connections use TLS 1.3 (one cipher suite,
-`TLS_AES_128_GCM_SHA256`; every current Mosquitto/OpenSSL offers it).
-Brokers on a LAN mostly have self-signed certificates and the gateway has
-no clock, so instead of validating a certificate chain it *pins the
-broker's public key*:
+`TLS_AES_128_GCM_SHA256`; every current Mosquitto/OpenSSL offers it). The
+broker is checked in one of three ways ([ADR 0015](adr/0015-mqtt-tls-pinned-public-key.md),
+[ADR 0020](adr/0020-trusted-certificate-authorities.md)):
 
-1. `mqtt-trust` (`mqtt2-trust` for the second broker) makes the next
-   connection a capture: the certificate the broker presents is stored in
-   flash and its SHA-256 fingerprint is logged, to compare with
-   `openssl x509 -in <cert> -noout -fingerprint -sha256`. The request is
-   not persisted; it is also lost on a restart.
-2. From then on the broker must present a certificate with that same
-   public key and sign the handshake with the matching private key, or the
-   connection is refused. A renewed certificate with the same key is
-   accepted; a new key needs `mqtt-trust` again.
+- **Against the trusted certificate authorities** (unless a key is pinned):
+  Let's Encrypt's roots are built in, others are installed on the HTTPS
+  page. The chain must lead to one of them, the certificate must name the
+  host of the broker URI (SAN DNS name; for an address, a SAN IP address),
+  be valid now and allow `serverAuth`. The host name is sent as SNI. The
+  gateway waits for the time from SNTP before it connects. A certificate
+  renewed with a new key is accepted as long as it comes from the same CAs.
+- **By its pinned public key**, for a broker with a self-signed
+  certificate:
+  1. `mqtt-trust` (`mqtt2-trust` for the second broker) makes the next
+     connection a capture: the certificate the broker presents is stored in
+     flash and its SHA-256 fingerprint is logged, to compare with
+     `openssl x509 -in <cert> -noout -fingerprint -sha256`. The request is
+     not persisted; it is also lost on a restart.
+  2. From then on the broker must present a certificate with that same
+     public key and sign the handshake with the matching private key, or the
+     connection is refused. A renewed certificate with the same key is
+     accepted; a new key needs `mqtt-trust` again. Validity dates, the
+     issuer and the host name are not checked.
 
-`mqtt-untrust` forgets the pinned certificate (a TLS broker without one
-isn't connected to), `mqtt-insecure on` accepts any certificate instead:
-encrypted, but a man in the middle isn't excluded.
+  `mqtt-untrust` forgets the pinned certificate, so the broker is checked
+  against the CAs again.
+- **Not at all** with `mqtt-insecure on`: encrypted, but a man in the
+  middle isn't excluded.
 
-Limits: certificates with ECDSA P-256/P-384 or RSA keys (at most 2048
-bytes), and validity dates, the issuer and the host name are not checked.
+When a check fails, the console log says why (`not issued by a trusted CA`,
+`not for this host name`, `expired`, …).
+
+Limits: certificates with ECDSA P-256/P-384 or RSA keys; a pinned
+certificate at most 2048 bytes, a chain within one 8 KiB TLS record.
 
 ## Command topics (broker → gateway)
 

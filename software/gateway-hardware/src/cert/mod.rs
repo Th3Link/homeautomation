@@ -15,6 +15,7 @@
 
 mod est;
 mod key;
+pub mod roots;
 mod store;
 
 use crate::config::{config, LoadOrInit};
@@ -175,6 +176,8 @@ pub struct Settings {
     pub est_auto_renew: bool,
     /// As configured; empty means automatic ([`ntp_server`]).
     pub ntp_server: String<NTP_CAP>,
+    /// Whether the built-in root certificates are trusted ([`roots`]).
+    pub built_in_roots: bool,
 }
 
 pub async fn settings() -> Settings {
@@ -190,6 +193,7 @@ pub async fn settings() -> Settings {
         est_url: store.get_str(store::EST_URL).await.unwrap_or_default(),
         est_auto_renew: store.get_bool(store::EST_AUTO_RENEW).await.unwrap_or(true),
         ntp_server: store.get_str(store::NTP_SERVER).await.unwrap_or_default(),
+        built_in_roots: store.get_bool(store::BUILT_IN_ROOTS).await.unwrap_or(true),
     }
 }
 
@@ -247,6 +251,7 @@ pub struct SettingsUpdate<'a> {
     pub est_url: Option<&'a str>,
     pub est_auto_renew: Option<bool>,
     pub ntp_server: Option<&'a str>,
+    pub built_in_roots: Option<bool>,
 }
 
 /// Changes the settings and acts on them: a new FQDN or the self-signed mode
@@ -309,6 +314,12 @@ pub async fn update_settings(update: SettingsUpdate<'_>) -> Result<(), CertError
                 .await
                 .map_err(failed)?;
         }
+        if let Some(on) = update.built_in_roots {
+            store
+                .set_bool(store::BUILT_IN_ROOTS, on)
+                .await
+                .map_err(failed)?;
+        }
     }
     let after = settings().await;
 
@@ -317,12 +328,18 @@ pub async fn update_settings(update: SettingsUpdate<'_>) -> Result<(), CertError
     if after.mode == Mode::SelfSigned && (fqdn_changed || mode_changed) {
         generate_self_signed(None).await?;
     }
-    if after.mode == Mode::Est {
+    // EST mode starts an enrollment, and so do other built-in roots: EST
+    // may have been waiting for a CA to check its server against.
+    if after.mode == Mode::Est || before.built_in_roots != after.built_in_roots {
         let mut est = EST.lock().await;
         est.failures = 0;
         est.next_attempt = None;
         drop(est);
         WAKE.signal(());
+    }
+    // The brokers checked against the CAs connect again with the new ones.
+    if before.built_in_roots != after.built_in_roots {
+        crate::mqtt::reconnect_all();
     }
     Ok(())
 }
@@ -495,10 +512,12 @@ async fn csr_der(fqdn: &str) -> Result<Vec<u8>, CertError> {
 /// empty data removes it.
 pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
     if data.is_empty() {
-        return store::TRUST_ANCHOR
+        store::TRUST_ANCHOR
             .write(&[])
             .await
-            .map_err(|_| CertError::Storage);
+            .map_err(|_| CertError::Storage)?;
+        crate::mqtt::reconnect_all();
+        return Ok(());
     }
     let certs = decode_certificates(data)?;
     let certs = certs.iter().map(|range| &data[range.clone()]);
@@ -513,12 +532,14 @@ pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
         .write(&all)
         .await
         .map_err(|_| CertError::Storage)?;
-    // EST may have been waiting for exactly this: try again now.
+    // EST and the brokers may have been waiting for exactly this: try again
+    // now.
     let mut est = EST.lock().await;
     est.failures = 0;
     est.next_attempt = None;
     drop(est);
     WAKE.signal(());
+    crate::mqtt::reconnect_all();
     Ok(())
 }
 
@@ -929,12 +950,12 @@ async fn enroll(
     operation: Operation,
     renewing: bool,
 ) -> Result<(), EnrollError> {
-    let anchors = store::TRUST_ANCHOR
-        .read()
-        .await
-        .ok_or(EnrollError::Cert(CertError::NoTrustAnchor))?;
+    let anchors = roots::Trusted::load().await;
+    if anchors.is_empty() {
+        return Err(EnrollError::Cert(CertError::NoTrustAnchor));
+    }
     let mut trust = HeapString::new();
-    for der in split_concatenated(&anchors) {
+    for der in anchors.iter() {
         write!(
             trust,
             "{}",
