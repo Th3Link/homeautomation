@@ -24,6 +24,7 @@
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::tls::{self, Trust};
+use core::num::NonZero;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::{select3, Either3};
 use embassy_net::tcp::TcpSocket;
@@ -57,6 +58,13 @@ type MqttClient<'a, 'c, N> = Client<'a, 'c, N, BumpBuffer<'c>, 4, 4, 4, 0, 0, 0,
 /// crate builds (see [`gateway_core::topics`]).
 const TOPIC_CAP: usize = 96;
 const BODY_CAP: usize = 200;
+
+/// The client's buffer for what it receives, and so the largest packet it
+/// takes ([`forget_received`]). The broker is told (MQTT 5's maximum packet
+/// size) and drops a larger message for this client instead of sending it:
+/// it would end the connection, and a retained one every one after it.
+const RECEIVE_BYTES: usize = 2048;
+const MAXIMUM_PACKET_SIZE: NonZero<u32> = NonZero::new(RECEIVE_BYTES as u32).unwrap();
 
 pub struct Publication {
     pub topic: String<TOPIC_CAP>,
@@ -154,6 +162,19 @@ async fn dispatch_publish(msg: &Publish<'_, 0, 0>) {
     }
 }
 
+/// Gives the client's buffer back for the next packets. The client keeps
+/// what it receives there (the topic and payload of every PUBLISH, reason
+/// strings) and never frees it itself: without this, the next message after
+/// [`RECEIVE_BYTES`] of them doesn't fit, and the connection fails with it.
+///
+/// # Safety
+///
+/// Nothing the client returned before may still be in use.
+unsafe fn forget_received<N: Transport>(client: &mut MqttClient<'_, '_, N>) {
+    // SAFETY: passed on to the caller.
+    unsafe { client.buffer_mut().reset() };
+}
+
 /// Waits for the SUBACK of the SUBSCRIBE with packet identifier `pid`,
 /// still dispatching any message that arrives meanwhile (e.g. a retained
 /// one the broker sends right after subscribing). Returns false if the
@@ -165,6 +186,9 @@ async fn wait_for_suback<N: Transport>(
 ) -> bool {
     let wait = async {
         loop {
+            // SAFETY: the previous event was dropped at the end of the
+            // last iteration.
+            unsafe { forget_received(client) };
             match client.poll().await {
                 Ok(Event::Suback(suback)) if suback.packet_identifier == pid => {
                     if !suback.reason_code.is_success() {
@@ -225,6 +249,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     // Drains this broker's publish queue while polling for incoming
     // messages, dispatching them into `crate::translate`.
     loop {
+        // SAFETY: the previous event was dropped at the end of the last
+        // iteration; the subscription loop above keeps nothing either.
+        unsafe { forget_received(client) };
         match select3(
             PUBLISH_QUEUES[slot].receive(),
             client.poll(),
@@ -279,7 +306,7 @@ async fn session<N: Transport>(
     address: &BrokerAddress<'_>,
 ) {
     let broker = slot + 1;
-    let mut bump_storage = [0u8; 2048];
+    let mut bump_storage = [0u8; RECEIVE_BYTES];
     let mut buffer = BumpBuffer::new(&mut bump_storage);
     // Const generics: SUBSCRIBE/RECEIVE/SEND_MAXIMUM bound in-flight
     // un-acked packets of each kind (we only ever have one outstanding
@@ -287,7 +314,9 @@ async fn session<N: Transport>(
     // of subscription identifiers, user properties, or topic aliases.
     let mut client: MqttClient<'_, '_, N> = Client::new(&mut buffer);
 
-    let mut connect_options = ConnectOptions::new().clean_start();
+    let mut connect_options = ConnectOptions::new()
+        .clean_start()
+        .maximum_packet_size(MAXIMUM_PACKET_SIZE);
     if !settings.user.is_empty() {
         if let Ok(user) = MqttString::from_str(settings.user.as_str()) {
             connect_options = connect_options.user_name(user);
