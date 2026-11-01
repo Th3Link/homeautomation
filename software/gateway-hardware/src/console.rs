@@ -310,10 +310,7 @@ async fn handle_command(
             .await
         }
         Commands::MqttUri(s) => respond(writer, &cmd_mqtt_uri(0, s).await).await,
-        Commands::MqttUser(s) => {
-            let keys = config::Key::broker(0);
-            respond(writer, &cmd_str_field(s, keys.user, "mqtt_user").await).await
-        }
+        Commands::MqttUser(s) => respond(writer, &cmd_mqtt_user(0, s).await).await,
         Commands::MqttPassword(s) => respond(writer, &cmd_mqtt_password(0, s).await).await,
         Commands::MqttEnabled(v) => {
             respond(writer, &cmd_mqtt_enabled(0, matches!(v, OnOff::On)).await).await
@@ -326,10 +323,7 @@ async fn handle_command(
         Commands::Mqtt2Trust => respond(writer, &cmd_mqtt_trust(1).await).await,
         Commands::Mqtt2Untrust => respond(writer, &cmd_mqtt_untrust(1).await).await,
         Commands::Mqtt2Uri(s) => respond(writer, &cmd_mqtt_uri(1, s).await).await,
-        Commands::Mqtt2User(s) => {
-            let keys = config::Key::broker(1);
-            respond(writer, &cmd_str_field(s, keys.user, "mqtt2_user").await).await
-        }
+        Commands::Mqtt2User(s) => respond(writer, &cmd_mqtt_user(1, s).await).await,
         Commands::Mqtt2Password(s) => respond(writer, &cmd_mqtt_password(1, s).await).await,
         Commands::Mqtt2Enabled(v) => {
             respond(writer, &cmd_mqtt_enabled(1, matches!(v, OnOff::On)).await).await
@@ -554,9 +548,8 @@ async fn cmd_mqtt_uri(slot: usize, value: &str) -> String<LINE_CAP> {
     if gateway_core::helper::parse_broker_uri(value).is_none() {
         return str_msg("uri must look like mqtt://host[:port] or mqtts://host[:port]");
     }
-    let name = broker_name(slot);
     let key = config::Key::broker(slot).uri;
-    let mut message = cmd_str_field(value, key, &format_name(name, "uri")).await;
+    let mut message = cmd_broker_str(slot, value, key, "uri").await;
     if value.starts_with("mqtts://") {
         let _ = message.push_str(" - run mqtt-trust once to pin its certificate");
     }
@@ -569,12 +562,32 @@ fn format_name(name: &str, field: &str) -> String<16> {
     out
 }
 
+/// Stores a string setting of broker `slot` and reconnects it, so that the
+/// change takes effect right away.
+async fn cmd_broker_str(
+    slot: usize,
+    value: &str,
+    key: config::Key,
+    field: &str,
+) -> String<LINE_CAP> {
+    let name = format_name(broker_name(slot), field);
+    if config().await.set_str(key, value).await.is_err() {
+        return fmt_msg(format_args!("failed to persist {name}"));
+    }
+    crate::mqtt::reconnect(slot);
+    fmt_msg(format_args!("{name} set to \"{value}\""))
+}
+
+async fn cmd_mqtt_user(slot: usize, value: &str) -> String<LINE_CAP> {
+    cmd_broker_str(slot, value, config::Key::broker(slot).user, "user").await
+}
+
 async fn cmd_mqtt_password(slot: usize, value: &str) -> String<LINE_CAP> {
     if !gateway_core::command::should_apply_mqtt_password(value) {
         return str_msg("mqtt password rejected: must be at least 8 characters");
     }
     let key = config::Key::broker(slot).password;
-    cmd_str_field(value, key, &format_name(broker_name(slot), "password")).await
+    cmd_broker_str(slot, value, key, "password").await
 }
 
 async fn cmd_mqtt_enabled(slot: usize, enabled: bool) -> String<LINE_CAP> {
@@ -583,11 +596,13 @@ async fn cmd_mqtt_enabled(slot: usize, enabled: bool) -> String<LINE_CAP> {
     if config().await.set_bool(key, enabled).await.is_err() {
         return fmt_msg(format_args!("failed to persist {name}"));
     }
+    crate::mqtt::reconnect(slot);
     fmt_msg(format_args!("{name} set to {enabled}"))
 }
 
 async fn cmd_mqtt_trust(slot: usize) -> String<LINE_CAP> {
     crate::mqtt::request_trust(slot);
+    crate::mqtt::reconnect(slot);
     fmt_msg(format_args!(
         "{}: the next connection pins the broker's certificate - watch the log for its fingerprint",
         broker_name(slot)
@@ -597,7 +612,10 @@ async fn cmd_mqtt_trust(slot: usize) -> String<LINE_CAP> {
 async fn cmd_mqtt_untrust(slot: usize) -> String<LINE_CAP> {
     let name = broker_name(slot);
     match config::set_pinned_certificate(slot, &[]).await {
-        Ok(()) => fmt_msg(format_args!("{name}: pinned certificate forgotten")),
+        Ok(()) => {
+            crate::mqtt::reconnect(slot);
+            fmt_msg(format_args!("{name}: pinned certificate forgotten"))
+        }
         Err(()) => fmt_msg(format_args!("{name}: failed to forget the certificate")),
     }
 }
@@ -608,6 +626,7 @@ async fn cmd_mqtt_insecure(slot: usize, insecure: bool) -> String<LINE_CAP> {
     if config().await.set_bool(key, insecure).await.is_err() {
         return fmt_msg(format_args!("failed to persist {name}"));
     }
+    crate::mqtt::reconnect(slot);
     fmt_msg(format_args!("{name} set to {insecure}"))
 }
 
