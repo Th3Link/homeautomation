@@ -475,28 +475,38 @@ pub fn verify_chain<'a>(
     }
 
     let mut flags = 0u32;
-    // SAFETY: both lists were set up by `Certificates` and outlive the
-    // call; `name` is NUL-terminated; MbedTLS writes only `flags`.
-    let result = unsafe {
-        mbedtls::mbedtls_x509_crt_verify(
-            presented.as_mut_ptr(),
-            trusted.as_mut_ptr(),
-            core::ptr::null_mut(),
-            name.as_ptr(),
-            &mut flags,
-            None,
-            core::ptr::null_mut(),
-        )
+    let mut verify = || {
+        // SAFETY: both lists were set up by `Certificates` and outlive the
+        // call; `name` is NUL-terminated; MbedTLS writes only `flags`.
+        unsafe {
+            mbedtls::mbedtls_x509_crt_verify(
+                presented.as_mut_ptr(),
+                trusted.as_mut_ptr(),
+                core::ptr::null_mut(),
+                name.as_ptr(),
+                &mut flags,
+                None,
+                core::ptr::null_mut(),
+            )
+        }
+    };
+    let before_time = dates == Dates::NowOrBuildTime && crate::wall_clock::now().is_none();
+    // Without a time MbedTLS doesn't check the chain at all: it checks it
+    // at the build time then, and the dates are looked at below.
+    let result = if before_time {
+        crate::wall_clock::assuming(crate::wall_clock::build_time(), verify)
+    } else {
+        verify()
     };
     if result != 0 {
         if flags == 0 {
             return Err(mbedtls::MBEDTLS_X509_BADCERT_OTHER);
         }
-        // Without the time MbedTLS takes every certificate as expired and
-        // not yet valid. If that is all, check what can be checked.
+        // At the build time a certificate issued since is not yet valid,
+        // and one that expired since still valid. If that is all, check
+        // what can be checked.
         const DATES: u32 =
             mbedtls::MBEDTLS_X509_BADCERT_EXPIRED | mbedtls::MBEDTLS_X509_BADCERT_FUTURE;
-        let before_time = dates == Dates::NowOrBuildTime && crate::wall_clock::now().is_none();
         if !before_time || flags & !DATES != 0 {
             return Err(flags);
         }

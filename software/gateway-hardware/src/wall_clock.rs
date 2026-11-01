@@ -21,6 +21,9 @@ use gateway_core::x509::time::{parse_rfc3339, DateTime};
 static UNIX_AT_BOOT: AtomicU32 = AtomicU32::new(0);
 /// Whether the time was last set by NTS.
 static AUTHENTICATED: AtomicBool = AtomicBool::new(false);
+/// A time MbedTLS is given while the time is unknown, see [`assuming`];
+/// 0 for none.
+static ASSUMED: AtomicU32 = AtomicU32::new(0);
 
 /// Seconds from 1900 (NTP's epoch) to 1970.
 const NTP_TO_UNIX: u64 = 2_208_988_800;
@@ -46,6 +49,16 @@ pub fn authenticated() -> bool {
 /// When `instant` was, in Unix seconds, once the time is known.
 pub fn unix_at(instant: Instant) -> Option<i64> {
     Some(now()? - Instant::now().saturating_duration_since(instant).as_secs() as i64)
+}
+
+/// Runs `f` (MbedTLS, without awaiting) with MbedTLS taking `unix` as the
+/// time if the real one isn't known: it doesn't check certificate chains
+/// without a time at all.
+pub fn assuming<R>(unix: i64, f: impl FnOnce() -> R) -> R {
+    ASSUMED.store(unix as u32, Ordering::Relaxed);
+    let result = f();
+    ASSUMED.store(0, Ordering::Relaxed);
+    result
 }
 
 /// When the firmware was built (a lower bound for the time).
@@ -182,7 +195,8 @@ struct Clocks;
 
 impl mbedtls_rs::sys::hook::wall_clock::MbedtlsWallClock for Clocks {
     fn instant(&self) -> Option<mbedtls_rs::sys::tm> {
-        let t = DateTime::from_unix(now()?);
+        let assumed = ASSUMED.load(Ordering::Relaxed);
+        let t = DateTime::from_unix(now().or((assumed != 0).then_some(i64::from(assumed)))?);
         let days = gateway_core::x509::time::days_from_civil(t.year, t.month, t.day);
         let year_start = gateway_core::x509::time::days_from_civil(t.year, 1, 1);
         // SAFETY: `tm` is a plain C struct; all-zero is a valid value.
