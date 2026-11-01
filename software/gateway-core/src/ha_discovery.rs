@@ -173,6 +173,10 @@ fn write_payload(p: &mut Payload, device: &Device<'_>, entity: &Entity<'_>) -> c
                 json_string(p, kind.unit())?;
             }
             p.write_str(",\"stat_cla\":\"measurement\"")?;
+            if *kind == SensorKind::GasResistance {
+                // For calibrating, not for dashboards.
+                p.write_str(",\"ent_cat\":\"diagnostic\",\"en\":false")?;
+            }
         }
         Entity::Presence { state_topic } => {
             write!(
@@ -234,9 +238,11 @@ fn kind_label(kind: SensorKind) -> &'static str {
         SensorKind::Temperature => "Temperature",
         SensorKind::Humidity => "Humidity",
         SensorKind::Pressure => "Pressure",
-        SensorKind::Co2Equivalent => "CO2",
+        SensorKind::Co2Equivalent => "CO2 equivalent",
         SensorKind::VocBreath => "VOC",
         SensorKind::AirQuality => "Air quality",
+        SensorKind::Co2 => "CO2",
+        SensorKind::GasResistance => "Gas resistance",
         SensorKind::Brightness => "Brightness",
     }
 }
@@ -250,6 +256,8 @@ fn device_class(kind: SensorKind) -> Option<&'static str> {
         SensorKind::Co2Equivalent => Some("carbon_dioxide"),
         SensorKind::AirQuality => Some("aqi"),
         SensorKind::VocBreath => Some("volatile_organic_compounds_parts"),
+        SensorKind::Co2 => Some("carbon_dioxide"),
+        SensorKind::GasResistance => None,
     }
 }
 
@@ -298,6 +306,41 @@ mod tests {
              \"unit_of_meas\":\"°C\",\"stat_cla\":\"measurement\",\
              \"dev\":{\"ids\":[\"canbus_10044d00\"],\"name\":\"testsw\",\"mdl\":\"Button\",\"sw\":\"v1.2\"}}"
         );
+    }
+
+    #[test]
+    fn measured_co2_and_gas_resistance() {
+        let sensor = |kind, sub_id, state_topic| Entity::Sensor {
+            kind,
+            sub_id,
+            label: "",
+            state_topic,
+        };
+        let co2 = payload(
+            &SWITCH,
+            &sensor(
+                SensorKind::Co2,
+                0x3000_0061,
+                "canbus/co2_measured/testsw/0x30000061",
+            ),
+        )
+        .unwrap();
+        assert!(co2.contains("\"name\":\"CO2\""));
+        assert!(co2.contains("\"dev_cla\":\"carbon_dioxide\",\"unit_of_meas\":\"ppm\""));
+        assert!(!co2.contains("ent_cat"));
+        // Diagnostic and off by default: it's for calibrating.
+        let gas = payload(
+            &SWITCH,
+            &sensor(
+                SensorKind::GasResistance,
+                0x6800_0077,
+                "canbus/gas_resistance/testsw/0x68000077",
+            ),
+        )
+        .unwrap();
+        assert!(!gas.contains("dev_cla"));
+        assert!(gas.contains("\"unit_of_meas\":\"kΩ\""));
+        assert!(gas.contains("\"ent_cat\":\"diagnostic\",\"en\":false"));
     }
 
     #[test]

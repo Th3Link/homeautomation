@@ -15,6 +15,10 @@ pub enum SensorKind {
     Co2Equivalent,
     VocBreath,
     AirQuality,
+    /// Measured CO2 (`Co2Sensor`), ppm.
+    Co2,
+    /// A BME680's raw gas resistance (`GasResistance`), kΩ.
+    GasResistance,
     /// Ambient light (`AmbientLightSensor`), lux; one per device.
     Brightness,
 }
@@ -29,6 +33,8 @@ impl SensorKind {
             CanMessageType::Co2Equivalent => Self::Co2Equivalent,
             CanMessageType::VocBreath => Self::VocBreath,
             CanMessageType::AirQuality => Self::AirQuality,
+            CanMessageType::Co2Sensor => Self::Co2,
+            CanMessageType::GasResistance => Self::GasResistance,
             CanMessageType::AmbientLightSensor => Self::Brightness,
             _ => return None,
         })
@@ -43,6 +49,8 @@ impl SensorKind {
             Self::Co2Equivalent => CanMessageType::Co2Equivalent,
             Self::VocBreath => CanMessageType::VocBreath,
             Self::AirQuality => CanMessageType::AirQuality,
+            Self::Co2 => CanMessageType::Co2Sensor,
+            Self::GasResistance => CanMessageType::GasResistance,
             Self::Brightness => CanMessageType::AmbientLightSensor,
         }
     }
@@ -55,6 +63,8 @@ impl SensorKind {
             Self::Co2Equivalent => "co2",
             Self::VocBreath => "voc",
             Self::AirQuality => "air_quality",
+            Self::Co2 => "co2_measured",
+            Self::GasResistance => "gas_resistance",
             Self::Brightness => "brightness",
         }
     }
@@ -66,10 +76,12 @@ impl SensorKind {
             Self::Humidity => "%",
             Self::Pressure => "hPa",
             Self::Brightness => "lx",
-            // BSEC's estimates from a BME680's gas sensor.
-            Self::Co2Equivalent | Self::VocBreath => "ppm",
+            // Estimates from a BME680's gas sensor (ADR 0024), and a
+            // measurement.
+            Self::Co2Equivalent | Self::VocBreath | Self::Co2 => "ppm",
             // An index, 0-500.
             Self::AirQuality => "",
+            Self::GasResistance => "kΩ",
         }
     }
 }
@@ -203,5 +215,28 @@ mod tests {
         assert_eq!(SensorKind::Temperature.unit(), "°C");
         assert_eq!(SensorKind::Co2Equivalent.unit(), "ppm");
         assert_eq!(SensorKind::AirQuality.unit(), "");
+    }
+
+    #[test]
+    fn measured_co2_and_gas_resistance() {
+        for (msg, kind, name, unit) in [
+            (
+                CanMessageType::Co2Sensor,
+                SensorKind::Co2,
+                "co2_measured",
+                "ppm",
+            ),
+            (
+                CanMessageType::GasResistance,
+                SensorKind::GasResistance,
+                "gas_resistance",
+                "kΩ",
+            ),
+        ] {
+            assert_eq!(SensorKind::from_message(msg), Some(kind));
+            assert_eq!(kind.message(), msg);
+            assert_eq!(kind.name(), name);
+            assert_eq!(kind.unit(), unit);
+        }
     }
 }
