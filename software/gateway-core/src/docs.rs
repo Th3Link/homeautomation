@@ -103,6 +103,11 @@ pub mod protocol_mqtt {}
 #[doc = include_str!("../docs/technical-debt.md")]
 pub mod technical_debt {}
 
+/// What lies where in the gateway's RAM, the critical sizes, and where
+/// there is room left.
+#[doc = include_str!("../docs/ram.md")]
+pub mod ram {}
+
 /// The gateway's REST API and web UI.
 #[doc = include_str!("../docs/api-rest.md")]
 pub mod api_rest {}
