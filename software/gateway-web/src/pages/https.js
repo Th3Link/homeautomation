@@ -195,12 +195,13 @@ function Time({ d, reload }) {
     if (await done(() => api.tls.update({ ntp_server: server.trim() }), 'Saved; used at the next synchronisation')) reload();
   };
   return html`
-    <${Section} title="Time" aside=${html`<span class=${'badge ' + (d.time_known ? 'ok' : 'warn')}>${d.time_known ? 'synchronised' : 'not synchronised'}</span>`}>
+    <${Section} title="Time" aside=${html`<span class=${'badge ' + (d.time_known ? 'ok' : 'warn')}>${d.time_known ? (d.time_authenticated ? 'synchronised (NTS)' : 'synchronised') : 'not synchronised'}</span>`}>
       <p class="muted">Certificate dates, EST and MQTT brokers checked against a CA need the time; the gateway has no clock of its own.</p>
       <div class="row">
         <${Field} label="NTP server"><input value=${server} placeholder="automatic" onInput=${(e) => setServer(e.target.value)} /><//>
       </div>
-      <p class="muted">Empty: the server DHCPv6 names, else pool.ntp.org. In use: ${d.ntp_server_in_use}</p>
+      <p class="muted">Empty: the server DHCPv6 names, else pool.ntp.org. <code>nts://host</code> authenticates the time with NTS (e.g. <code>nts://ptbtime1.ptb.de</code>); its certificate is checked against the trusted CAs. In use: ${d.ntp_server_in_use}</p>
+      ${d.nts && html`<p class="muted">NTS: ${d.nts.cookies} cookies${d.nts.last_key_exchange ? ` · key exchange ${d.nts.last_key_exchange}` : ''}${d.nts.last_answer ? ` · last answer ${d.nts.last_answer}` : ''}${d.nts.error ? html` · <span class="badge warn">${d.nts.error}</span>` : ''}</p>`}
       <div class="buttons"><${Button} onClick=${save}>Save<//></div>
     <//>`;
 }

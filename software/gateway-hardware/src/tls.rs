@@ -13,6 +13,10 @@
 //!   broker URI (SAN DNS name, or IP address for an address), be valid now
 //!   (so the time must be known, from SNTP) and allow `serverAuth`. MbedTLS
 //!   checks the chain ([`verify_chain`]); the host name is also sent as SNI.
+//!   NTS-KE ([`crate::nts`]) checks its server the same way, but after
+//!   the handshake ([`Trust::Later`]), and before the time is known only
+//!   rules out certificates that expired before the firmware was built
+//!   ([`Dates::NowOrBuildTime`]).
 //! - **Any certificate** with `mqtt-insecure on`.
 //!
 //! A broker on the LAN often has a self-signed certificate, so there's no
@@ -58,6 +62,8 @@ use embedded_tls::{
 };
 use esp_hal::rng::{Trng, TrngSource};
 use gateway_core::tls_pin;
+use gateway_core::x509::cert::Certificate;
+use gateway_core::x509::check::{check_dates, Clock};
 use heapless::{String, Vec};
 use mbedtls_rs::sys as mbedtls;
 // embedded-tls 0.19 and rsa 0.9 are still on sha2 0.10 (digest 0.10): the
@@ -81,17 +87,39 @@ pub type Connection<'a> = TlsConnection<'a, TcpSocket<'a>, Aes128GcmSha256>;
 pub enum Trust<'a> {
     /// It has to verify against exactly this pinned certificate (DER).
     Pinned(&'a [u8]),
-    /// Its chain has to lead to one of `roots` and name `host`; why it
-    /// didn't is left in `problems` ([`ChainProblems`]).
+    /// Its chain has to lead to one of `roots`, name `host` and be valid
+    /// by `dates`; why it didn't is left in `problems` ([`ChainProblems`]).
     Authority {
         roots: &'a Trusted,
         host: &'a str,
+        dates: Dates,
         problems: &'a mut u32,
+    },
+    /// The server has to prove it holds its certificate's key; the chain
+    /// is only kept in `chain` (DER, concatenated, leaf first), for the
+    /// caller to check with [`verify_chain`] before it uses anything the
+    /// server sent. For a server that gives the handshake less time than
+    /// the chain check takes (chrony's NTS-KE: 2 s, a P-384 chain about
+    /// 1.2 s here).
+    Later {
+        host: &'a str,
+        chain: &'a mut alloc::vec::Vec<u8>,
     },
     /// Anything goes: encrypted, but not authenticated.
     AnyCertificate,
     /// Anything goes, and the certificate is copied into the given buffer.
     Capture(&'a mut Vec<u8, CERT_CAP>),
+}
+
+/// How the validity dates of a chain are checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dates {
+    /// Valid now: the time must be known (SNTP).
+    Now,
+    /// Valid now if the time is known; before that, not expired before the
+    /// firmware was built. For NTS-KE, which is what sets the time: like
+    /// chrony's `nocerttimecheck` for the first synchronisation.
+    NowOrBuildTime,
 }
 
 /// Switches on the hardware random number generator's true-random mode.
@@ -121,10 +149,26 @@ pub async fn open<'a>(
     write_buffer: &'a mut [u8],
     trust: Trust<'_>,
 ) -> Result<Connection<'a>, TlsError> {
+    open_with_alpn(socket, read_buffer, write_buffer, trust, &[]).await
+}
+
+/// [`open`], offering the application protocols `alpn` (none if empty).
+pub async fn open_with_alpn<'a>(
+    socket: TcpSocket<'a>,
+    read_buffer: &'a mut [u8],
+    write_buffer: &'a mut [u8],
+    trust: Trust<'_>,
+    alpn: &'static [&'static [u8]],
+) -> Result<Connection<'a>, TlsError> {
     let mut connection = Connection::new(socket, read_buffer, write_buffer);
-    // RSA signatures are offered, or an RSA broker would end the handshake
+    // RSA signatures are offered, or an RSA server would end the handshake
     // right away.
     let config = TlsConfig::new().enable_rsa_signatures();
+    let config = if alpn.is_empty() {
+        config
+    } else {
+        config.with_alpn(alpn)
+    };
     let rng = Trng::try_new().map_err(|_| TlsError::InternalError)?;
 
     match trust {
@@ -139,6 +183,7 @@ pub async fn open<'a>(
         Trust::Authority {
             roots,
             host,
+            dates,
             problems,
         } => {
             // The host name as SNI (an address isn't sent, RFC 6066), so
@@ -153,8 +198,21 @@ pub async fn open<'a>(
                 verifier: KeyVerifier::new(Check::Authority {
                     roots,
                     host,
+                    dates,
                     problems,
                 }),
+            };
+            connection.open(TlsContext::new(&config, provider)).await?;
+        }
+        Trust::Later { host, chain } => {
+            let config = if host.parse::<core::net::IpAddr>().is_ok() {
+                config
+            } else {
+                config.with_server_name(host)
+            };
+            let provider = KeyProvider {
+                rng,
+                verifier: KeyVerifier::new(Check::Later(chain)),
             };
             connection.open(TlsContext::new(&config, provider)).await?;
         }
@@ -276,8 +334,11 @@ enum Check<'a> {
     Authority {
         roots: &'a Trusted,
         host: &'a str,
+        dates: Dates,
         problems: &'a mut u32,
     },
+    /// None now: the chain is kept for later ([`Trust::Later`]).
+    Later(&'a mut alloc::vec::Vec<u8>),
 }
 
 /// Accepts a server whose certificate passes the [`Check`] and which proves
@@ -325,15 +386,24 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
             Check::Authority {
                 roots,
                 host,
+                dates,
                 problems,
             } => {
                 let chain = cert.entries.iter().filter_map(|entry| match entry {
                     CertificateEntryRef::X509(der) => Some(*der),
                     _ => None,
                 });
-                if let Err(found) = verify_chain(chain, roots.iter(), host) {
+                if let Err(found) = verify_chain(chain, roots.iter(), host, *dates) {
                     **problems = found;
                     return Err(TlsError::InvalidCertificate);
+                }
+            }
+            Check::Later(kept) => {
+                kept.clear();
+                for entry in cert.entries.iter() {
+                    if let CertificateEntryRef::X509(der) = entry {
+                        kept.extend_from_slice(der);
+                    }
                 }
             }
         }
@@ -403,10 +473,10 @@ const SERVER_AUTH: &[u8] = &[0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
 /// Checks a server's certificate chain (DER, leaf first) with MbedTLS, as
 /// its TLS client would: signatures up to one of `roots`, every certificate
 /// valid at the current time (from SNTP: without it MbedTLS refuses the
-/// dates), the leaf naming `host` (SAN DNS name, or SAN IP address for an
-/// address) and allowed for `digitalSignature` and `serverAuth` (where it
-/// says). Returns MbedTLS' `MBEDTLS_X509_BADCERT_*` flags on failure,
-/// see [`ChainProblems`].
+/// dates, see [`Dates`]), the leaf naming `host` (SAN DNS name, or SAN IP
+/// address for an address) and allowed for `digitalSignature` and
+/// `serverAuth` (where it says). Returns MbedTLS' `MBEDTLS_X509_BADCERT_*`
+/// flags on failure, see [`ChainProblems`].
 ///
 /// The certificates aren't copied, only MbedTLS' parsed view of them is on
 /// the heap while this runs.
@@ -414,6 +484,7 @@ pub fn verify_chain<'a>(
     chain: impl Iterator<Item = &'a [u8]>,
     roots: impl Iterator<Item = &'a [u8]>,
     host: &str,
+    dates: Dates,
 ) -> Result<(), u32> {
     let mut name: String<256> = String::new();
     if name.push_str(host).is_err() || name.push('\0').is_err() {
@@ -423,8 +494,9 @@ pub fn verify_chain<'a>(
         .map_err(|_| mbedtls::MBEDTLS_X509_BADCERT_CN_MISMATCH)?;
 
     let mut presented = Certificates::new();
+    let mut presented_der: Vec<&[u8], 8> = Vec::new();
     for der in chain {
-        if !presented.add(der) {
+        if !presented.add(der) || presented_der.push(der).is_err() {
             return Err(mbedtls::MBEDTLS_X509_BADCERT_OTHER);
         }
     }
@@ -436,25 +508,48 @@ pub fn verify_chain<'a>(
     }
 
     let mut flags = 0u32;
-    // SAFETY: both lists were set up by `Certificates` and outlive the
-    // call; `name` is NUL-terminated; MbedTLS writes only `flags`.
-    let result = unsafe {
-        mbedtls::mbedtls_x509_crt_verify(
-            presented.as_mut_ptr(),
-            trusted.as_mut_ptr(),
-            core::ptr::null_mut(),
-            name.as_ptr(),
-            &mut flags,
-            None,
-            core::ptr::null_mut(),
-        )
+    let mut verify = || {
+        // SAFETY: both lists were set up by `Certificates` and outlive the
+        // call; `name` is NUL-terminated; MbedTLS writes only `flags`.
+        unsafe {
+            mbedtls::mbedtls_x509_crt_verify(
+                presented.as_mut_ptr(),
+                trusted.as_mut_ptr(),
+                core::ptr::null_mut(),
+                name.as_ptr(),
+                &mut flags,
+                None,
+                core::ptr::null_mut(),
+            )
+        }
+    };
+    let before_time = dates == Dates::NowOrBuildTime && crate::wall_clock::now().is_none();
+    // Without a time MbedTLS doesn't check the chain at all: it checks it
+    // at the build time then, and the dates are looked at below.
+    let result = if before_time {
+        crate::wall_clock::assuming(crate::wall_clock::build_time(), verify)
+    } else {
+        verify()
     };
     if result != 0 {
-        return Err(if flags == 0 {
-            mbedtls::MBEDTLS_X509_BADCERT_OTHER
-        } else {
-            flags
-        });
+        if flags == 0 {
+            return Err(mbedtls::MBEDTLS_X509_BADCERT_OTHER);
+        }
+        // At the build time a certificate issued since is not yet valid,
+        // and one that expired since still valid. If that is all, check
+        // what can be checked.
+        const DATES: u32 =
+            mbedtls::MBEDTLS_X509_BADCERT_EXPIRED | mbedtls::MBEDTLS_X509_BADCERT_FUTURE;
+        if !before_time || flags & !DATES != 0 {
+            return Err(flags);
+        }
+        let clock = Clock::AtLeast(crate::wall_clock::build_time());
+        for der in &presented_der {
+            let current = Certificate::parse(der).is_some_and(|c| check_dates(&c, clock).is_ok());
+            if !current {
+                return Err(mbedtls::MBEDTLS_X509_BADCERT_EXPIRED);
+            }
+        }
     }
 
     // What MbedTLS' own TLS client checks of the leaf besides the chain.

@@ -368,6 +368,8 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         }
 
+        crate::ethernet::wait_ready().await;
+
         let Some(address) = gateway_core::helper::parse_broker_uri(&settings.uri) else {
             console_log!("mqtt{broker}: invalid broker uri \"{}\"", settings.uri);
             Timer::after(Duration::from_secs(10)).await;
@@ -401,10 +403,12 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                     address.host,
                 );
                 // Wake up early if the user asks to pin the certificate now,
-                // or changes the settings (trusts a CA, say).
+                // or changes the settings (trusts a CA, say), or when the
+                // time becomes known.
                 for _ in 0..30 {
                     if TRUST_REQUESTED[slot].load(Ordering::Relaxed)
                         || RECONNECT[slot].try_take().is_some()
+                        || (!roots.is_empty() && crate::wall_clock::now().is_some())
                     {
                         break;
                     }
@@ -446,6 +450,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             Trust::Authority {
                 roots,
                 host: address.host,
+                dates: tls::Dates::Now,
                 problems: &mut problems,
             }
         } else {

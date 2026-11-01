@@ -39,7 +39,8 @@ use embassy_net::{
 };
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
+use embassy_sync::watch::Watch;
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal::ethernet::clock::ApllClock;
 use esp_hal::ethernet::phy::generic::GenericPhy;
 use esp_hal::ethernet::{Ethernet, EthernetDmaStorage, RmiiPinBundle};
@@ -270,6 +271,11 @@ async fn net_task(mut runner: Runner<'static, EthDriver>) {
 pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> Stack<'static> {
     let mut dhcp = embassy_net::DhcpConfig::default();
     dhcp.hostname = heapless::String::try_from(hostname).ok();
+    // The first DISCOVER often goes out while the switch port is still
+    // coming up and is lost; smoltcp's default is to try again only after
+    // 10 s, which held up everything that needs the network.
+    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(2);
+    dhcp.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(2);
 
     let resources = NET_RESOURCES.init(StackResources::new());
     let seed = embassy_time::Instant::now().as_ticks();
@@ -281,8 +287,83 @@ pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> St
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(address_log_task(stack).unwrap());
     spawner.spawn(info_task(stack).unwrap());
+    spawner.spawn(ready_task(stack).unwrap());
     STARTED.store(true, Ordering::Relaxed);
     stack
+}
+
+/// Whether the network is ready, see [`wait_ready`].
+static READY: Watch<CriticalSectionRawMutex, bool, 8> = Watch::new_with(false);
+/// Once one IP version is configured, how long to wait for the other: a
+/// network may have only one.
+const READY_GRACE: Duration = Duration::from_secs(5);
+
+/// Waits until the network is ready: the link is up with a DHCPv4 lease
+/// and a global IPv6 address (SLAAC or DHCPv6), or with one of the two
+/// and [`READY_GRACE`] has passed without the other. What connects to
+/// servers starts here, so that its first attempt doesn't go out before
+/// the addresses and routes are there (and then waits for its retry).
+pub async fn wait_ready() {
+    match READY.receiver() {
+        Some(mut receiver) => {
+            receiver.get_and(|&ready| ready).await;
+        }
+        // More waiters than receivers: look now and then.
+        None => {
+            while READY.try_get() != Some(true) {
+                Timer::after(Duration::from_millis(200)).await;
+            }
+        }
+    }
+}
+
+fn has_global_ipv6(stack: Stack<'_>) -> bool {
+    stack
+        .ipv6_addresses()
+        .iter()
+        .any(|cidr| !cidr.address().is_unicast_link_local())
+}
+
+#[embassy_executor::task]
+async fn ready_task(stack: Stack<'static>) {
+    let sender = READY.sender();
+    loop {
+        stack.wait_link_up().await;
+        // The addresses arrive without an event of their own (SLAAC, the
+        // DHCPv6 lease): look for them every 100 ms.
+        let mut first = None;
+        let (v4, v6) = loop {
+            let (v4, v6) = (stack.config_v4().is_some(), has_global_ipv6(stack));
+            if v4 && v6 {
+                break (v4, v6);
+            }
+            if v4 || v6 {
+                let since = *first.get_or_insert_with(Instant::now);
+                if since.elapsed() >= READY_GRACE {
+                    break (v4, v6);
+                }
+            }
+            if !stack.is_link_up() {
+                first = None;
+            }
+            Timer::after(Duration::from_millis(100)).await;
+        };
+        let uptime = Instant::now().as_millis();
+        console_log!(
+            "network: ready after {}.{} s ({})",
+            uptime / 1000,
+            uptime % 1000 / 100,
+            match (v4, v6) {
+                (true, true) => "IPv4 and IPv6",
+                (true, false) => "IPv4 only",
+                _ => "IPv6 only",
+            }
+        );
+        sender.send(true);
+        embassy_futures::select::select(stack.wait_link_down(), stack.wait_config_down()).await;
+        sender.send(false);
+        console_log!("network: not ready");
+    }
 }
 
 /// Logs when the DHCP lease arrives or is lost — the only visible sign that
