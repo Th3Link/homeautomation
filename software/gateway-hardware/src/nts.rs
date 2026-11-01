@@ -32,6 +32,7 @@ use embassy_time::{with_deadline, with_timeout, Duration, Instant};
 use embedded_io_async::Write as _;
 use esp_hal::rng::Trng;
 use gateway_core::nts::{self, AnswerError, Cookies, KeError, Keys, Sent, NAME_CAP};
+use gateway_core::x509::cert::split_concatenated;
 use heapless::String;
 
 /// For the key exchange: connecting, the handshake, the answer.
@@ -195,6 +196,12 @@ async fn key_exchange(
         return Err("cannot resolve the name");
     }
 
+    // One TLS session at a time, with the web server and the EST client:
+    // the handshake's future, its buffers and the certificate check are
+    // another ~25 KB of heap. Taken before connecting: chrony gives a
+    // session 2 s from the connection on, there's no time to wait for it
+    // in between.
+    let _slot = crate::https::slot().await;
     // On the heap, for the moment it takes. The handshake's messages and
     // the request are small, the answer is under a kilobyte; only the
     // server's flight with its certificates needs a large record buffer.
@@ -206,17 +213,11 @@ async fn key_exchange(
         console_log!("nts: {host}:{port}: {e:?}");
         return Err("cannot connect");
     }
-
-    // One TLS session at a time, with the web server and the EST client:
-    // the handshake's future, its buffers and the certificate check are
-    // another ~25 KB of heap. Taken only now, so that a server that doesn't
-    // answer doesn't hold up the web server.
-    let _slot = crate::https::slot().await;
     crate::heap::boxed(|| handshake(socket, &roots, host, port)).await
 }
 
 /// NTS-KE over the connected `socket`: TLS, the request, the answer, the
-/// keys.
+/// keys; then the server's certificate chain.
 async fn handshake(
     socket: TcpSocket<'_>,
     roots: &Trusted,
@@ -226,12 +227,13 @@ async fn handshake(
     let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
     let mut write_record = alloc::vec![0u8; 1024];
 
-    let mut problems = 0;
-    let trust = Trust::Authority {
-        roots,
+    // The chain is checked once the server has answered: chrony gives the
+    // whole session 2 s, the check alone takes over one. Until then
+    // nothing the server sent is used.
+    let mut chain = alloc::vec::Vec::new();
+    let trust = Trust::Later {
         host,
-        dates: Dates::NowOrBuildTime,
-        problems: &mut problems,
+        chain: &mut chain,
     };
     const ALPN: &[&[u8]] = &[nts::ALPN];
     let opened = with_timeout(
@@ -242,10 +244,6 @@ async fn handshake(
     let mut connection = match opened {
         Ok(Ok(connection)) => connection,
         Ok(Err(e)) => {
-            if problems != 0 {
-                console_log!("nts: {host}: certificate {}", ChainProblems(problems));
-                return Err("the server's certificate isn't trusted");
-            }
             console_log!("nts: {host}: TLS handshake failed: {e:?}");
             return Err("TLS handshake failed");
         }
@@ -298,6 +296,16 @@ async fn handshake(
             .map_err(|_| "no keys")?;
     }
     let _ = with_deadline(deadline, connection.close()).await;
+
+    if let Err(problems) = tls::verify_chain(
+        split_concatenated(&chain),
+        roots.iter(),
+        host,
+        Dates::NowOrBuildTime,
+    ) {
+        console_log!("nts: {host}: certificate {}", ChainProblems(problems));
+        return Err("the server's certificate isn't trusted");
+    }
 
     let ntp_host = match response.server {
         Some(server) => server,
