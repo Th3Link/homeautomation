@@ -5,10 +5,11 @@ there is room left.
 
 **Measured on** the integration build of 2026-11-01: `main` with the
 branches `feat/ca-trust-store`, `feat/tls-key-pin`, `feat/ha-discovery` and
-`feat/nts` (firmware `release/1.4-194-ge033598`). Static sizes are from the
-ELF (`xtensa-esp32-elf-size -A`, `nm -S`, a linker map); run-time figures
-are from `GET /api/v1/system` on the test gateway after 75 minutes, with
-HTTPS, MQTT over TLS and NTS in use. CI tracks static DRAM and the stack
+`feat/nts`, the smaller console future and the MQTT buffers in SRAM1
+(firmware `release/1.4-199`). Static sizes are from the ELF
+(`xtensa-esp32-elf-size -A`, `nm -S`, a linker map); run-time figures are
+from `GET /api/v1/system` on the test gateway, with HTTPS, MQTT over TLS
+and NTS in use. CI tracks static DRAM and the stack
 budget per commit (`.github/scripts/memory_report.py`).
 
 ## The chip's RAM
@@ -33,16 +34,18 @@ SRAM0  0x4007_0000  flash cache (PRO + APP)                    64 KB
 
 SRAM2  0x3FFA_E000  reserved for the ROM (esp-hal)               8 KB
        0x3FFB_0000  .data                                      16.6 KB
-       0x3FFB_4288  .bss                                      138.2 KB
-       0x3FFD_6B74  main stack (grows down to here)            37.1 KB
+       0x3FFB_4288  .bss                                      101.8 KB
+       0x3FFC_D98C  main stack (grows down to here)            73.6 KB
        0x3FFE_0000
 
 SRAM1  0x3FFE_0000  ROM data, PRO CPU                           1.1 KB
-       0x3FFE_0440  -- unused --                                3.7 KB
-       0x3FFE_1320  ROM stack, PRO CPU (boot only)               11 KB
+       0x3FFE_0440  MQTT buffers, primary broker                  13 KB
+                    (`.rom_boot_pro_uninit`)
+       0x3FFE_3840  -- unused --                                1.7 KB
        0x3FFE_3F20  ROM data, APP CPU                           1.0 KB
-       0x3FFE_4350  -- unused --                                3.7 KB
-       0x3FFE_5230  ROM stack, APP CPU (never used)              11 KB
+       0x3FFE_4350  MQTT buffers, secondary broker                13 KB
+                    (`.rom_boot_app_uninit`)
+       0x3FFE_7750  -- unused --                                1.7 KB
        0x3FFE_7E30  heap (esp-alloc, `.dram2_uninit`)            94 KB
        0x3FFF_F630  -- unused --                                2.5 KB
 
@@ -55,22 +58,33 @@ from `0x3FFB_0000` to `0x3FFE_0000` (`dram_seg`) hold `.data`, `.bss` and
 then the main stack: **the stack is whatever the statics leave**. Every
 byte a static grows is a byte less stack.
 
-## The statics (`.data` 17,028 B + `.bss` 141,548 B)
+From `0x3FFE_0000` to `0x3FFE_7E30` esp-hal places nothing: the ROM's data
+and the two CPUs' boot stacks. The ROM runs on those stacks only until the
+firmware's entry code switches to its own (PRO CPU), or when the APP CPU is
+started, which the gateway never does. ESP-IDF gives them to its heap once
+it runs and keeps only the ROM's data (`memory_layout.c`:
+`0x3FFE_0000`–`0x3FFE_0440`, `0x3FFE_3F20`–`0x3FFE_4350`). The gateway
+makes them two sections of its own (`gateway-hardware/rom-boot-stacks.x`,
+15,072 B each, not zeroed and not loaded, like `.dram2_uninit`) and puts
+the MQTT buffers there.
+
+## The statics (`.data` 17,028 B + `.bss` 104,196 B, + 26,624 B in SRAM1)
 
 Grouped by owner, largest first. Sizes in bytes.
 
 | What | Size | Notes |
 |---|---:|---|
-| **MQTT** | **68,600** | 48 % of `.bss` |
-| `mqtt::BUFFERS` | 33,808 | Per broker slot (2): TCP 2 + 2 KiB, TLS read record 8 KiB, write record 2.5 KiB, certificate capture 2 KiB. Static even for a slot that is off. |
-| `mqtt::mqtt_task::POOL` | 24,032 | The two task futures, ~12 KB each: a pinned certificate (2 KiB), the client's bump buffer (2 KiB), the configuration, the TLS connection's state. |
+| **MQTT** | **36,830** | 35 % of `.bss`; see [below](#the-mqtt-buffers-and-why-they-are-that-size) |
+| `mqtt::PRIMARY_BUFFERS`, `SECONDARY_BUFFERS` | (26,624) | In SRAM1, not in `.bss`: 13,312 per broker slot, static even for a slot that is off. |
+| `mqtt::mqtt_task::POOL` | 24,032 | The two task futures, ~12 KB each: a pinned certificate (2 KiB), the client's receive buffer (2 KiB), the configuration, the TLS connection's state. |
 | `mqtt::PUBLISH_QUEUES` | 9,792 | 2 × 16 publications of 96 + 200 bytes. |
+| `mqtt::CAPTURED` | 2,068 | The certificate a capturing connection (`mqtt-trust`) saw; one for both slots. |
 | `mqtt::RETAINED` | 904 | One Home Assistant discovery payload. |
 | **Ethernet and IP** | **28,700** | |
 | `ethernet::DMA_STORAGE` | 18,676 | 8 RX + 4 TX buffers of 1,536 B and their descriptors. Must be DMA-capable RAM. |
 | `ethernet::NET_RESOURCES` | 8,736 | smoltcp's 14 socket slots, ~620 B each. |
 | `dhcpv6::STATUS`, `ethernet::INFO`, task futures | ~1,300 | |
-| **Console** | **12,264** | `console_task::POOL`: the line editor 2.2 KB; `handle_command` 9.9 KB, of which 4.6 KB are the 160-byte reply strings of its ~28 arms, each in a slot of its own (see below); `show` 5.3 KB, of which 2 KB are such strings and 2.5 KB the configuration load. |
+| **Console** | **6,648** | `console_task::POOL`: the line editor 2.2 KB; `handle_command` 4.3 KB, mostly `cert::update_settings` (two copies of the settings across the certificate's generation). |
 | **Devices and sensors** | **11,300** | `device_list::DEVICE_LIST` 6,820 (100 devices), `sensor_list` 2,416, `can_update::SESSION` 1,068, CAN channel and receive task 1,000. |
 | **`.data` constants** | **10,215** | Switch tables (7,467) and merged constants (2,748), placed in RAM by esp-hal's `place-switch-tables-in-ram` (default on). |
 | **Web server and HTTPS** | **7,300** | `https::SLOT` 3,600 (the HTTP and response buffers of the one TLS session), `web::json::BUFFER` 3,088, the listener tasks' futures (their buffers are on the heap). |
@@ -97,17 +111,18 @@ Grouped by owner, largest first. Sizes in bytes.
 Free memory isn't the only limit: a session needs its 16 KiB record
 buffer in one piece, so fragmentation counts.
 
-## Stack (38,028 B)
+## Stack (75,380 B)
 
 Everything runs on the one main stack: the executor, every task's poll,
 MbedTLS's handshake, flash access (see "One main stack for everything" in
 [technical debt](technical-debt.md)).
 
-**Measured: 2,720 B never touched since boot**, i.e. a peak of ~35.3 KB.
-That is the most critical figure on the gateway. On 2026-10-27 the stack
-was 47 KB with ~14 KB to spare. Since then the statics grew by ~9 KB (HA
-discovery, NTS, the trust store, DHCPv6 status), which took that much from
-the stack, and the peak grew by ~2 KB.
+**Measured: 40,072 B never touched** after 5 minutes, i.e. a peak of
+~35.3 KB. Before the MQTT buffers moved to SRAM1 the stack was 43.6 KB, and
+with the larger console future before that 38 KB with only 2,720 B never
+touched after 75 minutes. On 2026-10-27 it was 47 KB with ~14 KB to spare;
+then the statics grew by ~9 KB (HA discovery, NTS, the trust store, DHCPv6
+status), which took that much from the stack, and the peak grew by ~2 KB.
 
 Directly below the stack are MbedTLS's globals (the cipher suite list, the
 ECP state). An overflow overwrites them before it reaches esp-hal's stack
@@ -119,44 +134,62 @@ how deep, not where.
 
 | Size | Value | Why it matters |
 |---|---:|---|
-| Stack margin | 2.7 KB | See above. A larger future or a deeper call in a handler crashes the gateway. |
+| Stack margin | 40 KB | See above. Was 2.7 KB; every byte of statics in SRAM2 takes one from it. |
 | Free heap during HTTPS | 25 KB | A second large user (EST, NTS key exchange) has to wait for the slot; anything outside the slot must fit here, in pieces. |
 | MbedTLS record in/out | 16 / 8 KiB | Browsers send full 16 KiB records (firmware upload); the certificate chain must fit in one 8 KiB message. |
-| MQTT TLS read record | 8 KiB | A broker's whole certificate chain must arrive in one record. |
+| MQTT TLS read record | 8 KiB | A broker's whole certificate chain must arrive in one record (4.1 KB measured). |
+| MQTT receive buffer | 2 KiB | The largest MQTT packet the gateway takes; the broker drops larger ones for it. |
 | Config store item | 2 KiB | One setting or pinned certificate; longer values (certificate chains) are split over several items. |
+
+## The MQTT buffers, and why they are that size
+
+Each broker slot has 13,312 B in SRAM1:
+
+| Buffer | Size | Why |
+|---|---:|---|
+| TCP receive window | 2 KiB | More than one segment (1,460 B); a TLS record arrives in several. Smaller, and the broker sends smaller segments. |
+| TCP send buffer | 2 KiB | Takes a whole TLS record (1 KiB) and the next. |
+| TLS read record | 8 KiB | embedded-tls decrypts a record as a whole and doesn't put a handshake message together from several records. The largest record is the broker's certificate chain: 4,119 B measured for Mosquitto with a Let's Encrypt chain of three RSA certificates (1,300 + 1,246 + 1,528 B DER). 8 KiB leaves room for a longer chain (an RSA-4096 intermediate, a fourth certificate). The maximum fragment length extension (RFC 6066) doesn't help: the broker would then split the chain over several records, which embedded-tls can't read. |
+| TLS write record | 1 KiB | The ClientHello (some 250 B) and MQTT packets. embedded-tls keeps 128 B for the record's overhead and splits longer writes into several records. The NTS key exchange uses the same size. |
+
+And elsewhere:
+
+| Buffer | Size | Why |
+|---|---:|---|
+| The client's receive buffer (in the task's future) | 2 KiB | rust-mqtt keeps the topic and payload of a received PUBLISH there; it is given back before each next packet. The gateway tells the broker (MQTT 5's maximum packet size), which drops a larger message for it: commands are under 100 B. |
+| `CAPTURED` | 2 KiB | The largest certificate that can be pinned (`tls::CERT_CAP`); one for both slots. |
+| `PUBLISH_QUEUES` | 2 × 16 × 306 B | A topic of up to 96 B, a body of up to 200 B. Only the primary broker's queue is used. |
+| `RETAINED` | 904 B | One Home Assistant discovery payload (768 B) and its topic. |
 
 ## Room for improvement
 
-Ordered by what it does for the stack. Nothing here puts more on the heap:
+Ordered by what it did or does for the stack. Nothing here puts more on the heap:
 the heap stays for what can't do without it (MbedTLS allocates its
 session state, picoserve's per-connection futures are boxed so they don't
 take stack). Sizes stay fixed at link time.
 
-1. **Futures that waste their space: ~7 KB in the console alone.** rustc
+1. **Futures that waste their space. Done for the console (12.2 → 6.6
+   KB).** rustc
    gives every temporary that lives across an `.await` a slot of its own
    in the future and doesn't share it with the temporaries of other match
    arms or statements. `respond(writer, &fmt_msg(...)).await` keeps a
    160-byte `String` per call site: 28 of them in `handle_command`
    (4.6 KB), 13 in `show` (2 KB). One reply variable per function (`let
    reply = match ... ; respond(writer, &reply).await`) or writing straight
-   into the UART with `core::fmt` brings the console from 12.2 KB to ~5 KB.
+   into the UART with `core::fmt` brings the console from 12.2 KB to ~5 KB;
+   passing the reply by value (`respond(writer, fmt_msg(...))`) does too.
    `-Zprint-type-sizes` shows these layouts (`padding` between the slots);
    the MQTT task (12 KB each) and the port-80 redirect (7.7 KB for an
    answer of a few lines) are worth the same look.
-2. **Large static buffers into SRAM1: +52.5 KB stack.** The MQTT buffers
-   (33.8 KB) and the Ethernet DMA buffers (18.7 KB) don't have to be in
-   SRAM2. Placed in `.dram2_uninit` (`#[link_section]`, like the heap
-   today; not zeroed at boot, so they are initialised once in `main`) they
-   leave SRAM2 to the stack. The heap shrinks by as much, which the next
-   point gives back.
-3. **Reclaim the ROM areas: +35.7 KB.** ESP-IDF uses them on the ESP32,
-   keeping only the ROM's data (`memory_layout.c`): `0x3FFA_E6E0`–
-   `0x3FFB_0000` (6,432 B), `0x3FFE_0440`–`0x3FFE_3F20` (15,072 B, the PRO
-   CPU's boot stack) and `0x3FFE_4350`–`0x3FFE_7E30` (15,072 B, the APP
-   CPU's stack, never used; it adjoins `.dram2_uninit`). Either as heap
-   regions (esp-alloc takes three, `HEAP.add_region`) to keep the heap at
-   94 KB after point 2, or with linker sections of our own for more
-   statics. Plus the unused 2.5 KB after the heap.
+2. **Large static buffers into SRAM1. Done for MQTT: +31.7 KB.** The MQTT
+   buffers fill the ROM's boot stacks (see the map). The Ethernet DMA
+   buffers (18.7 KB) could follow into `.dram2_uninit`; the heap would
+   shrink by as much, so only with a heap region somewhere else.
+3. **The rest of the ROM areas: +9.9 KB.** `0x3FFA_E6E0`–`0x3FFB_0000`
+   (6,432 B; ESP-IDF keeps only `0x3FFA_E000`–`0x3FFA_E6E0` for the ROM),
+   1.7 KB behind each set of MQTT buffers, 2.5 KB after the heap. As a
+   heap region (esp-alloc takes three, `HEAP.add_region`) or for small
+   statics.
 4. **Smaller MQTT task futures: up to +20 KB.** Each holds a pinned
    certificate (2 KiB), the client's 2 KiB bump buffer, the configuration
    and the TLS state for the whole session, also in a slot that is off.
@@ -169,7 +202,8 @@ take stack). Sizes stay fixed at link time.
    for the device list (6.8 KB), RTC SLOW (8 KB) for things read rarely,
    such as `ha::PUBLISHED`. Needs a check that they start zeroed.
 7. **Small items: ~+8 KB.** One publish queue of 16 for the primary broker
-   and a short one for the secondary (−4.9 KB); `main` keeps only the
+   and a short one for the secondary (−4.9 KB; nothing ever queues for the
+   secondary broker today); `main` keeps only the
    fields of the configuration it needs (−3 KB); fewer smoltcp socket
    slots if the count allows; 6 Ethernet RX buffers instead of 8 (−3 KB)
    after a test under load.
