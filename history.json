@@ -251,5 +251,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "f09e749f7fa0354ec3f04973402c5bee5b28f3fb",
+  "date": "2026-11-01T22:44:39+01:00",
+  "subject": "Merge pull request #31 from Th3Link/feat/tls-key-pin",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 422100,
+    "iram": 19008,
+    "dram_static": 36928,
+    "stack_budget": 159676,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443743,
+    "iram": 16036,
+    "dram_static": 36832,
+    "stack_budget": 159772,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
