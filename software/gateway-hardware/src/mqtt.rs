@@ -154,6 +154,19 @@ async fn dispatch_publish(msg: &Publish<'_, 0, 0>) {
     }
 }
 
+/// Gives the client's buffer back for the next packets. The client keeps
+/// what it receives there (the topic and payload of every PUBLISH, reason
+/// strings) and never frees it itself: without this, the next message after
+/// 2 KiB of them doesn't fit, and the connection fails with it.
+///
+/// # Safety
+///
+/// Nothing the client returned before may still be in use.
+unsafe fn forget_received<N: Transport>(client: &mut MqttClient<'_, '_, N>) {
+    // SAFETY: passed on to the caller.
+    unsafe { client.buffer_mut().reset() };
+}
+
 /// Waits for the SUBACK of the SUBSCRIBE with packet identifier `pid`,
 /// still dispatching any message that arrives meanwhile (e.g. a retained
 /// one the broker sends right after subscribing). Returns false if the
@@ -165,6 +178,9 @@ async fn wait_for_suback<N: Transport>(
 ) -> bool {
     let wait = async {
         loop {
+            // SAFETY: the previous event was dropped at the end of the
+            // last iteration.
+            unsafe { forget_received(client) };
             match client.poll().await {
                 Ok(Event::Suback(suback)) if suback.packet_identifier == pid => {
                     if !suback.reason_code.is_success() {
@@ -225,6 +241,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     // Drains this broker's publish queue while polling for incoming
     // messages, dispatching them into `crate::translate`.
     loop {
+        // SAFETY: the previous event was dropped at the end of the last
+        // iteration; the subscription loop above keeps nothing either.
+        unsafe { forget_received(client) };
         match select3(
             PUBLISH_QUEUES[slot].receive(),
             client.poll(),
