@@ -13,9 +13,10 @@
 //!   broker URI (SAN DNS name, or IP address for an address), be valid now
 //!   (so the time must be known, from SNTP) and allow `serverAuth`. MbedTLS
 //!   checks the chain ([`verify_chain`]); the host name is also sent as SNI.
-//!   NTS-KE ([`crate::nts`]) checks its server the same way, except that
-//!   before the time is known it only rules out certificates that expired
-//!   before the firmware was built ([`Dates::NowOrBuildTime`]).
+//!   NTS-KE ([`crate::nts`]) checks its server the same way, but after
+//!   the handshake ([`Trust::Later`]), and before the time is known only
+//!   rules out certificates that expired before the firmware was built
+//!   ([`Dates::NowOrBuildTime`]).
 //! - **Any certificate** with `mqtt-insecure on`.
 //!
 //! A broker on the LAN often has a self-signed certificate, so there's no
