@@ -99,13 +99,14 @@ intentional, not omissions:
 | 16 | `FlashSelect` | 156 | `Ping` |
 | 17 | `FlashErase` | 157 | `PingDisable` |
 | 18 | `FlashRead` | 158 | `Echo` |
-| 19 | `FlashWrite` | 165 | `HeatingCommand` |
-| 20 | `FlashVerify` | 166 | `HeatingState` |
-| 21 | `FlashProgress` | 167 | `SensorConfig` |
-| 22 | `FlashComplete` | 168 | `OtaControl` |
-| 30 | `ButtonEvent` | 169 | `OtaData` |
-| 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 41 | `HwRev` | | |
+| 19 | `FlashWrite` | 159 | `Co2Sensor` |
+| 20 | `FlashVerify` | 165 | `HeatingCommand` |
+| 21 | `FlashProgress` | 166 | `HeatingState` |
+| 22 | `FlashComplete` | 167 | `SensorConfig` |
+| 30 | `ButtonEvent` | 168 | `OtaControl` |
+| 31 | `TemperatureSensor` | 169 | `OtaData` |
+| 41 | `HwRev` | 170 | `GasResistance` |
+| | | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 42 | `ExtensionMode` | | |
 | 43 | `Discovery` | | |
 | 44 | `DiscoveryAck` | | |
@@ -468,7 +469,8 @@ Rust node firmware, `cancomponents-core/src/button_fsm.rs` and
 ## Environmental sensors
 
 Fixed-point readings (`TemperatureSensor`, `PressureSensor`,
-`HumiditySensor`, `Co2Equivalent`, `VocBreath`, `AirQuality`) — 8 bytes:
+`HumiditySensor`, `Co2Equivalent`, `VocBreath`, `AirQuality`, `Co2Sensor`,
+`GasResistance`) — 8 bytes:
 
 ```text
 byte:  0..5               6..7
@@ -501,6 +503,16 @@ BME680's temperature (°C, signed), humidity (%) and pressure (hPa) as
 `TemperatureSensor`, `HumiditySensor` and `PressureSensor` once per send
 interval (`sensor-interval`, default 30 s). `sub_id` is `0x6800_00xx`, the
 low byte the chip's I2C address (0x76 or 0x77): topic id `0x68000077`.
+
+With the same `sub_id` it sends, from its gas sensor:
+- once the air quality calculation is past its warm-up (ADR 0024),
+  `AirQuality` (index 0–500, 0 = clean), `Co2Equivalent` and `VocBreath`
+  (ppm, estimates from VOCs);
+- once per send interval, the last heat-stable gas reading as
+  `GasResistance` (kΩ, the raw resistance), to calibrate that calculation.
+
+An SCD30 on the board (I2C 0x61, optional) sends the measured CO2 (ppm) as
+`Co2Sensor` once per send interval, with `sub_id` `0x3000_0061`.
 
 On the gateway the sensor shows up as `canbus/temperature/<device>/0x<id>`,
 where `<id>` is the low 32 bits of `sub_id` in lowercase hex — for a sensor

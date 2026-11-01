@@ -62,6 +62,10 @@ pub enum CanMessageType {
     Ping = 156,
     PingDisable = 157,
     Echo = 158,
+    /// Measured CO2 (ppm, fixed point like the other sensors), from an NDIR
+    /// sensor such as the SCD30 on a light switch's sensor board. Not
+    /// `Co2Equivalent`, which is estimated from VOCs.
+    Co2Sensor = 159,
     // 160-164 were the first heating messages (target, energy, emergency,
     // manual, manual state), one type each. They are retired: the numbers
     // must not be used again, or a node that was not updated yet would read a
@@ -80,6 +84,9 @@ pub enum CanMessageType {
     OtaControl = 168,
     /// Firmware update in blocks (data side): 8 image bytes per frame.
     OtaData = 169,
+    /// A BME680's raw gas resistance (kΩ, fixed point), to calibrate the air
+    /// quality calculation against.
+    GasResistance = 170,
     /// Not part of the wire protocol. The original C++'s `switch` on
     /// `MSG_ID_t` silently drops unrecognized bytes; representing that as a
     /// typed fallback (rather than refusing to build a [`CanMessageType`]
@@ -144,11 +151,13 @@ mod tests {
             (CanMessageType::Ping, 156),
             (CanMessageType::PingDisable, 157),
             (CanMessageType::Echo, 158),
+            (CanMessageType::Co2Sensor, 159),
             (CanMessageType::HeatingCommand, 165),
             (CanMessageType::HeatingState, 166),
             (CanMessageType::SensorConfig, 167),
             (CanMessageType::OtaControl, 168),
             (CanMessageType::OtaData, 169),
+            (CanMessageType::GasResistance, 170),
         ];
 
         for &(variant, byte) in known {

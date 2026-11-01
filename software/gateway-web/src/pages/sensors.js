@@ -3,9 +3,9 @@ import * as api from '../api.js';
 import { Link } from '../router.js';
 import { html, useLoad, run, ago, Section, Loading, Button } from '../ui.js';
 
-const KINDS = { temperature: 'Temperature', humidity: 'Humidity', pressure: 'Pressure', co2: 'CO₂', voc: 'VOC', air_quality: 'Air quality', brightness: 'Brightness' };
+const KINDS = { temperature: 'Temperature', humidity: 'Humidity', pressure: 'Pressure', co2: 'CO₂ equivalent', voc: 'VOC', air_quality: 'Air quality', co2_measured: 'CO₂', gas_resistance: 'Gas resistance', brightness: 'Brightness' };
 // Decimals shown per kind; brightness comes in whole lux.
-const DECIMALS = { temperature: 2, humidity: 1, pressure: 1, co2: 0, voc: 2, air_quality: 0 };
+const DECIMALS = { temperature: 2, humidity: 1, pressure: 1, co2: 0, voc: 2, air_quality: 0, co2_measured: 0, gas_resistance: 1 };
 export const ROLES = ['none', 'tank0', 'tank1', 'tank2', 'tank3', 'tank4', 'tank5', 'tank6', 'flow'];
 const ROLE_LABELS = { none: '–', flow: 'Flow', ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((n) => [`tank${n}`, `Tank ${n}${n === 0 ? ' (top)' : n === 6 ? ' (bottom)' : ''}`])) };
 export const roleLabel = (role) => ROLE_LABELS[role] || role;
