@@ -25,7 +25,7 @@ use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::tls::{self, Trust};
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select4, Either4};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -72,6 +72,34 @@ pub const SECONDARY: usize = 1;
 /// [`mqtt_task`].
 static PUBLISH_QUEUES: [Channel<CriticalSectionRawMutex, Publication, 16>; MQTT_BROKERS] =
     [Channel::new(), Channel::new()];
+
+/// A retained message too long for [`PUBLISH_QUEUES`]: Home Assistant's
+/// discovery configurations ([`crate::ha`]). One at a time, primary broker
+/// only; the sender waits until it was taken.
+pub struct RetainedPublication {
+    pub topic: String<TOPIC_CAP>,
+    pub body: gateway_core::ha_discovery::Payload,
+}
+
+static RETAINED: Channel<CriticalSectionRawMutex, RetainedPublication, 1> = Channel::new();
+
+/// Publishes `topic`/`body` retained on the primary broker; waits until the
+/// connection took it. False if the broker isn't connected (or the message
+/// doesn't fit).
+pub async fn publish_retained(topic: &str, body: &str) -> bool {
+    if !is_connected(PRIMARY) {
+        return false;
+    }
+    let mut p = RetainedPublication {
+        topic: String::new(),
+        body: gateway_core::ha_discovery::Payload::new(),
+    };
+    if p.topic.push_str(topic).is_err() || p.body.push_str(body).is_err() {
+        return false;
+    }
+    RETAINED.send(p).await;
+    true
+}
 
 /// Set to make a slot's task drop its connection and connect again (with
 /// whatever configuration is stored by then), see [`reconnect`].
@@ -143,6 +171,7 @@ const SUBSCRIBE_TOPICS: &[&str] = &[
     "canbus/heating_emergency_command/#",
     "canbus/debug/#",
     "canbus/gateway/restart",
+    gateway_core::ha_discovery::STATUS_TOPIC,
 ];
 
 /// Hands one received PUBLISH to the CAN/MQTT translation.
@@ -218,21 +247,50 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     // Anything queued while this broker wasn't connected is stale by now.
     while PUBLISH_QUEUES[slot].try_receive().is_ok() {}
     if slot == PRIMARY {
+        while RETAINED.try_receive().is_ok() {}
         crate::translate::publish_self_available(slot).await;
     }
     CONNECTED[slot].store(true, Ordering::Relaxed);
+    if slot == PRIMARY {
+        // The broker may have lost the retained configurations.
+        crate::ha::republish().await;
+    }
 
     // Drains this broker's publish queue while polling for incoming
     // messages, dispatching them into `crate::translate`.
     loop {
-        match select3(
+        let retained = async {
+            if slot == PRIMARY {
+                RETAINED.receive().await
+            } else {
+                core::future::pending().await
+            }
+        };
+        match select4(
             PUBLISH_QUEUES[slot].receive(),
             client.poll(),
             RECONNECT[slot].wait(),
+            retained,
         )
         .await
         {
-            Either3::First(publication) => {
+            Either4::Fourth(publication) => {
+                let Ok(topic_string) = MqttString::from_str(publication.topic.as_str()) else {
+                    continue;
+                };
+                let Some(topic_name) = TopicName::new(topic_string) else {
+                    continue;
+                };
+                let options = PublicationOptions::new(TopicReference::Name(topic_name)).retain();
+                if client
+                    .publish(&options, publication.body.as_str().into())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Either4::First(publication) => {
                 let Ok(topic_string) = MqttString::from_str(publication.topic.as_str()) else {
                     continue;
                 };
@@ -248,9 +306,9 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
                     break;
                 }
             }
-            Either3::Second(Ok(Event::Publish(msg))) => dispatch_publish(&msg).await,
-            Either3::Second(Ok(_)) => {}
-            Either3::Second(Err(_)) | Either3::Third(()) => break,
+            Either4::Second(Ok(Event::Publish(msg))) => dispatch_publish(&msg).await,
+            Either4::Second(Ok(_)) => {}
+            Either4::Second(Err(_)) | Either4::Third(()) => break,
         }
     }
     CONNECTED[slot].store(false, Ordering::Relaxed);

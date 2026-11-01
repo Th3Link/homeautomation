@@ -47,6 +47,9 @@ pub enum Key {
     /// but not authenticated), per broker.
     MqttTlsInsecure = 21,
     Mqtt2TlsInsecure = 22,
+    /// Publish Home Assistant discovery configurations
+    /// ([`crate::ha_discovery`]) on the primary broker.
+    HomeAssistant = 23,
 }
 
 /// How many MQTT brokers the gateway talks to at the same time.

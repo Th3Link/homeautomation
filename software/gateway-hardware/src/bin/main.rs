@@ -9,7 +9,7 @@ use esp_hal::timer::timg::TimerGroup;
 use gateway_hardware::config::LoadOrInit;
 use gateway_hardware::ethernet::EthernetPins;
 use gateway_hardware::{
-    can, cert, config, console, console_log, dhcpv6, ethernet, flash, https, mqtt, update,
+    can, cert, config, console, console_log, dhcpv6, ethernet, flash, ha, https, mqtt, update,
     wall_clock, web,
 };
 
@@ -117,6 +117,7 @@ async fn main(spawner: Spawner) -> ! {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
         spawner.spawn(dhcpv6::dhcpv6_task(stack).unwrap());
+        ha::init(&spawner).await;
         spawner.spawn(wall_clock::sntp_task(stack).unwrap());
         spawner.spawn(cert::manager_task(stack).unwrap());
         web::spawn(&spawner, stack, cert::https_enabled().await);

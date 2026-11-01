@@ -12,7 +12,22 @@ export function Mqtt() {
   if (!data) return html`<${Loading} error=${error} />`;
   return html`
     <${Broker} slot="primary" b=${data.primary} reload=${reload} />
-    <${Broker} slot="secondary" b=${data.secondary} reload=${reload} />`;
+    <${Broker} slot="secondary" b=${data.secondary} reload=${reload} />
+    <${HomeAssistant} on=${data.home_assistant} reload=${reload} />`;
+}
+
+// Home Assistant's MQTT discovery: the gateway describes the devices it
+// has seen on the primary broker, so they appear in Home Assistant.
+function HomeAssistant({ on, reload }) {
+  const toggle = async (e) => {
+    const value = e.target.checked;
+    if (await run(() => api.mqtt.updateAll({ home_assistant: value }), value ? 'Home Assistant discovery on' : 'Home Assistant discovery off')) reload();
+  };
+  return html`
+    <${Section} title="Home Assistant">
+      <label class="check"><input type="checkbox" checked=${on} onChange=${toggle} /> Publish discovery configurations (homeassistant/…) on the primary broker</label>
+      <p class="muted">Sensors, presence sensors and buttons of every device the gateway has seen then appear in Home Assistant by themselves; buttons as device triggers (single, double, triple, hold, release). Relays, rollershutters and lamps aren't described yet. Switching it off stops new configurations; what was published stays until removed in Home Assistant.</p>
+    <//>`;
 }
 
 function Broker({ slot, b, reload }) {

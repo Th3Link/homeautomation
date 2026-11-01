@@ -58,6 +58,8 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | Route | |
 |---|---|
 | `GET /mqtt` | `{"primary": {...}, "secondary": {...}}` |
+| `GET /mqtt` | both brokers (`primary`, `secondary`, each as below) and `home_assistant`: whether Home Assistant discovery is on ([ADR 0022](adr/0022-home-assistant-discovery.md)) |
+| `PATCH /mqtt` | `home_assistant` (`true`/`false`); the answer is the new state |
 | `GET /mqtt/:slot` | `slot`, `enabled`, `uri`, `user`, `password_set`, `tls_insecure`, `certificate_pinned`, `connected` |
 | `PATCH /mqtt/:slot` | `enabled`, `uri` (`mqtt://host[:1883]` or `mqtts://host[:8883]`), `user`, `password` (8+ characters, or `""`), `tls_insecure`. The broker reconnects with the new settings; the answer is the new state |
 | `POST /mqtt/:slot/trust` | the next connection pins the certificate the broker presents (`202`) |

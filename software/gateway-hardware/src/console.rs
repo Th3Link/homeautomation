@@ -132,6 +132,11 @@ enum Commands<'a> {
     /// in if HTTPS doesn't work). Takes effect after a restart.
     #[set(one_of = ["on", "off"])]
     WebHttps(OnOff),
+    /// Publish Home Assistant discovery configurations on the first broker,
+    /// so the CAN devices show up in Home Assistant by themselves (off by
+    /// default).
+    #[set(one_of = ["on", "off"])]
+    HaDiscovery(OnOff),
     /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
     /// servers and the time.
     Network,
@@ -354,6 +359,15 @@ async fn handle_command(
             )
             .await
         }
+        Commands::HaDiscovery(v) => {
+            let on = matches!(v, OnOff::On);
+            let text = match crate::ha::set_enabled(on).await {
+                Ok(()) if on => "home assistant discovery on",
+                Ok(()) => "home assistant discovery off (what was published stays)",
+                Err(()) => "failed to persist ha-discovery",
+            };
+            respond(writer, text).await
+        }
         Commands::WebHttps(v) => {
             respond(writer, &cmd_web_https(matches!(v, OnOff::On)).await).await
         }
@@ -455,6 +469,14 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     respond(
         writer,
         &fmt_msg(format_args!("web_username: {}", cfg.web_username)),
+    )
+    .await?;
+    respond(
+        writer,
+        &fmt_msg(format_args!(
+            "ha_discovery: {}",
+            if crate::ha::enabled() { "on" } else { "off" }
+        )),
     )
     .await?;
     respond(

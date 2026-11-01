@@ -34,6 +34,19 @@ impl SensorKind {
         })
     }
 
+    /// The message type that carries this kind.
+    pub fn message(self) -> CanMessageType {
+        match self {
+            Self::Temperature => CanMessageType::TemperatureSensor,
+            Self::Humidity => CanMessageType::HumiditySensor,
+            Self::Pressure => CanMessageType::PressureSensor,
+            Self::Co2Equivalent => CanMessageType::Co2Equivalent,
+            Self::VocBreath => CanMessageType::VocBreath,
+            Self::AirQuality => CanMessageType::AirQuality,
+            Self::Brightness => CanMessageType::AmbientLightSensor,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Temperature => "temperature",

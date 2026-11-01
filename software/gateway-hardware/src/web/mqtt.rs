@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let slot = || parse_path_segment::<Slot>();
     router
-        .route("/mqtt", get(read_all))
+        .route("/mqtt", get(read_all).patch(update_all))
         .route(("/mqtt", slot()), get(read).patch(update))
         .route(("/mqtt", slot(), "/trust"), post(trust))
         .route(
@@ -84,6 +84,8 @@ async fn view(slot: usize, settings: BrokerConfig) -> Broker {
 struct Brokers {
     primary: Broker,
     secondary: Broker,
+    /// Home Assistant discovery on the primary broker ([`crate::ha`]).
+    home_assistant: bool,
 }
 
 async fn read_all() -> Result<impl IntoResponse, ApiError> {
@@ -93,6 +95,7 @@ async fn read_all() -> Result<impl IntoResponse, ApiError> {
         json(&Brokers {
             primary: view(crate::mqtt::PRIMARY, primary).await,
             secondary: view(crate::mqtt::SECONDARY, secondary).await,
+            home_assistant: crate::ha::enabled(),
         })
         .await
     })
@@ -105,6 +108,25 @@ async fn read(Slot(slot): Slot) -> Result<impl IntoResponse, ApiError> {
         json(&view(slot, cfg.brokers[slot].clone()).await).await
     })
     .await
+}
+
+/// The settings of both brokers together.
+#[derive(Deserialize)]
+struct UpdateAll {
+    home_assistant: Option<bool>,
+}
+
+async fn update_all(Json(body): Json<UpdateAll>) -> Result<impl IntoResponse, ApiError> {
+    if let Some(on) = body.home_assistant {
+        crate::ha::set_enabled(on).await.map_err(|()| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage",
+                "the setting could not be stored",
+            )
+        })?;
+    }
+    read_all().await
 }
 
 /// Every field is optional; only the given ones change.
