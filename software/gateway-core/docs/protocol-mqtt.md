@@ -101,6 +101,9 @@ collapses to `hold`. Published from a `PirSensor` CAN frame.
 light — this one has **no** `/0x<sub_id>` suffix at all). Body: the
 decoded reading as a decimal string (e.g. `"21.5"` for temperature,
 divided-by-16 fixed point; a plain integer for brightness, unscaled).
+`co2` and `voc` are in ppm and `air_quality` is an index from 0 to 500. These
+are BSEC's estimates from a BME680's gas sensor (ADR 0024), not
+measurements.
 
 `<sub_id>` for the fixed-point sensors is the CAN payload's 48-bit
 accompanying id, but formatted from only its **low 32 bits** — a

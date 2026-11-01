@@ -8,6 +8,7 @@
 pub use common_hardware::console_log;
 pub use common_hardware::{flash, logging};
 
+pub mod bsec;
 pub mod button;
 pub mod can;
 pub mod cli;

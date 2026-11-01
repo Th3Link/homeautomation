@@ -1,6 +1,11 @@
 fn main() {
     vergen().unwrap();
     linker_be_nice();
+    // Bosch's BSEC 2 for the BME680's gas sensor (see bsec2/README.md).
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo:rustc-link-search=native={manifest_dir}/bsec2");
+    println!("cargo:rustc-link-lib=static=algobsec");
+    println!("cargo:rerun-if-changed=bsec2/libalgobsec.a");
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
 }

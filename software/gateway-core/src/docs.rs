@@ -88,6 +88,9 @@ pub mod adr {
 
     #[doc = include_str!("../docs/adr/0022-home-assistant-discovery.md")]
     pub mod adr_0022_home_assistant_discovery {}
+
+    #[doc = include_str!("../docs/adr/0024-bsec-air-quality.md")]
+    pub mod adr_0024_bsec_air_quality {}
 }
 
 /// The CAN wire protocol specification (workspace-wide — shared with
