@@ -20,3 +20,4 @@ globally-numbered list including cross-cutting decisions.
 | [0017](0017-block-ota.md) | Firmware update over CAN in acknowledged blocks | Accepted |
 | [0018](0018-https-certificate-management.md) | HTTPS for the web UI, with central certificate management | Accepted |
 | [0019](0019-ipv6-first.md) | IPv6 first, with SLAAC and DHCPv6 | Accepted |
+| [0022](0022-home-assistant-discovery.md) | Home Assistant MQTT discovery from the gateway | Accepted |

@@ -45,6 +45,7 @@ pub mod device_list;
 pub mod docs;
 pub mod error;
 pub mod est;
+pub mod ha_discovery;
 pub mod helper;
 pub mod lamp;
 pub mod relais;
