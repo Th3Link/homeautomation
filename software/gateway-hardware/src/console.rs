@@ -147,8 +147,8 @@ enum Commands<'a> {
     /// server and the MQTT brokers whose key isn't pinned.
     #[set(one_of = ["on", "off"])]
     TlsBuiltInRoots(OnOff),
-    /// Set the NTP server the time comes from; `auto`: the one DHCPv6
-    /// names, else pool.ntp.org.
+    /// Set the NTP server the time comes from; `nts://host[:port]` for NTS
+    /// (authenticated); `auto`: the one DHCPv6 names, else pool.ntp.org.
     NtpServer(&'a str),
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
@@ -693,10 +693,10 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     .await?;
     respond(
         writer,
-        if status.time_known {
-            "time: known (SNTP)"
-        } else {
-            "time: unknown (no SNTP answer yet)"
+        match (status.time_known, crate::wall_clock::authenticated()) {
+            (true, true) => "time: known (NTS, authenticated)",
+            (true, false) => "time: known (SNTP)",
+            (false, _) => "time: unknown (no answer from the time server yet)",
         },
     )
     .await
@@ -906,13 +906,35 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     }
 
     let ntp = crate::cert::ntp_server().await;
+    if let Some(gateway_core::nts::Server::Nts { .. }) = gateway_core::nts::parse_server(&ntp) {
+        let nts = crate::nts::status();
+        respond(
+            writer,
+            &fmt_msg(format_args!(
+                "nts: {} cookies{}{}",
+                nts.cookies,
+                if nts.error.is_some() {
+                    ", last error: "
+                } else {
+                    ""
+                },
+                nts.error.unwrap_or("")
+            )),
+        )
+        .await?;
+    }
     match crate::wall_clock::now() {
         Some(now) => {
             respond(
                 writer,
                 &fmt_msg(format_args!(
-                    "time: {} (SNTP from {ntp})",
-                    gateway_core::x509::time::Rfc3339(now)
+                    "time: {} ({} from {ntp})",
+                    gateway_core::x509::time::Rfc3339(now),
+                    if crate::wall_clock::authenticated() {
+                        "NTS"
+                    } else {
+                        "SNTP"
+                    }
                 )),
             )
             .await

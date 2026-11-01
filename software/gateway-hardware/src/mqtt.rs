@@ -446,6 +446,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             Trust::Authority {
                 roots,
                 host: address.host,
+                dates: tls::Dates::Now,
                 problems: &mut problems,
             }
         } else {
