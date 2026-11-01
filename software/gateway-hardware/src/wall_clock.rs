@@ -71,7 +71,7 @@ pub async fn sntp_task(stack: Stack<'static>) {
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     loop {
-        stack.wait_config_up().await;
+        crate::ethernet::wait_ready().await;
         let server = crate::cert::ntp_server().await;
         let wait = match parse_server(&server) {
             Some(Server::Nts { host, port }) => {
