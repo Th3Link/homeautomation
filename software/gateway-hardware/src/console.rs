@@ -706,7 +706,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     if let Some(pin) = &status.key_pin {
         respond(
             writer,
-            &fmt_msg(format_args!(
+            fmt_msg(format_args!(
                 "key pin-sha256 {}",
                 gateway_core::x509::pem::Base64 {
                     bytes: pin,
