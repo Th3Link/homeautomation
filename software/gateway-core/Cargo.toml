@@ -12,6 +12,9 @@ embedded-can = { version = "0.4.1" }
 embassy-time = { version = "0.5" }
 heapless = { version = "0.9" }
 num_enum = { version = "0.7", default-features = false }
+# NTS (RFC 8915): AEAD_AES_SIV_CMAC_256. 0.7 shares aes, ctr and cipher with
+# embedded-tls' AES-GCM.
+aes-siv = { version = "0.7", default-features = false }
 
 [dev-dependencies]
 # Signs and verifies in the x509 tests (the firmware signs in

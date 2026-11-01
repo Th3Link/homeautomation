@@ -275,7 +275,7 @@ pub async fn update_settings(update: SettingsUpdate<'_>) -> Result<(), CertError
         }
     }
     if let Some(server) = update.ntp_server {
-        if server.len() > NTP_CAP {
+        if server.len() > NTP_CAP || gateway_core::nts::parse_server(server).is_none() {
             return Err(CertError::BadInput);
         }
     }
