@@ -45,6 +45,9 @@ pub enum Key {
     /// Whether missing `Echo` frames restart the device (`u8`, 0 = off;
     /// unset means on). See `echo_guard`.
     EchoRestart = 12,
+    /// BSEC's calibration of the BME680's gas sensor (up to 221 bytes), see
+    /// `bsec::Bsec::state`.
+    BsecState = 13,
 }
 
 /// Flash key of the tank sensor at position 0 (top); position `n` lives at
