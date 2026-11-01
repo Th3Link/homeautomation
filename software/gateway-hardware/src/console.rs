@@ -145,6 +145,9 @@ enum Commands<'a> {
     /// Set the NTP server the time comes from; `auto`: the one DHCPv6
     /// names, else pool.ntp.org.
     NtpServer(&'a str),
+    /// Ask every node to announce itself (Discovery, ADR 0021); they
+    /// answer one after the other until acked.
+    Discover,
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
     /// Restart the gateway.
@@ -362,6 +365,14 @@ async fn handle_command(
         Commands::TlsFqdn(s) => respond(writer, &cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, &cmd_tls_self_signed().await).await,
         Commands::NtpServer(s) => respond(writer, &cmd_ntp_server(s).await).await,
+        Commands::Discover => {
+            for send in
+                gateway_core::command::discover_sends(&gateway_core::command::Target::CanAll)
+            {
+                crate::can::send_raw(send.can_id, &send.data, send.request).await;
+            }
+            respond(writer, "discovery requested").await
+        }
         Commands::Ping => {
             send_can_message(CanMessageType::Available, &[], true).await;
             respond(writer, "ping sent").await

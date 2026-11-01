@@ -8,6 +8,7 @@ use cancomponents::config;
 use cancomponents::config::config;
 use cancomponents::console_log;
 use cancomponents::device;
+use cancomponents::discovery;
 use cancomponents::echo_guard;
 use cancomponents::extension::Extension;
 use cancomponents::flash;
@@ -15,7 +16,6 @@ use cancomponents::heating;
 use cancomponents::relais::Relais;
 use cancomponents::temperature;
 use cancomponents::update;
-use cancomponents_core::can_message_type::CanMessageType;
 use cancomponents_core::device_type::DeviceType;
 use embassy_executor::Spawner;
 use embassy_time::Duration;
@@ -195,11 +195,8 @@ async fn main(spawner: Spawner) -> ! {
         (_, _) => {}
     };
 
-    let data = [1];
-    Timer::after(Duration::from_millis(5_000)).await;
-    can::send_can_message(CanMessageType::Available, &data, false).await;
-    Timer::after(Duration::from_millis(1_000)).await;
-    can::send_can_message(CanMessageType::Available, &data, false).await;
+    // Announced until the gateway acks, see `discovery`.
+    discovery::init(&spawner);
 
     echo_guard::init(&spawner).await;
 

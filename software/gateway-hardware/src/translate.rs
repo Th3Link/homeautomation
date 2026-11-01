@@ -78,6 +78,13 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
             }
         }
         CanMessageType::SensorConfig if !request => dispatch_sensor_config(id, data).await,
+        // A node announcing itself (ADR 0021): it repeats until acked. The
+        // device list took its name already.
+        CanMessageType::Discovery if !request => {
+            let ack =
+                gateway_core::can_ota::target_id(id.device_key(), CanMessageType::DiscoveryAck);
+            crate::can::send_raw(ack, &[], false).await;
+        }
         // The answers of a node to a firmware update.
         CanMessageType::OtaControl if !request => {
             if let Ok(control) = gateway_core::ota::OtaControl::from_bytes(data) {

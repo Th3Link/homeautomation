@@ -25,12 +25,10 @@ export function Devices() {
     await bus(() => api.bus.action('restart'), 'Restart sent to every device')();
   };
 
-  // Makes every device announce itself and its settings, which also finds
-  // the ones that aren't in the list yet.
-  const scan = bus(async () => {
-    await api.bus.action('ping');
-    await api.bus.action('refresh');
-  }, 'Scanning: every device was asked to announce itself');
+  // Makes every device announce itself, one after the other at random
+  // times (ADR 0021); new ones are then asked for their settings. Devices
+  // with the old firmware only answer the broadcast ping.
+  const scan = bus(() => api.bus.action('discover'), 'Scanning: every device was asked to announce itself');
 
   return html`
     <${Section} title="Devices">

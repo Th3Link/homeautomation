@@ -77,6 +77,7 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
             ("/device-types", parse_path_segment::<u8>(), "/restart"),
             post(type_restart),
         )
+        .route("/bus/discover", post(bus_discover))
         .route("/bus/ping", post(bus_ping))
         .route("/bus/refresh", post(bus_refresh))
         .route("/bus/restart", post(bus_restart))
@@ -459,6 +460,10 @@ async fn type_restart(device_type: u8) -> Result<impl IntoResponse, ApiError> {
 }
 
 // ---- everybody on the bus ------------------------------------------------
+
+async fn bus_discover() -> Result<impl IntoResponse, ApiError> {
+    send_all(command::discover_sends(&Target::CanAll)).await
+}
 
 async fn bus_ping() -> Result<impl IntoResponse, ApiError> {
     send_all(command::ping_sends(&Target::CanAll)).await
