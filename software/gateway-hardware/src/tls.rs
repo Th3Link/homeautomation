@@ -94,6 +94,16 @@ pub enum Trust<'a> {
         dates: Dates,
         problems: &'a mut u32,
     },
+    /// The server has to prove it holds its certificate's key; the chain
+    /// is only kept in `chain` (DER, concatenated, leaf first), for the
+    /// caller to check with [`verify_chain`] before it uses anything the
+    /// server sent. For a server that gives the handshake less time than
+    /// the chain check takes (chrony's NTS-KE: 2 s, a P-384 chain about
+    /// 1.2 s here).
+    Later {
+        host: &'a str,
+        chain: &'a mut alloc::vec::Vec<u8>,
+    },
     /// Anything goes: encrypted, but not authenticated.
     AnyCertificate,
     /// Anything goes, and the certificate is copied into the given buffer.
@@ -190,6 +200,18 @@ pub async fn open_with_alpn<'a>(
                     dates,
                     problems,
                 }),
+            };
+            connection.open(TlsContext::new(&config, provider)).await?;
+        }
+        Trust::Later { host, chain } => {
+            let config = if host.parse::<core::net::IpAddr>().is_ok() {
+                config
+            } else {
+                config.with_server_name(host)
+            };
+            let provider = KeyProvider {
+                rng,
+                verifier: KeyVerifier::new(Check::Later(chain)),
             };
             connection.open(TlsContext::new(&config, provider)).await?;
         }
@@ -314,6 +336,8 @@ enum Check<'a> {
         dates: Dates,
         problems: &'a mut u32,
     },
+    /// None now: the chain is kept for later ([`Trust::Later`]).
+    Later(&'a mut alloc::vec::Vec<u8>),
 }
 
 /// Accepts a server whose certificate passes the [`Check`] and which proves
@@ -371,6 +395,14 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
                 if let Err(found) = verify_chain(chain, roots.iter(), host, *dates) {
                     **problems = found;
                     return Err(TlsError::InvalidCertificate);
+                }
+            }
+            Check::Later(kept) => {
+                kept.clear();
+                for entry in cert.entries.iter() {
+                    if let CertificateEntryRef::X509(der) = entry {
+                        kept.extend_from_slice(der);
+                    }
                 }
             }
         }
