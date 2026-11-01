@@ -228,5 +228,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "8316eeece24e90b71b648cf7af9512bce5d69885",
+  "date": "2026-11-01T22:26:17+01:00",
+  "subject": "Merge pull request #25 from Th3Link/fix/tls-server-auth",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 422100,
+    "iram": 19008,
+    "dram_static": 36928,
+    "stack_budget": 159676,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 443743,
+    "iram": 16036,
+    "dram_static": 36832,
+    "stack_budget": 159772,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
