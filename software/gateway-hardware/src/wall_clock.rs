@@ -79,10 +79,12 @@ pub fn clock() -> Clock {
 /// failed NTS key exchange).
 #[embassy_executor::task]
 pub async fn sntp_task(stack: Stack<'static>) {
-    let mut rx_meta = [PacketMetadata::EMPTY; 2];
-    let mut tx_meta = [PacketMetadata::EMPTY; 2];
-    let mut rx = [0u8; 128];
-    let mut tx = [0u8; 128];
+    let mut buffers = UdpBuffers {
+        rx_meta: [PacketMetadata::EMPTY; 2],
+        tx_meta: [PacketMetadata::EMPTY; 2],
+        rx: [0; 128],
+        tx: [0; 128],
+    };
     loop {
         crate::ethernet::wait_ready().await;
         let server = crate::cert::ntp_server().await;
@@ -95,14 +97,9 @@ pub async fn sntp_task(stack: Stack<'static>) {
                 }
             }
             Some(Server::Plain(host)) => {
-                let mut socket =
-                    UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
-                let synced = match socket.bind(0) {
-                    // On the heap, like the EST client: the DNS lookup's
-                    // future is large and only needed for a moment.
-                    Ok(()) => crate::heap::boxed(|| query(stack, &mut socket, host)).await,
-                    Err(_) => false,
-                };
+                // On the heap, like the EST client: the DNS lookup's future
+                // is large and only needed for a moment.
+                let synced = crate::heap::boxed(|| query(stack, &mut buffers, host)).await;
                 if synced {
                     RESYNC
                 } else {
@@ -119,16 +116,33 @@ pub async fn sntp_task(stack: Stack<'static>) {
     }
 }
 
+struct UdpBuffers {
+    rx_meta: [PacketMetadata; 2],
+    tx_meta: [PacketMetadata; 2],
+    rx: [u8; 128],
+    tx: [u8; 128],
+}
+
 /// Asks the addresses of `server` in turn (IPv6 first, see
 /// [`crate::resolve`]) until one answers.
-async fn query(stack: Stack<'static>, socket: &mut UdpSocket<'_>, server: &str) -> bool {
+async fn query(stack: Stack<'static>, buffers: &mut UdpBuffers, server: &str) -> bool {
     let addresses = crate::resolve::resolve(stack, server).await;
     if addresses.is_empty() {
         console_log!("sntp: cannot resolve {server}");
         return false;
     }
     for address in addresses {
-        if ask(socket, address, server).await {
+        // A socket for each address: a request to a neighbour that doesn't
+        // answer neighbour discovery stays queued in its socket, and the
+        // next one would wait behind it.
+        let mut socket = UdpSocket::new(
+            stack,
+            &mut buffers.rx_meta,
+            &mut buffers.rx,
+            &mut buffers.tx_meta,
+            &mut buffers.tx,
+        );
+        if socket.bind(0).is_ok() && ask(&mut socket, address, server).await {
             return true;
         }
     }
