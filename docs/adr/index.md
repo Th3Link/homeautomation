@@ -32,6 +32,7 @@ next to the component they constrain — e.g.
 | [0017](../../software/gateway-core/docs/adr/0017-block-ota.md) | Firmware update over CAN in acknowledged blocks | gateway | Accepted |
 | [0018](../../software/gateway-core/docs/adr/0018-https-certificate-management.md) | HTTPS for the web UI, with central certificate management | gateway | Accepted |
 | [0019](../../software/gateway-core/docs/adr/0019-ipv6-first.md) | IPv6 first, with SLAAC and DHCPv6 | gateway | Accepted |
+| [0021](0021-can-discovery.md) | Nodes announce themselves until the gateway acks (Discovery) | workspace | Accepted |
 
 ADRs 0010 and 0011 are **proposed**, not yet implemented — see
 [`gateway-core`'s technical-debt.md`](../../software/gateway-core/docs/technical-debt.md)

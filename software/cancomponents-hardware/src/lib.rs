@@ -13,6 +13,7 @@ pub mod can;
 pub mod cli;
 pub mod config;
 pub mod device;
+pub mod discovery;
 pub mod echo_guard;
 pub mod error;
 pub mod extension;

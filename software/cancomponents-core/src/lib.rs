@@ -17,8 +17,8 @@ pub use common_core::DecodeError;
 /// `crate::can_message_type`/`crate::device_type`/`crate::device_message`
 /// paths keep working unchanged.
 pub use common_core::{
-    can_id, can_message_type, device_message, device_type, heating_message, ota, ota_receiver,
-    ota_sender, sensor_config,
+    can_id, can_message_type, device_message, device_type, discovery, heating_message, ota,
+    ota_receiver, ota_sender, sensor_config,
 };
 
 pub mod ambient_light;
