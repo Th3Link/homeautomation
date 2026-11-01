@@ -86,6 +86,12 @@ requests, uploads and a firmware update over HTTPS; MQTT over TLS (RSA
 signature check on the stack) is not measured yet. A new large future in
 a handler or task shows up there first.
 
+With HA discovery, NTS and the CA trust store (in review on 2026-11-01)
+the statics are ~9 KB larger, the stack that much smaller (38 KB), and only
+2.7 KB of it were left untouched in a measurement on the test gateway.
+Where the RAM goes and how to win back far more than that:
+[RAM on the gateway](ram.md).
+
 ## Single gateway, too many nodes, no gateway-to-gateway coordination
 
 The one gateway that exists today controls every node in the
