@@ -48,12 +48,18 @@ use sha2::{Digest, Sha256};
 
 /// Largest server certificate (DER) that can be pinned or captured.
 pub const CERT_CAP: usize = 2048;
-/// Buffer for one received TLS record. Records can be up to 16 KiB; this is
-/// enough for a certificate chain and any message this gateway subscribes
-/// to, and keeps two simultaneous connections affordable.
+/// Buffer for one received TLS record: embedded-tls decrypts a record as a
+/// whole and doesn't put a handshake message together from several. Records
+/// can be up to 16 KiB; the largest one here is the server's certificate
+/// chain (a Let's Encrypt chain of three RSA certificates, as Mosquitto
+/// sends it: 4,119 bytes). The MQTT messages the gateway receives are
+/// smaller: the client's buffer (2 KiB) limits them anyway.
 pub const READ_RECORD_BYTES: usize = 8192;
-/// Buffer for one record being sent (handshake messages and MQTT packets).
-pub const WRITE_RECORD_BYTES: usize = 2560;
+/// Buffer for one record being sent: the ClientHello (some 250 bytes) and
+/// MQTT packets. embedded-tls keeps 128 bytes of it for the record's
+/// overhead and splits longer writes into several records, so up to 896
+/// bytes go out as one.
+pub const WRITE_RECORD_BYTES: usize = 1024;
 
 /// An open TLS connection over a TCP socket.
 pub type Connection<'a> = TlsConnection<'a, TcpSocket<'a>, Aes128GcmSha256>;

@@ -24,12 +24,14 @@
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::tls::{self, Trust};
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_futures::select::{select3, Either3};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use gateway_core::config::BrokerConfig;
@@ -45,7 +47,6 @@ use rust_mqtt::client::options::{
 use rust_mqtt::client::Client;
 use rust_mqtt::io::Transport;
 use rust_mqtt::types::{MqttBinary, MqttString, PacketIdentifier, TopicFilter, TopicName};
-use static_cell::ConstStaticCell;
 
 /// The gateway's client instantiation: a little headroom (4) for
 /// in-flight un-acked SUBSCRIBE/incoming-QoS/outgoing-QoS packets, and
@@ -318,31 +319,53 @@ async fn session<N: Transport>(
     Timer::after(Duration::from_secs(2)).await;
 }
 
-/// The buffers of one broker connection. Static, in place from the start:
-/// in the task's future they would make it ~16 KB larger, and a task's
-/// future is built on the main stack when it is spawned.
+/// The buffers of one broker connection (13 KB). Static, in place from the
+/// start: in the task's future they would make it that much larger, and a
+/// task's future is built on the main stack when it is spawned.
+///
+/// The TCP windows only have to take a segment (1,460 bytes); the TLS
+/// record buffers are sized in [`tls`].
 struct Buffers {
     rx: [u8; 2048],
     tx: [u8; 2048],
     read_record: [u8; tls::READ_RECORD_BYTES],
     write_record: [u8; tls::WRITE_RECORD_BYTES],
-    captured: Vec<u8, { tls::CERT_CAP }>,
 }
 
-impl Buffers {
-    const fn new() -> Self {
-        Self {
-            rx: [0; 2048],
-            tx: [0; 2048],
-            read_record: [0; tls::READ_RECORD_BYTES],
-            write_record: [0; tls::WRITE_RECORD_BYTES],
-            captured: Vec::new(),
-        }
+// Each slot's buffers fill one of the ROM's boot stacks in SRAM1
+// (`rom-boot-stacks.x`, 15,072 bytes each), which leaves SRAM2 to the main
+// stack. Not zeroed at boot; `take_buffers` does that.
+const _: () = assert!(MQTT_BROKERS == 2);
+#[unsafe(link_section = ".rom_boot_pro_uninit")]
+static mut PRIMARY_BUFFERS: MaybeUninit<Buffers> = MaybeUninit::uninit();
+#[unsafe(link_section = ".rom_boot_app_uninit")]
+static mut SECONDARY_BUFFERS: MaybeUninit<Buffers> = MaybeUninit::uninit();
+static BUFFERS_TAKEN: [AtomicBool; MQTT_BROKERS] = [AtomicBool::new(false), AtomicBool::new(false)];
+
+/// Broker `slot`'s buffers, zeroed. Once per slot.
+fn take_buffers(slot: usize) -> &'static mut Buffers {
+    assert!(
+        !BUFFERS_TAKEN[slot].swap(true, Ordering::Relaxed),
+        "mqtt buffers taken twice"
+    );
+    let buffers = if slot == PRIMARY {
+        &raw mut PRIMARY_BUFFERS
+    } else {
+        &raw mut SECONDARY_BUFFERS
+    };
+    // SAFETY: each slot's buffers are handed out once (above) and nothing
+    // else touches them. Zeroed in place (a `Buffers` value would be built
+    // on the stack first), all zeroes is a valid `Buffers`.
+    unsafe {
+        buffers.write_bytes(0, 1);
+        (*buffers).assume_init_mut()
     }
 }
 
-static BUFFERS: [ConstStaticCell<Buffers>; MQTT_BROKERS] =
-    [const { ConstStaticCell::new(Buffers::new()) }; MQTT_BROKERS];
+/// The certificate a capturing connection saw (`mqtt-trust`). One for both
+/// slots: captures are rare and short, a second one waits for the first.
+static CAPTURED: Mutex<CriticalSectionRawMutex, Vec<u8, { tls::CERT_CAP }>> =
+    Mutex::new(Vec::new());
 
 /// The connection to one broker (slot 0 or 1), kept up forever: connects,
 /// serves, and reconnects after a pause when the connection is lost or the
@@ -350,7 +373,7 @@ static BUFFERS: [ConstStaticCell<Buffers>; MQTT_BROKERS] =
 #[embassy_executor::task(pool_size = 2)]
 pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
     let broker = slot + 1;
-    let buffers = BUFFERS[slot].take();
+    let buffers = take_buffers(slot);
     loop {
         let cfg = config().await.load_or_init().await;
         let settings = &cfg.brokers[slot];
@@ -411,9 +434,15 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             continue;
         }
 
-        buffers.captured.clear();
-        let trust = if capturing {
-            Trust::Capture(&mut buffers.captured)
+        let mut captured = if capturing {
+            let mut captured = CAPTURED.lock().await;
+            captured.clear();
+            Some(captured)
+        } else {
+            None
+        };
+        let trust = if let Some(captured) = &mut captured {
+            Trust::Capture(captured)
         } else if let Some(certificate) = &pinned {
             Trust::Pinned(certificate)
         } else {
@@ -432,7 +461,9 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         match opened {
             Ok(Ok(connection)) if capturing => {
                 drop(connection);
-                pin_captured(slot, &buffers.captured).await;
+                if let Some(captured) = &captured {
+                    pin_captured(slot, captured).await;
+                }
                 Timer::after(Duration::from_secs(1)).await;
             }
             Ok(Ok(connection)) => session(connection, settings, slot, &address).await,
