@@ -128,6 +128,10 @@ async fn main(spawner: Spawner) -> ! {
         false,
     )
     .await;
+    // Every node announces itself, one after the other (ADR 0021).
+    for send in gateway_core::command::discover_sends(&gateway_core::command::Target::CanAll) {
+        can::send_raw(send.can_id, &send.data, send.request).await;
+    }
 
     loop {
         embassy_time::Timer::after(embassy_time::Duration::from_millis(3_000)).await;

@@ -92,6 +92,15 @@ impl DeviceListEntry {
                     self.uptime = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
                 }
             }
+            // A node's announcement carries its name.
+            CanMessageType::Discovery => {
+                if let Some(name) = crate::discovery::decode(data) {
+                    self.custom_string.clear();
+                    let _ = self
+                        .custom_string
+                        .push_str(truncate(name, self.custom_string.capacity()));
+                }
+            }
             CanMessageType::CustomString => {
                 if let Ok(s) = core::str::from_utf8(data) {
                     self.custom_string.clear();
@@ -247,6 +256,23 @@ mod tests {
 
     fn id(device_type: u8, device_id: u8, msg: CanMessageType) -> CanId {
         CanId::new(device_type, device_id, msg)
+    }
+
+    #[test]
+    fn discovery_carries_the_name() {
+        let mut table: DeviceTable<4> = DeviceTable::new();
+        let action = table.observe(id(4, 77, CanMessageType::Discovery), b"testsw", 0);
+        // A new device is still asked for its settings.
+        assert!(action.is_some());
+        assert_eq!(
+            table.entry(id(4, 77, CanMessageType::Discovery).device_key()),
+            "testsw"
+        );
+        table.observe(id(4, 77, CanMessageType::Discovery), b"hall\0\0\0\0", 1);
+        assert_eq!(
+            table.resolve("hall"),
+            Some(id(4, 77, CanMessageType::Discovery).device_key())
+        );
     }
 
     #[test]

@@ -75,7 +75,7 @@ discriminants, gaps included:
 ## Message types
 
 `ICAN::MSG_ID_t` / `gateway_core::can_message_type::CanMessageType`. Fixed
-discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159, 163–254) are
+discriminants — gaps (23–29, 45–89, 91–127, 142–149, 159, 163–254) are
 intentional, not omissions:
 
 | Value | Name | Value | Name |
@@ -107,11 +107,31 @@ intentional, not omissions:
 | 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 41 | `HwRev` | | |
 | 42 | `ExtensionMode` | | |
+| 43 | `Discovery` | | |
+| 44 | `DiscoveryAck` | | |
 
 An unrecognized `msg_type` byte decodes to `InvalidMessage` rather than
 failing to decode at all — this makes "ignore an unknown message" an
 explicit, matchable case (the original's C++ `switch` just silently falls
 through with no default case).
+
+## Discovery (`Discovery` / `DiscoveryAck`)
+
+How nodes make themselves known to the gateway
+([ADR 0021](adr/0021-can-discovery.md), `common-core/src/discovery.rs`):
+
+| Frame | From → to | Payload |
+|---|---|---|
+| `Discovery` (43), data | node → gateway, the node's own id | its name (custom string), 0-8 bytes UTF-8 |
+| `DiscoveryAck` (44), data | gateway → node, the node's id | none |
+| `Discovery` (43), R frame | gateway → device 0 (everybody) or one node | none: announce yourself |
+
+A node announces itself after it starts, after its name changed and when
+asked, and repeats until the ack comes: the first `Discovery` after a
+random 0-2 s, then it waits a random 300 ms-2 s for the ack (first five
+tries), then a random 2-5 s, for as long as it takes. The gateway acks
+every `Discovery` at once, takes the name from it, and sends a node it
+didn't know a `RequestParameter` R frame for its other settings.
 
 ## `UpdateSilence` — bus quieting during OTA
 

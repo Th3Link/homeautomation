@@ -612,6 +612,7 @@ async fn cmd_custom_string(text: &str) -> String<LINE_CAP> {
     {
         return str_msg("failed to persist custom_string");
     }
+    crate::device::device().await.set_name(&value);
     if truncated {
         fmt_msg(format_args!(
             "custom_string set to \"{value}\" (truncated to 8 bytes)"

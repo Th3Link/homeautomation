@@ -148,6 +148,12 @@ pub fn refresh_sends(target: &Target) -> Vec<CanSend, MAX_SENDS> {
     targeted_sends(target, CanMessageType::RequestParameter, &[], true)
 }
 
+/// Asks the devices to announce themselves (`Discovery` R frame, ADR 0021):
+/// they answer one by one at random times, each until the gateway acks.
+pub fn discover_sends(target: &Target) -> Vec<CanSend, MAX_SENDS> {
+    targeted_sends(target, CanMessageType::Discovery, &[], true)
+}
+
 /// `"ping"` (`Command::ping_device`) — zero-length `Available`
 /// remote-frame request.
 pub fn ping_sends(target: &Target) -> Vec<CanSend, MAX_SENDS> {

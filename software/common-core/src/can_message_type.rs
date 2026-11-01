@@ -37,6 +37,12 @@ pub enum CanMessageType {
     TemperatureSensor = 31,
     HwRev = 41,
     ExtensionMode = 42,
+    /// A node announces itself with its name, until the gateway acks
+    /// (as an R frame from the gateway: everybody announce). See
+    /// [`crate::discovery`].
+    Discovery = 43,
+    /// The gateway's ack of a node's `Discovery`.
+    DiscoveryAck = 44,
     LampGroup = 90,
     PirSensor = 128,
     HumiditySensor = 129,
@@ -117,6 +123,8 @@ mod tests {
             (CanMessageType::TemperatureSensor, 31),
             (CanMessageType::HwRev, 41),
             (CanMessageType::ExtensionMode, 42),
+            (CanMessageType::Discovery, 43),
+            (CanMessageType::DiscoveryAck, 44),
             (CanMessageType::LampGroup, 90),
             (CanMessageType::PirSensor, 128),
             (CanMessageType::HumiditySensor, 129),
