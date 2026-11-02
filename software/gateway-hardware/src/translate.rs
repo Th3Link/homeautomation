@@ -263,11 +263,7 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
         let Some(target) = resolve_target(topic).await else {
             return;
         };
-        if has_bank {
-            send_command(target, CanMessageType::LampGroup, &msg.to_bytes_full()).await;
-        } else {
-            send_command(target, CanMessageType::LampGroup, &msg.to_bytes_short()).await;
-        }
+        crate::lamps::send(target, msg, has_bank).await;
         return;
     }
 

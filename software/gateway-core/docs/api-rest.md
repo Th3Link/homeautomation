@@ -74,7 +74,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | `PUT /devices/:device/silence` `{"on": true}` | |
 | `PUT /devices/:device/relays/:num` | `{"state": "on"\|"off"\|"up"\|"down", "duration_ms": 0, "bank": 0}`; after `duration_ms` (up to 24 bits, `0` = stay) it switches back |
 | `PUT /devices/:device/rollershutters/:num` | the same body |
-| `PUT /devices/:device/lamps/:bank` | `{"value": 0-255, "bitmask": <24 bits>}` (always the full 8-byte form with the bank) |
+| `PUT /devices/:device/lamps/:bank` | `{"value": 0-255, "bitmask": <24 bits>}` (always the full 8-byte form with the bank; paced for legacy lamp controllers like `canbus/lamp_command`) |
 | `PUT /devices/:device/heating/target` | `{"flow_c": 45.5, "tank": true}` |
 | `PUT /devices/:device/heating/energy` | `{"power_w": 6200, "rod_enabled": true}` |
 | `PUT /devices/:device/heating/emergency` | `{"stage": 0-3, "tank_c": 55}` |

@@ -47,6 +47,7 @@ pub mod error;
 pub mod est;
 pub mod helper;
 pub mod lamp;
+pub mod lamp_pacer;
 pub mod relais;
 pub mod sensor;
 pub mod sensor_info;
