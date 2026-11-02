@@ -5,6 +5,7 @@
 //! incoming MQTT messages into the CAN payload types from
 //! [`crate::relais`]/[`crate::lamp`]/[`crate::button`].
 
+pub mod automation;
 pub mod button;
 pub mod debug;
 pub mod device;
