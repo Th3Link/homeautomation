@@ -69,10 +69,18 @@ error is published anywhere.
 
 ## State topics (gateway → broker)
 
+### `canbus/relais_state/<device>/<bank>/<number>`
+
+Body: `<state>` — the raw state byte of that relay channel as a decimal
+string: `"0"` = off; on is `"1"` from legacy nodes and `"3"` from Rust
+nodes. Published from a `RelaisState` CAN frame.
+
 ### `canbus/relais_state/<device>`
 
-Body: `<state>` — the raw state byte as a decimal string, e.g. `"3"`.
-Published from a `RelaisState` CAN frame.
+Body: byte 0 of a `RelaisState` CAN frame as a decimal string. That byte
+is the **channel number**, not the state: a quirk of the original
+gateway, kept so existing subscribers don't break. Use the per-channel
+topic above for the state.
 
 ### `canbus/rollershutter_state/<device>/<bank>/<number>`
 
