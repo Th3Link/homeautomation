@@ -1935,6 +1935,7 @@ dependencies = [
  "embassy-time",
  "embedded-can",
  "heapless 0.9.3",
+ "libm",
  "num_enum",
  "p256 0.14.0",
 ]

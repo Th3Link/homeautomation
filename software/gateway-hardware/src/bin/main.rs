@@ -51,6 +51,7 @@ async fn main(spawner: Spawner) -> ! {
 
     flash::init(peripherals.FLASH);
     config::init().await;
+    gateway_hardware::location::init().await;
     let cfg = config::config().await.load_or_init().await;
 
     can::DEVICE_ID.store(cfg.can_id, Ordering::Relaxed);
