@@ -60,9 +60,10 @@ equivalents. The crate doesn't talk to the sensor.
   - **Phase 2:** a Sensirion SCD30 (real CO2, NDIR) is wired to the same
     sensor board, and the constants are fitted against it.
 - **Sending:** once per send interval go out temperature, humidity and
-  pressure. Once the accuracy is at least "low" (after the warm-up),
+  pressure. Once the burn-in is over (at least 5 minutes and 100 values),
   `AirQuality` (the index), `Co2Equivalent` and `VocBreath` (ppm) go out
-  too.
+  too. During the burn-in the sensor's resistance is still rising, so every
+  reading would look like clean air.
 - **Calibration** (422 bytes, CRC-protected):
   - It goes into the config store (`AirQualityState`) every 4 hours and when
     the accuracy first reaches "high". The store's buffer grew from 256 to
