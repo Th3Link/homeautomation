@@ -56,6 +56,11 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
+| `GET /location` | `latitude`, `longitude` (degrees, north/east positive; `null` until set), `timezone` (a POSIX `TZ` string, default `CET-1CEST,M3.5.0,M10.5.0/3`), `local_time` (`YYYY-MM-DDTHH:MM:SS`) and `utc_offset_minutes` (`null` until the clock is set), `sun`: today's local `HH:MM` of `astronomical_dawn`, `nautical_dawn`, `civil_dawn`, `sunrise`, `noon`, `sunset`, `civil_dusk`, `nautical_dusk`, `astronomical_dusk` (each `null` on a day the sun doesn't reach it; the whole object `null` without a place or a clock) |
+| `PATCH /location` | `latitude` and `longitude` (only together), `timezone`. Answers like `GET` |
+
+| Route | |
+|---|---|
 | `GET /mqtt` | `{"primary": {...}, "secondary": {...}}` |
 | `GET /mqtt/:slot` | `slot`, `enabled`, `uri`, `user`, `password_set`, `tls_insecure`, `certificate_pinned`, `tls_check` (how an `mqtts://` broker is checked: `pinned`, `ca` (against the trusted CAs and the host name) or `insecure`, [ADR 0020](adr/0020-trusted-certificate-authorities.md)), `connected` |
 | `PATCH /mqtt/:slot` | `enabled`, `uri` (`mqtt://host[:1883]` or `mqtts://host[:8883]`), `user`, `password` (8+ characters, or `""`), `tls_insecure`. The broker reconnects with the new settings; the answer is the new state |
