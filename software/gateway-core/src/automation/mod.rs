@@ -21,6 +21,7 @@ pub mod engine;
 pub mod motion;
 pub mod output;
 pub mod schedule;
+pub mod store;
 pub mod when;
 
 use crate::can_id::CanId;
@@ -49,7 +50,7 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 /// A CAN device by its address: device type and id (1–255).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeviceRef {
     #[serde(rename = "type")]
     pub device_type: u8,
