@@ -172,7 +172,9 @@ pub async fn environment_task(bus: &'static Bus) {
                     sensor_board::unsigned_raw(pressure_hpa),
                 ),
             ]);
-            if out.air.accuracy >= Accuracy::Low {
+            // During the burn-in the ceiling is still rising with the
+            // sensor, so every reading looks like clean air.
+            if out.air.stage == Stage::Operation {
                 let e = out.air.equivalents;
                 for (kind, value) in [
                     (CanMessageType::AirQuality, e.index),
