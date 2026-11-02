@@ -9,7 +9,8 @@ use gateway_core::can_message_type::CanMessageType;
 use gateway_core::relais::{self, RelaisMsg};
 use gateway_core::sensor::{decode_ambient_light, FixedPointReading};
 use gateway_core::topics::{
-    button, debug, device, heating as heating_topics, lamp, relais as relais_topics,
+    automation as automation_topics, button, debug, device, heating as heating_topics, lamp,
+    relais as relais_topics,
 };
 use heapless::String as HString;
 
@@ -32,6 +33,12 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 .await;
             }
             if let Ok(msg) = RelaisMsg::from_bytes(data) {
+                crate::automation::post(crate::automation::Event::Relay {
+                    device_key: id.device_key(),
+                    bank: msg.bank,
+                    channel: msg.number,
+                    on: msg.state != 0,
+                });
                 let mut body: HString<8> = HString::new();
                 let _ = core::fmt::write(&mut body, format_args!("{}", msg.state));
                 let key = id.device_key();
@@ -45,6 +52,12 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         }
         CanMessageType::RollershutterState => {
             if let Ok(msg) = RelaisMsg::from_bytes(data) {
+                crate::automation::post(crate::automation::Event::Shutter {
+                    device_key: id.device_key(),
+                    bank: msg.bank,
+                    channel: msg.number,
+                    raw: msg.state,
+                });
                 let mut body: HString<8> = HString::new();
                 let _ = core::fmt::write(&mut body, format_args!("{}", msg.state));
                 let key = id.device_key();
@@ -58,6 +71,11 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         }
         CanMessageType::ButtonEvent => {
             if let Ok(event) = ButtonEvent::from_bytes(data) {
+                crate::automation::post(crate::automation::Event::Button {
+                    device_key: id.device_key(),
+                    button: event.button_id,
+                    kind: event.event,
+                });
                 crate::ha::observe_button(id.device_key(), event.button_id).await;
                 if let Some(body) = button::button_body(event) {
                     let key = id.device_key();
@@ -72,6 +90,12 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         }
         CanMessageType::PirSensor => {
             if let Ok(event) = ButtonEvent::from_bytes(data) {
+                // Every report but the end of one is motion.
+                if event.event != gateway_core::button::ButtonEventKind::Released {
+                    crate::automation::post(crate::automation::Event::Motion {
+                        device_key: id.device_key(),
+                    });
+                }
                 crate::ha::observe_presence(id.device_key()).await;
                 let body = button::presence_body(event);
                 let key = id.device_key();
@@ -177,6 +201,7 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                     value as f32,
                 )
                 .await;
+                crate::automation::post(crate::automation::Event::Brightness);
                 publish_with_custom_string(
                     key,
                     |cs| device::ambient_light_topic(key, cs),
@@ -336,6 +361,29 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
             &gateway_core::lamp::nightlight_bytes(value),
         )
         .await;
+        return;
+    }
+
+    if let Some(name) = automation_topics::output_command_name(topic) {
+        // An old command replayed by the broker would switch again.
+        if let (false, Ok(name), Ok(op)) = (
+            retained,
+            gateway_core::automation::Name::try_from(name),
+            automation_topics::parse_output_command(body),
+        ) {
+            crate::automation::post(crate::automation::Event::Output { name, op });
+        }
+        return;
+    }
+
+    if let Some(name) = automation_topics::automation_command_name(topic) {
+        if let (false, Ok(name), Ok(switch)) = (
+            retained,
+            gateway_core::automation::Name::try_from(name),
+            automation_topics::parse_automation_command(body),
+        ) {
+            crate::automation::post(crate::automation::Event::Switch { name, switch });
+        }
         return;
     }
 

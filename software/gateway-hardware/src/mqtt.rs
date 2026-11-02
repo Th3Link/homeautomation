@@ -184,6 +184,8 @@ const SUBSCRIBE_TOPICS: &[&str] = &[
     "canbus/rollershutter_command/#",
     "canbus/lamp_command/#",
     "canbus/nightlight_command/#",
+    "canbus/output_command/#",
+    "canbus/automation_command/#",
     "canbus/heating_target_command/#",
     "canbus/heating_energy_command/#",
     "canbus/heating_emergency_command/#",

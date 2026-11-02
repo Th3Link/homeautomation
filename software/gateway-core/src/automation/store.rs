@@ -76,6 +76,10 @@ pub struct Named<T> {
 pub struct Slots(u128);
 
 impl Slots {
+    pub const fn new() -> Self {
+        Self(0)
+    }
+
     pub fn take(&mut self, slot: u8) {
         if slot < 128 {
             self.0 |= 1 << slot;

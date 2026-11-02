@@ -183,6 +183,14 @@ When a check fails, the console log says why (`not issued by a trusted CA`,
 Limits: certificates with ECDSA P-256/P-384 or RSA keys; a pinned
 certificate at most 2048 bytes, a chain within one 8 KiB TLS record.
 
+### `canbus/output_state/<name>`, `canbus/automation_state/<name>`
+
+The gateway's own automation (ADR 0025), by the names given in its
+configuration. `output_state`: a light's level (`0` = off), a dimmer's
+value, `ON`/`OFF` for a relay, `up`/`down`/`stopped` for a shutter; sent
+when it changes. `automation_state`: `ON`/`OFF`, whether a motion light or
+schedule is enabled. Not retained.
+
 ### Home Assistant discovery (`homeassistant/…/config`)
 
 Off by default; with it on (console `ha-discovery on`, REST
@@ -262,6 +270,14 @@ is the same; only fast intermediate values are dropped.
 Body: a single decimal integer, the **entire** body (not slash-delimited
 like the other command topics). Encodes to the 1-byte `Nightlight`
 message.
+
+### `canbus/output_command/<name>`, `canbus/automation_command/<name>`
+
+Commands to the automation's outputs and to its motion lights and
+schedules. `output_command`: `ON`, `OFF`, `TOGGLE`, `MAX`, `INC`, `DEC`,
+`UP`, `DOWN`, `STOP` (any case), or a number (a light's level, a dimmer's
+value). `automation_command`: `ON`, `OFF`, `TOGGLE`. Retained messages are
+ignored.
 
 ### `canbus/debug/<target>`
 

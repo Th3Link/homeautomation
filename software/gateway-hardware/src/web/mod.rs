@@ -14,6 +14,7 @@
 //! back in if TLS ever doesn't work.
 
 mod assets;
+mod automation;
 mod commands;
 mod devices;
 mod error;
@@ -194,6 +195,7 @@ fn app() -> Router<impl PathRouter> {
     let api = sensors::routes(api);
     let api = tls::routes(api);
     let api = location::routes(api);
+    let api = automation::routes(api);
     let app = Router::new().nest("/api/v1", api);
     assets::routes(app).layer(BasicAuth)
 }
