@@ -25,6 +25,7 @@ pub mod ethernet;
 pub mod heap;
 pub mod heating_state;
 pub mod https;
+pub mod lamps;
 pub mod mqtt;
 pub mod nts;
 pub mod resolve;
