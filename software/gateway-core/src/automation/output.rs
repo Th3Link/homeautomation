@@ -294,6 +294,83 @@ mod tests {
         );
     }
 
+    /// The lamp values each frame list leaves, per device id, as
+    /// `(id, value, mask)` sorted.
+    fn result(frames: &Frames) -> std::vec::Vec<(u8, u8, u32)> {
+        let mut lamps = std::collections::BTreeMap::new();
+        for (device, _, msg) in frames {
+            for bit in 0..24 {
+                if msg.bitmask & (1 << bit) != 0 {
+                    lamps.insert((device.id, bit), msg.value);
+                }
+            }
+        }
+        let mut by_value = std::collections::BTreeMap::new();
+        for ((id, bit), value) in lamps {
+            *by_value.entry((id, value)).or_insert(0u32) |= 1 << bit;
+        }
+        by_value
+            .into_iter()
+            .map(|((id, v), m)| (id, v, m))
+            .collect()
+    }
+
+    /// Two rooms generated from openHAB's `smartlight.js` (lamp table,
+    /// scenes, the cubic ramp to 127), against the lamp values openHAB's
+    /// commands leave for every level: the living room (one controller,
+    /// eight lamp groups) and the hall (two controllers).
+    #[test]
+    fn levels_match_the_openhab_rule() {
+        type Levels<'a> = [&'a [(u8, u8, u32)]; 11];
+        let rooms: [(&str, Levels); 2] = [
+            (
+                r#"{"light":{"groups":[{"device":{"type":3,"id":5},"mask":2367489},{"device":{"type":3,"id":5},"mask":1576962},{"device":{"type":3,"id":5},"mask":8388672},{"device":{"type":3,"id":5},"mask":4194432},{"device":{"type":3,"id":5},"mask":256},{"device":{"type":3,"id":5},"mask":512},{"device":{"type":3,"id":5},"mask":16384},{"device":{"type":3,"id":5},"mask":32768}],"levels":[[0,0,0,0,0,34,34,0],[0,0,0,34,0,34,34,0],[0,0,0,0,17,34,0,0],[0,0,0,0,17,34,34,17],[0,0,17,34,17,34,34,17],[17,34,17,34,17,34,34,17],[19,35,19,35,19,35,35,19],[31,46,31,46,31,46,46,31],[63,73,63,73,63,73,73,63],[127,127,127,127,127,127,127,127]],"default_level":3}}"#,
+                [
+                    &[(5, 0, 16577475)],
+                    &[(5, 0, 16560579), (5, 34, 16896)],
+                    &[(5, 0, 12366147), (5, 34, 4211328)],
+                    &[(5, 0, 16576707), (5, 17, 256), (5, 34, 512)],
+                    &[(5, 0, 16527555), (5, 17, 33024), (5, 34, 16896)],
+                    &[(5, 0, 3944451), (5, 17, 8421696), (5, 34, 4211328)],
+                    &[(5, 17, 10789185), (5, 34, 5788290)],
+                    &[(5, 19, 10789185), (5, 35, 5788290)],
+                    &[(5, 31, 10789185), (5, 46, 5788290)],
+                    &[(5, 63, 10789185), (5, 73, 5788290)],
+                    &[(5, 127, 16577475)],
+                ],
+            ),
+            (
+                r#"{"light":{"groups":[{"device":{"type":3,"id":6},"mask":1280},{"device":{"type":3,"id":6},"mask":2560},{"device":{"type":3,"id":8},"mask":5},{"device":{"type":3,"id":8},"mask":10}],"levels":[[0,34,0,0],[0,34,0,34],[17,34,0,0],[17,34,17,34],[18,34,18,34],[21,37,21,37],[31,46,31,46],[50,62,50,62],[81,88,81,88],[127,127,127,127]],"default_level":3}}"#,
+                [
+                    &[(6, 0, 3840), (8, 0, 15)],
+                    &[(6, 0, 1280), (6, 34, 2560), (8, 0, 15)],
+                    &[(6, 0, 1280), (6, 34, 2560), (8, 0, 5), (8, 34, 10)],
+                    &[(6, 17, 1280), (6, 34, 2560), (8, 0, 15)],
+                    &[(6, 17, 1280), (6, 34, 2560), (8, 17, 5), (8, 34, 10)],
+                    &[(6, 18, 1280), (6, 34, 2560), (8, 18, 5), (8, 34, 10)],
+                    &[(6, 21, 1280), (6, 37, 2560), (8, 21, 5), (8, 37, 10)],
+                    &[(6, 31, 1280), (6, 46, 2560), (8, 31, 5), (8, 46, 10)],
+                    &[(6, 50, 1280), (6, 62, 2560), (8, 50, 5), (8, 62, 10)],
+                    &[(6, 81, 1280), (6, 88, 2560), (8, 81, 5), (8, 88, 10)],
+                    &[(6, 127, 3840), (8, 127, 15)],
+                ],
+            ),
+        ];
+        for (json, expected) in rooms {
+            let (output, _): (Output, _) = serde_json_core::from_str(json).unwrap();
+            assert_eq!(output.validate(), Ok(()));
+            let Output::Light(light) = output else {
+                panic!()
+            };
+            for (level, want) in expected.iter().enumerate() {
+                let frames = light.frames(level as u8);
+                // At most two frames per controller and level, like openHAB.
+                assert!(frames.len() <= 4, "{level}: {frames:?}");
+                assert_eq!(result(&frames), *want, "level {level}");
+            }
+        }
+    }
+
     #[test]
     fn validation() {
         assert_eq!(Output::Light(light()).validate(), Ok(()));
