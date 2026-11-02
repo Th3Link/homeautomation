@@ -343,5 +343,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "207c1ddcb2389019cb448b409acd3d7f7996970f",
+  "date": "2026-11-02T20:21:50+01:00",
+  "subject": "Merge pull request #51 from Th3Link/feat/automation-runtime",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 487536,
+    "iram": 18680,
+    "dram_static": 41304,
+    "stack_budget": 155304,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509315,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
