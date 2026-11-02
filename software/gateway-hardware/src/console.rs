@@ -133,6 +133,11 @@ enum Commands<'a> {
     /// in if HTTPS doesn't work). Takes effect after a restart.
     #[set(one_of = ["on", "off"])]
     WebHttps(OnOff),
+    /// Publish Home Assistant discovery configurations on the first broker,
+    /// so the CAN devices show up in Home Assistant by themselves (off by
+    /// default).
+    #[set(one_of = ["on", "off"])]
+    HaDiscovery(OnOff),
     /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
     /// servers and the time.
     Network,
@@ -151,6 +156,9 @@ enum Commands<'a> {
     /// Set the NTP server the time comes from; `nts://host[:port]` for NTS
     /// (authenticated); `auto`: the one DHCPv6 names, else pool.ntp.org.
     NtpServer(&'a str),
+    /// Ask every node to announce itself (Discovery, ADR 0021); they
+    /// answer one after the other until acked.
+    Discover,
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
     /// Restart the gateway.
@@ -357,6 +365,15 @@ async fn handle_command(
             )
             .await
         }
+        Commands::HaDiscovery(v) => {
+            let on = matches!(v, OnOff::On);
+            let text = match crate::ha::set_enabled(on).await {
+                Ok(()) if on => "home assistant discovery on",
+                Ok(()) => "home assistant discovery off (what was published stays)",
+                Err(()) => "failed to persist ha-discovery",
+            };
+            respond(writer, text).await
+        }
         Commands::WebHttps(v) => respond(writer, cmd_web_https(matches!(v, OnOff::On)).await).await,
         Commands::Network => cmd_network(writer).await,
         // ~15 KB of state (the certificate status): on the heap while it
@@ -369,6 +386,14 @@ async fn handle_command(
             respond(writer, cmd_tls_built_in_roots(matches!(v, OnOff::On)).await).await
         }
         Commands::NtpServer(s) => respond(writer, cmd_ntp_server(s).await).await,
+        Commands::Discover => {
+            for send in
+                gateway_core::command::discover_sends(&gateway_core::command::Target::CanAll)
+            {
+                crate::can::send_raw(send.can_id, &send.data, send.request).await;
+            }
+            respond(writer, "discovery requested").await
+        }
         Commands::Ping => {
             send_can_message(CanMessageType::Available, &[], true).await;
             respond(writer, "ping sent").await
@@ -457,6 +482,14 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     respond(
         writer,
         fmt_msg(format_args!("web_username: {}", cfg.web_username)),
+    )
+    .await?;
+    respond(
+        writer,
+        fmt_msg(format_args!(
+            "ha_discovery: {}",
+            if crate::ha::enabled() { "on" } else { "off" }
+        )),
     )
     .await?;
     respond(

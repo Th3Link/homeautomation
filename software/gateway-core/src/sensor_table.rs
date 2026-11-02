@@ -1,11 +1,12 @@
 //! The latest reading of every sensor seen on the bus (for the web UI's
 //! sensor list): one entry per device, kind of reading and sensor id, kept
-//! up to date by the fixed-point sensor messages ([`crate::sensor`]).
+//! up to date by the fixed-point sensor messages and the ambient light
+//! ([`crate::sensor`]).
 
 use crate::can_message_type::CanMessageType;
 use heapless::Vec;
 
-/// What a fixed-point sensor message measures.
+/// What a sensor message measures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorKind {
     Temperature,
@@ -14,10 +15,16 @@ pub enum SensorKind {
     Co2Equivalent,
     VocBreath,
     AirQuality,
+    /// Measured CO2 (`Co2Sensor`), ppm.
+    Co2,
+    /// A BME680's raw gas resistance (`GasResistance`), kΩ.
+    GasResistance,
+    /// Ambient light (`AmbientLightSensor`), lux; one per device.
+    Brightness,
 }
 
 impl SensorKind {
-    /// The kind a message type carries, if it is a fixed-point sensor one.
+    /// The kind a message type carries, if it is a sensor one.
     pub fn from_message(msg_type: CanMessageType) -> Option<Self> {
         Some(match msg_type {
             CanMessageType::TemperatureSensor => Self::Temperature,
@@ -26,8 +33,26 @@ impl SensorKind {
             CanMessageType::Co2Equivalent => Self::Co2Equivalent,
             CanMessageType::VocBreath => Self::VocBreath,
             CanMessageType::AirQuality => Self::AirQuality,
+            CanMessageType::Co2Sensor => Self::Co2,
+            CanMessageType::GasResistance => Self::GasResistance,
+            CanMessageType::AmbientLightSensor => Self::Brightness,
             _ => return None,
         })
+    }
+
+    /// The message type that carries this kind.
+    pub fn message(self) -> CanMessageType {
+        match self {
+            Self::Temperature => CanMessageType::TemperatureSensor,
+            Self::Humidity => CanMessageType::HumiditySensor,
+            Self::Pressure => CanMessageType::PressureSensor,
+            Self::Co2Equivalent => CanMessageType::Co2Equivalent,
+            Self::VocBreath => CanMessageType::VocBreath,
+            Self::AirQuality => CanMessageType::AirQuality,
+            Self::Co2 => CanMessageType::Co2Sensor,
+            Self::GasResistance => CanMessageType::GasResistance,
+            Self::Brightness => CanMessageType::AmbientLightSensor,
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -38,6 +63,9 @@ impl SensorKind {
             Self::Co2Equivalent => "co2",
             Self::VocBreath => "voc",
             Self::AirQuality => "air_quality",
+            Self::Co2 => "co2_measured",
+            Self::GasResistance => "gas_resistance",
+            Self::Brightness => "brightness",
         }
     }
 
@@ -46,9 +74,23 @@ impl SensorKind {
         match self {
             Self::Temperature => "°C",
             Self::Humidity => "%",
-            _ => "",
+            Self::Pressure => "hPa",
+            Self::Brightness => "lx",
+            // Estimates from a BME680's gas sensor (ADR 0024), and a
+            // measurement.
+            Self::Co2Equivalent | Self::VocBreath | Self::Co2 => "ppm",
+            // An index, 0-500.
+            Self::AirQuality => "",
+            Self::GasResistance => "kΩ",
         }
     }
+}
+
+/// Whether the node can tell the gateway a slot and name for this sensor
+/// (`SensorConfig`): only for its DS18B20s. The others (a light switch's
+/// BME680 and light sensor) are known by their device.
+pub fn named_by_node(kind: SensorKind, sub_id: u64) -> bool {
+    kind == SensorKind::Temperature && !common_core::sensor_id::is_bme680(sub_id)
 }
 
 /// One sensor and what it reported last.
@@ -171,5 +213,30 @@ mod tests {
         );
         assert_eq!(SensorKind::from_message(CanMessageType::Relais), None);
         assert_eq!(SensorKind::Temperature.unit(), "°C");
+        assert_eq!(SensorKind::Co2Equivalent.unit(), "ppm");
+        assert_eq!(SensorKind::AirQuality.unit(), "");
+    }
+
+    #[test]
+    fn measured_co2_and_gas_resistance() {
+        for (msg, kind, name, unit) in [
+            (
+                CanMessageType::Co2Sensor,
+                SensorKind::Co2,
+                "co2_measured",
+                "ppm",
+            ),
+            (
+                CanMessageType::GasResistance,
+                SensorKind::GasResistance,
+                "gas_resistance",
+                "kΩ",
+            ),
+        ] {
+            assert_eq!(SensorKind::from_message(msg), Some(kind));
+            assert_eq!(kind.message(), msg);
+            assert_eq!(kind.name(), name);
+            assert_eq!(kind.unit(), unit);
+        }
     }
 }

@@ -37,6 +37,11 @@ esp-rtos            = { version = "0.4", features = ["esp32", "embassy"] }
 xtensa-lx           = { version = "0.13" }
 embedded-can        = { version = "0.4" }
 embedded-io-async   = { version = "0.7" }
+embedded-hal-async  = { version = "1.0" }
+bme68x              = { version = "0.2", default-features = false, features = ["async"] }
+# Our own air quality calculation (BSEC is not open), see ADR 0024.
+libscd              = { version = "0.5", default-features = false, features = ["async", "scd30"] }
+bme68x-iaq-co2      = { git = "https://github.com/Th3Link/bme68x-iaq-co2", rev = "977a9bc2d3d8dca16893d26abd24b293c2704db7", features = ["bme68x"] }
 embedded-storage    = { version = "0.3" }
 static_cell         = { version = "2.1", features = ["nightly"] }
 heapless            = { version = "0.9" }

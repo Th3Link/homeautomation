@@ -19,6 +19,7 @@ mod devices;
 mod error;
 mod firmware;
 mod json;
+mod location;
 mod mqtt;
 mod sensors;
 mod settings;
@@ -192,6 +193,7 @@ fn app() -> Router<impl PathRouter> {
     let api = firmware::routes(api);
     let api = sensors::routes(api);
     let api = tls::routes(api);
+    let api = location::routes(api);
     let app = Router::new().nest("/api/v1", api);
     assets::routes(app).layer(BasicAuth)
 }

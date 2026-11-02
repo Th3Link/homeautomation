@@ -47,6 +47,15 @@ pub enum Key {
     /// but not authenticated), per broker.
     MqttTlsInsecure = 21,
     Mqtt2TlsInsecure = 22,
+    /// Where the gateway is, for sun times: micro-degrees north/east as an
+    /// `i32` stored in a `u32` ([`crate::sun::Place::to_micro`]).
+    Latitude = 23,
+    Longitude = 24,
+    /// A POSIX `TZ` string ([`crate::tz`]).
+    TimeZone = 25,
+    /// Publish Home Assistant discovery configurations
+    /// ([`crate::ha_discovery`]) on the primary broker.
+    HomeAssistant = 26,
 }
 
 /// How many MQTT brokers the gateway talks to at the same time.
@@ -240,6 +249,9 @@ mod tests {
         assert_eq!(u8::from(Key::Mqtt2Password), 20);
         assert_eq!(u8::from(Key::MqttTlsInsecure), 21);
         assert_eq!(u8::from(Key::Mqtt2TlsInsecure), 22);
+        assert_eq!(u8::from(Key::Latitude), 23);
+        assert_eq!(u8::from(Key::Longitude), 24);
+        assert_eq!(u8::from(Key::TimeZone), 25);
     }
 
     #[test]

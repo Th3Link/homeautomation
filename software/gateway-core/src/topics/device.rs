@@ -19,6 +19,8 @@ pub fn sensor_name(msg_type: CanMessageType) -> &'static str {
         CanMessageType::Co2Equivalent => "co2",
         CanMessageType::VocBreath => "voc",
         CanMessageType::AirQuality => "air_quality",
+        CanMessageType::Co2Sensor => "co2_measured",
+        CanMessageType::GasResistance => "gas_resistance",
         CanMessageType::AmbientLightSensor => "brightness",
         _ => "unknown",
     }
