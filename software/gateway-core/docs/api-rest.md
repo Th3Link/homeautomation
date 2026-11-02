@@ -157,7 +157,7 @@ refused item answers `400 invalid` with the `field` it is about.
 |---|---|
 | `GET /automation` | `enabled` (the master switch), the counts of `outputs`, `bindings`, `motion`, `schedules`, and `last_button` (the last button event: `trigger` as in a binding and `age_s`, or `null`), for learning a binding |
 | `PATCH /automation` | `enabled`: off, nothing switches by itself (outputs can still be commanded). Answers like `GET` |
-| `GET /automation/outputs` | `items`: the loaded outputs with `name`, `kind` (`light`, `dimmer`, `relay`, `shutter`, `group`), `level` and for shutters `movement` (`up`, `down`, `stopped`) |
+| `GET /automation/outputs` | `items`: the loaded outputs with `name`, `kind` (`light`, `dimmer`, `relay`, `shutter`, `group`), `level`, for lights `top` (the highest level) and for shutters `movement` (`up`, `down`, `stopped`) |
 | `GET /automation/outputs/:name`, `PUT`, `DELETE` | the output: `{"light": {...}}`, `{"dimmer": {...}}`, `{"relay": {...}}`, `{"shutter": {...}}` or `{"group": {"members": [...]}}`. `PUT` answers `201` for a new one, else `200` |
 | `POST /automation/outputs/:name/command` | an operation: `"on"`, `"off"`, `"toggle"`, `{"set": n}`, `"max"`, `"inc"`, `"dec"`, `{"on_for": ms}`, `"up"`, `"down"`, `"up_hold"`, `"down_hold"`, `"stop"`. `202` |
 | `GET /automation/bindings?offset=n` | `total`, `offset`, `items`: up to 8 bindings with their `slot`, `trigger` and `actions` |
@@ -171,7 +171,7 @@ refused item answers `400 invalid` with the `field` it is about.
 
 ## The browser UI
 
-`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/devices/:device` answer with `index.html`,
+`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/automation`, `/automation/:tab`, `/devices/:device` answer with `index.html`,
 `/assets/app.js` and `/assets/style.css` with the rest, all gzip'd and part
 of the firmware (`gateway-hardware/src/web/assets.rs`). Edit the sources in
 `software/gateway-web/src` and run `npm run build` there: the result in

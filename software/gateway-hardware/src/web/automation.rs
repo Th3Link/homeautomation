@@ -252,6 +252,9 @@ struct OutputView<'a> {
     kind: &'static str,
     /// Light level, dimmer value, relay 0/1.
     level: u8,
+    /// Lights: the top level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top: Option<u8>,
     /// Shutters: `up`, `down`, `stopped`.
     #[serde(skip_serializing_if = "Option::is_none")]
     movement: Option<&'static str>,
@@ -284,6 +287,7 @@ async fn outputs() -> Result<impl IntoResponse, ApiError> {
                 OutputKind::Group => "group",
             },
             level: state.level,
+            top: e.light_top(i),
             movement: (kind == OutputKind::Shutter).then_some(match state.movement {
                 Movement::Up => "up",
                 Movement::Down => "down",
