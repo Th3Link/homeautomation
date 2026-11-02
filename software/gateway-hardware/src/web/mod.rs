@@ -14,6 +14,7 @@
 //! back in if TLS ever doesn't work.
 
 mod assets;
+mod automation;
 mod commands;
 mod devices;
 mod error;
@@ -96,7 +97,7 @@ async fn redirect_task(stack: Stack<'static>) -> ! {
 
 async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
     let app = app();
-    let mut http_buffer = [0u8; 1536];
+    let mut http_buffer = [0u8; crate::https::HTTP_BUFFER];
     let mut tcp_rx = [0u8; 4096];
     let mut tcp_tx = [0u8; 1024];
     picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
@@ -194,6 +195,7 @@ fn app() -> Router<impl PathRouter> {
     let api = sensors::routes(api);
     let api = tls::routes(api);
     let api = location::routes(api);
+    let api = automation::routes(api);
     let app = Router::new().nest("/api/v1", api);
     assets::routes(app).layer(BasicAuth)
 }

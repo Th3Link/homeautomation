@@ -7,7 +7,7 @@ use crate::x509::time::DAY;
 use serde::{Deserialize, Serialize};
 
 /// A time of day: on the clock, or relative to the sun.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Time {
     /// Local time.
@@ -67,7 +67,7 @@ impl Context<'_> {
 }
 
 /// Something that holds or not at a given moment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Condition {
     /// A brightness sensor reads less than `lux`.

@@ -65,6 +65,7 @@ async fn main(spawner: Spawner) -> ! {
     )
     .await;
     spawner.spawn(gateway_hardware::lamps::pacer_task().unwrap());
+    spawner.spawn(gateway_hardware::automation::automation_task().unwrap());
 
     // Commissioning console, up regardless of network state — GPIO3/GPIO1
     // (ESP32 default UART0 pins) aren't used by anything else.

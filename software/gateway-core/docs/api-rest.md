@@ -143,9 +143,35 @@ support:
 | `PUT /tls/est/identity`, `DELETE` | the EST device identity: one PEM body with the certificate(s) and the private key; the key can't be read back. `204` |
 | `POST /tls/est/enroll` | enroll (or renew) now; `409 not_est_mode` outside EST mode. `202` |
 
+## Automation
+
+The gateway's own automation (ADR 0025, `gateway_core::automation`):
+outputs, button bindings, motion lights and schedules, one JSON object per
+item, stored on flash (the `storage` partition). A change is loaded right
+away; the states of what is still there are kept. `:name` is 1 to 20
+letters, digits, `-` and `_`; outputs, motion lights and schedules each
+have their own names (a motion light and a schedule can't share one). A
+refused item answers `400 invalid` with the `field` it is about.
+
+| Route | Body / answer |
+|---|---|
+| `GET /automation` | `enabled` (the master switch), the counts of `outputs`, `bindings`, `motion`, `schedules`, and `last_button` (the last button event: `trigger` as in a binding and `age_s`, or `null`), for learning a binding |
+| `PATCH /automation` | `enabled`: off, nothing switches by itself (outputs can still be commanded). Answers like `GET` |
+| `GET /automation/outputs` | `items`: the loaded outputs with `name`, `kind` (`light`, `dimmer`, `relay`, `shutter`, `group`), `level`, for lights `top` (the highest level) and for shutters `movement` (`up`, `down`, `stopped`) |
+| `GET /automation/outputs/:name`, `PUT`, `DELETE` | the output: `{"light": {...}}`, `{"dimmer": {...}}`, `{"relay": {...}}`, `{"shutter": {...}}` or `{"group": {"members": [...]}}`. `PUT` answers `201` for a new one, else `200` |
+| `POST /automation/outputs/:name/command` | an operation: `"on"`, `"off"`, `"toggle"`, `{"set": n}`, `"max"`, `"inc"`, `"dec"`, `{"on_for": ms}`, `"up"`, `"down"`, `"up_hold"`, `"down_hold"`, `"stop"`. `202` |
+| `GET /automation/bindings?offset=n` | `total`, `offset`, `items`: up to 8 bindings with their `slot`, `trigger` and `actions` |
+| `POST /automation/bindings` | a binding (`trigger`: `device` `{type, id}`, `button`, `event` `single`/`double`/`triple`/`hold`/`released`; up to 4 `actions`: `{"output": {"name", "op"}}`, `{"automation": {"name", "switch": "enable"/"disable"/"toggle"}}`, `{"nightlight": {"device", "value"}}`). `201` with its `slot` |
+| `GET /automation/bindings/:slot`, `PUT`, `DELETE` | one binding |
+| `GET /automation/motion` | `items`: `name`, `enabled`, `state` (`idle`, `auto`, `manual`, `lockout`), `remaining_s` in `auto` and `lockout` |
+| `GET /automation/motion/:name`, `PUT`, `DELETE` | the motion light: `detectors`, `output`, `level`, `timeout_s`, `lockout_s`, `conditions`. A new one is enabled |
+| `PATCH /automation/motion/:name` | `enabled`. `202` |
+| `GET /automation/schedules` | `items`: `name`, `enabled`, `state` (`running`, `idle`) |
+| `GET /automation/schedules/:name`, `PUT`, `DELETE`, `PATCH` | like the motion lights; a schedule is `output` and up to 4 `windows` |
+
 ## The browser UI
 
-`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/devices/:device` answer with `index.html`,
+`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/automation`, `/automation/:tab`, `/devices/:device` answer with `index.html`,
 `/assets/app.js` and `/assets/style.css` with the rest, all gzip'd and part
 of the firmware (`gateway-hardware/src/web/assets.rs`). Edit the sources in
 `software/gateway-web/src` and run `npm run build` there: the result in
