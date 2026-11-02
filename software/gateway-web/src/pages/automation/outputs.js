@@ -180,18 +180,6 @@ function LightEdit({ value, onChange, devices }) {
 
     <h3>Levels</h3>
     <p class="muted">The value (0–255) of each lamp group per level; level 0 is off. The controllers fade by themselves and take one change per second.</p>
-    <div class="table-wrap"><table class="levels">
-      <thead><tr><th>Level</th>${groups.map((_, i) => html`<th>Group ${i + 1}</th>`)}<th><button class="link" onClick=${() => tryLevel(null)}>All off</button></th></tr></thead>
-      <tbody>
-        ${value.levels.map(
-          (l, i) => html`<tr key=${i}>
-            <td>${i + 1}${i + 1 === value.default_level && html` <span class="badge muted">default</span>`}</td>
-            ${l.map((v, j) => html`<td><input type="number" class="short" min="0" max="255" aria-label=${`Level ${i + 1}, group ${j + 1}`} value=${v} onInput=${(e) => setValue(i, j, +e.target.value)} /></td>`)}
-            <td><button onClick=${() => tryLevel(l)} title="Show this level on the lamps">Try</button></td>
-          </tr>`,
-        )}
-      </tbody>
-    </table></div>
     <div class="row">
       <${Field} label="Levels">
         <input type="number" min="1" max=${MAX_LEVELS} value=${value.levels.length} onInput=${(e) => e.target.value && setCount(Math.max(1, Math.min(MAX_LEVELS, +e.target.value)))} />
@@ -205,7 +193,19 @@ function LightEdit({ value, onChange, devices }) {
         <input type="number" min="1" max="255" value=${rampTo} onInput=${(e) => setRampTo(+e.target.value)} />
       <//>
       <button onClick=${() => onChange({ ...value, levels: ramp(value.levels.length, groups.length, 2, rampTo, 3) })}>Fill ramp</button>
-    </div>`;
+    </div>
+    <div class="table-wrap"><table class="levels">
+      <thead><tr><th>Level</th>${groups.map((_, i) => html`<th>Group ${i + 1}</th>`)}<th><button class="link" onClick=${() => tryLevel(null)}>All off</button></th></tr></thead>
+      <tbody>
+        ${value.levels.map(
+          (l, i) => html`<tr key=${i}>
+            <td>${i + 1}${i + 1 === value.default_level && html` <span class="badge muted">default</span>`}</td>
+            ${l.map((v, j) => html`<td><input type="number" class="short" min="0" max="255" aria-label=${`Level ${i + 1}, group ${j + 1}`} value=${v} onInput=${(e) => setValue(i, j, +e.target.value)} /></td>`)}
+            <td><button onClick=${() => tryLevel(l)} title="Show this level on the lamps">Try</button></td>
+          </tr>`,
+        )}
+      </tbody>
+    </table></div>`;
 }
 
 // ---- the other kinds -----------------------------------------------------
