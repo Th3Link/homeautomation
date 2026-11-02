@@ -53,6 +53,9 @@ pub enum Key {
     Longitude = 24,
     /// A POSIX `TZ` string ([`crate::tz`]).
     TimeZone = 25,
+    /// Publish Home Assistant discovery configurations
+    /// ([`crate::ha_discovery`]) on the primary broker.
+    HomeAssistant = 26,
 }
 
 /// How many MQTT brokers the gateway talks to at the same time.

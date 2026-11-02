@@ -294,6 +294,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bme68x"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c148e88cb072b93a437b748e591c1a3df326888edcf81682626369e2d30d6a"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
+
+[[package]]
+name = "bme68x-iaq-co2"
+version = "0.1.0"
+source = "git+https://github.com/Th3Link/bme68x-iaq-co2?rev=977a9bc2d3d8dca16893d26abd24b293c2704db7#977a9bc2d3d8dca16893d26abd24b293c2704db7"
+dependencies = [
+ "bme68x",
+ "libm",
+]
+
+[[package]]
 name = "bon"
 version = "3.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -373,6 +392,8 @@ dependencies = [
  "async-trait",
  "bareminal_cli",
  "bareminal_macros",
+ "bme68x",
+ "bme68x-iaq-co2",
  "cancomponents-core",
  "common-hardware",
  "critical-section",
@@ -382,6 +403,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-can",
+ "embedded-hal-async",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "esp-backtrace",
@@ -392,6 +414,7 @@ dependencies = [
  "esp-rtos",
  "esp-storage",
  "heapless 0.9.3",
+ "libscd",
  "nb 1.1.0",
  "num_enum",
  "sequential-storage",
@@ -2438,6 +2461,15 @@ name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
+name = "libscd"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb97b629b6e642ec91432775cc9c0983877aac136123d8baf346c4fb0246cb1a"
+dependencies = [
+ "embedded-hal-async",
+]
 
 [[package]]
 name = "libz-sys"

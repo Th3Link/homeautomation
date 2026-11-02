@@ -1,182 +1,275 @@
-//! Pure press/hold/multi-click decision logic for a physical button.
+//! Press/hold/click decisions for a physical button, made exactly the way
+//! the original C++ firmware made them (esp-idf-lib's `button` driver,
+//! polled every 10 ms, plus the firmware's `Button::dispatch`), so that old
+//! and new nodes send the same `ButtonEvent`s and the gateway, MQTT topics
+//! and the automations behind them don't notice which firmware runs:
 //!
-//! This is deliberately hardware-free: it only decides *what state to move
-//! to* and *what [`ButtonMessage`] to emit* in response to an edge or a
-//! timeout. The caller owns all timing (debounce, which timeout to race
-//! against a GPIO edge) and is expected to drive the FSM like this:
+//! - **Press:** `Pressed`, count 0. For 50 ms after it, the level is
+//!   ignored (bounce).
+//! - **Clicks:** releasing starts a 250 ms window; `Single` (one release) or
+//!   `Double` (two) is sent when it closes, `Tripple` right at the third
+//!   release. Count 0. Further presses during a click sequence aren't sent.
+//! - **Hold:** from 2 s on (1.5 s until autorepeat starts, then one
+//!   interval), `Hold` every 500 ms with count 1, 2, …; letting go sends
+//!   `Released` with the last count.
 //!
-//! - In [`ButtonState::Released`], wait for an edge only (no timeout race)
-//!   and call [`ButtonFsm::on_edge`].
-//! - In every other state, race a GPIO edge against a state-specific
-//!   timeout (hold threshold / hold repeat / multi-click window) and call
-//!   [`ButtonFsm::on_edge`] or [`ButtonFsm::on_timeout`] accordingly.
+//! Hardware-free: the caller polls the button's level every [`POLL_MS`] and
+//! sends what [`ButtonFsm::poll`] returns.
 
 use crate::button_message::{ButtonMessage, ButtonState};
 
-/// A debounced GPIO transition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ButtonEdge {
+/// How often the level is sampled.
+pub const POLL_MS: u32 = 10;
+/// After a press, the level is ignored this long.
+const DEAD_TIME_MS: u32 = 50;
+/// Held this long, the button starts repeating ...
+const AUTOREPEAT_TIMEOUT_MS: u32 = 1500;
+/// ... a `Hold` every this long.
+const AUTOREPEAT_INTERVAL_MS: u32 = 500;
+/// After a release, a further click is waited for this long.
+const MULTI_CLICK_MS: u32 = 250;
+
+/// The messages one poll produced (the click window closing and an edge can
+/// fall into the same poll).
+pub type Messages = heapless::Vec<ButtonMessage, 2>;
+
+/// What the button driver reports (esp-idf-lib's `button_state_t`).
+#[derive(Clone, Copy)]
+enum DriverEvent {
     Pressed,
     Released,
+    /// An autorepeat tick, and after every release.
+    Clicked,
 }
 
 pub struct ButtonFsm {
-    index: usize,
+    num: u8,
+    // The driver's view.
+    down: bool,
+    pressed_ms: u32,
+    repeating_ms: u32,
+    // The firmware's view.
     state: ButtonState,
-    clicks: u16,
-    hold_repeat: u16,
+    count: u16,
+    /// Time left in the click window.
+    window_ms: Option<u32>,
 }
 
 impl ButtonFsm {
-    pub fn new(index: usize) -> Self {
+    /// A button reported as number `num` (0-3 on the board, 4-7 on the
+    /// extension).
+    pub fn new(num: u8) -> Self {
         Self {
-            index,
+            num,
+            down: false,
+            pressed_ms: 0,
+            repeating_ms: 0,
             state: ButtonState::Released,
-            clicks: 0,
-            hold_repeat: 0,
+            count: 0,
+            window_ms: None,
         }
     }
 
-    pub fn state(&self) -> ButtonState {
-        self.state
-    }
-
-    /// Feed a debounced GPIO edge to the FSM. Returns a message to send, if
-    /// this edge causes one.
-    pub fn on_edge(&mut self, edge: ButtonEdge) -> Option<ButtonMessage> {
-        match self.state {
-            ButtonState::Released => {
-                if edge == ButtonEdge::Pressed {
-                    self.state = ButtonState::Pressed;
-                    Some(ButtonMessage::new(self.index, ButtonState::Pressed, 0))
-                } else {
-                    None
-                }
-            }
-            ButtonState::Pressed => {
-                // Debounce already guarantees the only edge reachable here
-                // is the release that ends the first click, so the edge
-                // direction itself doesn't need checking.
-                self.clicks += 1;
-                self.state = ButtonState::Multi;
-                None
-            }
-            ButtonState::Hold => {
+    /// One poll, [`POLL_MS`] after the previous one, with whether the
+    /// button is pressed now.
+    pub fn poll(&mut self, pressed: bool) -> Messages {
+        let mut out = Messages::new();
+        if let Some(left) = self.window_ms {
+            let left = left.saturating_sub(POLL_MS);
+            if left == 0 {
+                self.window_ms = None;
+                self.emit(&mut out);
                 self.state = ButtonState::Released;
-                self.hold_repeat = 0;
-                Some(ButtonMessage::new(self.index, ButtonState::Released, 0))
+            } else {
+                self.window_ms = Some(left);
             }
-            ButtonState::Multi => match edge {
-                ButtonEdge::Pressed => {
-                    self.clicks += 1;
-                    Some(ButtonMessage::new(self.index, ButtonState::Pressed, 0))
-                }
-                ButtonEdge::Released => {
-                    Some(ButtonMessage::new(self.index, ButtonState::Released, 0))
-                }
-            },
-            _ => None,
         }
+
+        if self.down && self.pressed_ms < DEAD_TIME_MS {
+            self.pressed_ms += POLL_MS;
+            return out;
+        }
+        if pressed {
+            if !self.down {
+                self.down = true;
+                self.pressed_ms = 0;
+                self.repeating_ms = 0;
+                self.dispatch(DriverEvent::Pressed, &mut out);
+                return out;
+            }
+            self.pressed_ms += POLL_MS;
+            if self.pressed_ms < AUTOREPEAT_TIMEOUT_MS {
+                return out;
+            }
+            self.repeating_ms += POLL_MS;
+            if self.repeating_ms >= AUTOREPEAT_INTERVAL_MS {
+                self.repeating_ms = 0;
+                self.dispatch(DriverEvent::Clicked, &mut out);
+            }
+        } else if self.down {
+            self.down = false;
+            self.dispatch(DriverEvent::Released, &mut out);
+            self.dispatch(DriverEvent::Clicked, &mut out);
+        }
+        out
     }
 
-    /// Feed a state-specific timeout (hold threshold / hold repeat /
-    /// multi-click window) to the FSM. Returns a message to send, if this
-    /// timeout causes one.
-    pub fn on_timeout(&mut self) -> Option<ButtonMessage> {
-        match self.state {
-            ButtonState::Pressed => {
+    fn dispatch(&mut self, event: DriverEvent, out: &mut Messages) {
+        match (event, self.state) {
+            (DriverEvent::Pressed, ButtonState::Released) => {
+                self.state = ButtonState::Pressed;
+                self.count = 0;
+                self.emit(out);
+            }
+            (DriverEvent::Released, ButtonState::Pressed) => {
+                self.state = ButtonState::Single;
+                self.window_ms = Some(MULTI_CLICK_MS);
+            }
+            (DriverEvent::Released, ButtonState::Single) => {
+                self.state = ButtonState::Double;
+                self.window_ms = Some(MULTI_CLICK_MS);
+            }
+            (DriverEvent::Released, ButtonState::Double) => {
+                self.window_ms = None;
+                self.state = ButtonState::Tripple;
+                self.emit(out);
+                self.state = ButtonState::Released;
+            }
+            (DriverEvent::Released, ButtonState::Hold) => {
+                self.state = ButtonState::Released;
+                self.emit(out);
+            }
+            (DriverEvent::Clicked, ButtonState::Pressed | ButtonState::Hold) => {
                 self.state = ButtonState::Hold;
-                Some(ButtonMessage::new(self.index, ButtonState::Hold, 0))
+                self.count = self.count.wrapping_add(1);
+                self.emit(out);
             }
-            ButtonState::Hold => {
-                self.hold_repeat += 1;
-                Some(ButtonMessage::new(
-                    self.index,
-                    ButtonState::Hold,
-                    self.hold_repeat,
-                ))
-            }
-            ButtonState::Multi => {
-                self.state = ButtonState::Released;
-                let clicks = self.clicks;
-                self.clicks = 0;
-                Some(ButtonMessage::new(self.index, ButtonState::Multi, clicks))
-            }
-            _ => None,
+            _ => {}
         }
+    }
+
+    fn emit(&self, out: &mut Messages) {
+        // At most two per poll: the window closing, and one edge.
+        let _ = out.push(ButtonMessage::new(self.num, self.state, self.count));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
+    use std::vec::Vec;
+
+    /// Polls `fsm` with `pressed` for `ms` and collects (time, message).
+    fn run(
+        fsm: &mut ButtonFsm,
+        at: &mut u32,
+        pressed: bool,
+        ms: u32,
+        out: &mut Vec<(u32, ButtonMessage)>,
+    ) {
+        for _ in 0..ms / POLL_MS {
+            *at += POLL_MS;
+            for msg in fsm.poll(pressed) {
+                out.push((*at, msg));
+            }
+        }
+    }
+
+    fn states(events: &[(u32, ButtonMessage)]) -> Vec<(ButtonState, u16)> {
+        events.iter().map(|(_, m)| (m.state, m.count)).collect()
+    }
 
     #[test]
     fn single_click() {
-        let mut fsm = ButtonFsm::new(0);
-        assert_eq!(
-            fsm.on_edge(ButtonEdge::Pressed).unwrap().state,
-            ButtonState::Pressed
-        );
-        assert!(fsm.on_edge(ButtonEdge::Released).is_none());
-        assert_eq!(fsm.state(), ButtonState::Multi);
-        // Multi-click window expires with exactly one click recorded.
-        let msg = fsm.on_timeout().unwrap();
-        assert_eq!(msg.state, ButtonState::Single);
-        assert_eq!(fsm.state(), ButtonState::Released);
-    }
-
-    #[test]
-    fn double_click() {
-        let mut fsm = ButtonFsm::new(0);
-        fsm.on_edge(ButtonEdge::Pressed);
-        fsm.on_edge(ButtonEdge::Released); // -> Multi, clicks = 1
-        fsm.on_edge(ButtonEdge::Pressed); // second press within window
-        fsm.on_edge(ButtonEdge::Released); // second release within window
-        let msg = fsm.on_timeout().unwrap();
-        assert_eq!(msg.state, ButtonState::Double);
-    }
-
-    #[test]
-    fn hold_then_repeat_then_release() {
         let mut fsm = ButtonFsm::new(2);
-        fsm.on_edge(ButtonEdge::Pressed);
-        let hold_msg = fsm.on_timeout().unwrap();
-        assert_eq!(hold_msg.state, ButtonState::Hold);
-        assert_eq!(hold_msg.count, 0);
-        assert_eq!(fsm.state(), ButtonState::Hold);
-
-        let repeat1 = fsm.on_timeout().unwrap();
-        assert_eq!(repeat1.state, ButtonState::Hold);
-        assert_eq!(repeat1.count, 1);
-
-        let repeat2 = fsm.on_timeout().unwrap();
-        assert_eq!(repeat2.count, 2);
-
-        let released = fsm.on_edge(ButtonEdge::Released).unwrap();
-        assert_eq!(released.state, ButtonState::Released);
-        assert_eq!(fsm.state(), ButtonState::Released);
+        let (mut at, mut out) = (0, Vec::new());
+        run(&mut fsm, &mut at, true, 100, &mut out);
+        run(&mut fsm, &mut at, false, 400, &mut out);
+        assert_eq!(
+            states(&out),
+            [(ButtonState::Pressed, 0), (ButtonState::Single, 0)]
+        );
+        assert!(out.iter().all(|(_, m)| m.num == 2));
+        // Sent 250 ms after the release.
+        assert_eq!(out[1].0, 110 + MULTI_CLICK_MS);
     }
 
     #[test]
-    fn five_clicks_falls_back_to_multi_not_a_crash() {
+    fn double_and_triple_click() {
         let mut fsm = ButtonFsm::new(0);
-        fsm.on_edge(ButtonEdge::Pressed);
-        fsm.on_edge(ButtonEdge::Released); // clicks = 1
-        for _ in 0..4 {
-            fsm.on_edge(ButtonEdge::Pressed); // clicks += 1
-            fsm.on_edge(ButtonEdge::Released);
+        let (mut at, mut out) = (0, Vec::new());
+        for _ in 0..2 {
+            run(&mut fsm, &mut at, true, 100, &mut out);
+            run(&mut fsm, &mut at, false, 100, &mut out);
         }
-        // clicks == 5 now
-        let msg = fsm.on_timeout().unwrap();
-        assert_eq!(msg.state, ButtonState::Multi);
-        assert_eq!(msg.count, 5);
+        run(&mut fsm, &mut at, false, 300, &mut out);
+        assert_eq!(
+            states(&out),
+            [(ButtonState::Pressed, 0), (ButtonState::Double, 0)]
+        );
+
+        out.clear();
+        for _ in 0..3 {
+            run(&mut fsm, &mut at, true, 100, &mut out);
+            run(&mut fsm, &mut at, false, 100, &mut out);
+        }
+        // Tripple goes out right at the third release, nothing after it.
+        let tripple_at = out[1].0;
+        run(&mut fsm, &mut at, false, 300, &mut out);
+        assert_eq!(
+            states(&out),
+            [(ButtonState::Pressed, 0), (ButtonState::Tripple, 0)]
+        );
+        assert_eq!(tripple_at, at - 300 - 100 + POLL_MS);
     }
 
     #[test]
-    fn released_ignores_release_edge() {
+    fn hold_repeats_and_released_carries_the_count() {
+        let mut fsm = ButtonFsm::new(1);
+        let (mut at, mut out) = (0, Vec::new());
+        run(&mut fsm, &mut at, true, 2800, &mut out);
+        run(&mut fsm, &mut at, false, 400, &mut out);
+        assert_eq!(
+            states(&out),
+            [
+                (ButtonState::Pressed, 0),
+                (ButtonState::Hold, 1),
+                (ButtonState::Hold, 2),
+                (ButtonState::Released, 2),
+            ]
+        );
+        // Pressed at 10 ms; the first hold 2 s later, then every 500 ms.
+        assert_eq!(out[1].0, 2000);
+        assert_eq!(out[2].0, 2500);
+    }
+
+    #[test]
+    fn bounce_after_the_press_is_ignored() {
         let mut fsm = ButtonFsm::new(0);
-        assert!(fsm.on_edge(ButtonEdge::Released).is_none());
-        assert_eq!(fsm.state(), ButtonState::Released);
+        let (mut at, mut out) = (0, Vec::new());
+        run(&mut fsm, &mut at, true, 10, &mut out);
+        // Contact bounce within the dead time.
+        run(&mut fsm, &mut at, false, 20, &mut out);
+        run(&mut fsm, &mut at, true, 100, &mut out);
+        run(&mut fsm, &mut at, false, 400, &mut out);
+        assert_eq!(
+            states(&out),
+            [(ButtonState::Pressed, 0), (ButtonState::Single, 0)]
+        );
+    }
+
+    #[test]
+    fn click_then_hold_is_only_a_single() {
+        let mut fsm = ButtonFsm::new(0);
+        let (mut at, mut out) = (0, Vec::new());
+        run(&mut fsm, &mut at, true, 100, &mut out);
+        run(&mut fsm, &mut at, false, 100, &mut out);
+        run(&mut fsm, &mut at, true, 3000, &mut out);
+        run(&mut fsm, &mut at, false, 400, &mut out);
+        assert_eq!(
+            states(&out),
+            [(ButtonState::Pressed, 0), (ButtonState::Single, 0)]
+        );
     }
 }

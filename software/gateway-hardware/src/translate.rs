@@ -58,6 +58,7 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         }
         CanMessageType::ButtonEvent => {
             if let Ok(event) = ButtonEvent::from_bytes(data) {
+                crate::ha::observe_button(id.device_key(), event.button_id).await;
                 if let Some(body) = button::button_body(event) {
                     let key = id.device_key();
                     publish_with_custom_string(
@@ -71,6 +72,7 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         }
         CanMessageType::PirSensor => {
             if let Ok(event) = ButtonEvent::from_bytes(data) {
+                crate::ha::observe_presence(id.device_key()).await;
                 let body = button::presence_body(event);
                 let key = id.device_key();
                 publish_with_custom_string(
@@ -89,6 +91,13 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
             }
         }
         CanMessageType::SensorConfig if !request => dispatch_sensor_config(id, data).await,
+        // A node announcing itself (ADR 0021): it repeats until acked. The
+        // device list took its name already.
+        CanMessageType::Discovery if !request => {
+            let ack =
+                gateway_core::can_ota::target_id(id.device_key(), CanMessageType::DiscoveryAck);
+            crate::can::send_raw(ack, &[], false).await;
+        }
         // The answers of a node to a firmware update.
         CanMessageType::OtaControl if !request => {
             if let Ok(control) = gateway_core::ota::OtaControl::from_bytes(data) {
@@ -100,7 +109,9 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         | CanMessageType::HumiditySensor
         | CanMessageType::Co2Equivalent
         | CanMessageType::VocBreath
-        | CanMessageType::AirQuality => {
+        | CanMessageType::AirQuality
+        | CanMessageType::Co2Sensor
+        | CanMessageType::GasResistance => {
             if let Ok(reading) = FixedPointReading::from_bytes(data) {
                 let mut body: HString<24> = HString::new();
                 // Only temperatures can be below zero; the other sensors'
@@ -114,13 +125,7 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 let key = id.device_key();
                 let msg_type = id.msg_type;
                 if let Some(kind) = gateway_core::sensor_table::SensorKind::from_message(msg_type) {
-                    crate::sensor_list::SENSOR_LIST.lock().await.observe(
-                        key,
-                        kind,
-                        reading.sub_id,
-                        value as f32,
-                        crate::sensor_list::now_seconds(),
-                    );
+                    observe_sensor(key, kind, reading.sub_id, value as f32).await;
                 }
                 // The sensor's name, if its node told us one: asked for once
                 // per device, the first reading is the one that makes us ask.
@@ -131,7 +136,11 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                         .and_then(|sensor| sensor.name)
                         .map(|name| HString::<8>::try_from(name.as_str()).unwrap_or_default())
                         .unwrap_or_default();
-                    let ask = info.should_ask(key, crate::sensor_list::now_seconds());
+                    // Only DS18B20s have names on their node.
+                    let ask =
+                        gateway_core::sensor_table::SensorKind::from_message(msg_type).is_some_and(
+                            |kind| gateway_core::sensor_table::named_by_node(kind, reading.sub_id),
+                        ) && info.should_ask(key, crate::sensor_list::now_seconds());
                     drop(info);
                     if ask {
                         let id = key + u32::from(u8::from(CanMessageType::SensorConfig));
@@ -160,6 +169,14 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 let mut body: HString<16> = HString::new();
                 let _ = core::fmt::write(&mut body, format_args!("{value}"));
                 let key = id.device_key();
+                // One light sensor per device: sub_id 0.
+                observe_sensor(
+                    key,
+                    gateway_core::sensor_table::SensorKind::Brightness,
+                    0,
+                    value as f32,
+                )
+                .await;
                 publish_with_custom_string(
                     key,
                     |cs| device::ambient_light_topic(key, cs),
@@ -176,9 +193,30 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
     }
 }
 
+/// Keeps a reading for the sensor list; a sensor not seen before is news for
+/// Home Assistant discovery.
+async fn observe_sensor(
+    key: u32,
+    kind: gateway_core::sensor_table::SensorKind,
+    sub_id: u64,
+    value: f32,
+) {
+    let mut list = crate::sensor_list::SENSOR_LIST.lock().await;
+    let known = list
+        .iter()
+        .any(|e| e.device_key == key && e.kind == kind && e.sub_id == sub_id);
+    list.observe(key, kind, sub_id, value, crate::sensor_list::now_seconds());
+    drop(list);
+    if !known {
+        crate::ha::changed();
+    }
+}
+
 /// Takes in what a node says about its sensors (the answer to a list request
 /// or to a command).
 async fn dispatch_sensor_config(id: CanId, data: &[u8]) {
+    // Names change topics.
+    crate::ha::changed();
     use gateway_core::sensor_config::SensorConfig;
     use gateway_core::sensor_info::SensorInfo;
     let key = id.device_key();
@@ -239,6 +277,13 @@ pub async fn publish_self_available(slot: usize) {
 /// when the broker delivers the message from its retained store rather than
 /// because somebody just published it.
 pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
+    // Home Assistant (re)started: it gets the discovery configurations again.
+    if topic == gateway_core::ha_discovery::STATUS_TOPIC {
+        if body == "online" && !retained {
+            crate::ha::republish().await;
+        }
+        return;
+    }
     if gateway_core::topics::is_gateway_restart_topic(topic) {
         // A retained restart request would restart the gateway again after
         // every reconnect, forever.

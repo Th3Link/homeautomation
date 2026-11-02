@@ -187,9 +187,8 @@ pub async fn set_send_interval_secs(secs: u32) -> Result<u32, ()> {
     Ok(secs)
 }
 
-/// Starts measuring the DS18B20 sensors on `pin`.
-pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
-    crate::sensor_config::init(spawner).await;
+/// Reads the send interval from flash (it's also the sensor board's).
+pub async fn load_send_interval() {
     if let Some(secs) = config()
         .await
         .get_u32(config::Key::SensorSendInterval)
@@ -200,6 +199,12 @@ pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
             Ordering::Relaxed,
         );
     }
+}
+
+/// Starts measuring the DS18B20 sensors on `pin`.
+pub async fn init(pin: impl Pin + 'static, spawner: &Spawner) {
+    crate::sensor_config::init(spawner).await;
+    load_send_interval().await;
     spawner.spawn(temperature_task(BitBangBus::new(pin)).unwrap());
 }
 
