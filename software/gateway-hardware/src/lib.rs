@@ -27,6 +27,7 @@ pub mod heating_state;
 pub mod https;
 pub mod lamps;
 pub mod mqtt;
+pub mod nts;
 pub mod resolve;
 pub mod sensor_list;
 pub mod stack;
