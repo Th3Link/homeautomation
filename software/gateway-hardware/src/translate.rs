@@ -31,6 +31,17 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 )
                 .await;
             }
+            if let Ok(msg) = RelaisMsg::from_bytes(data) {
+                let mut body: HString<8> = HString::new();
+                let _ = core::fmt::write(&mut body, format_args!("{}", msg.state));
+                let key = id.device_key();
+                publish_with_custom_string(
+                    key,
+                    |cs| relais_topics::relais_channel_state_topic(key, cs, msg.bank, msg.number),
+                    body.as_str(),
+                )
+                .await;
+            }
         }
         CanMessageType::RollershutterState => {
             if let Ok(msg) = RelaisMsg::from_bytes(data) {
@@ -263,11 +274,7 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
         let Some(target) = resolve_target(topic).await else {
             return;
         };
-        if has_bank {
-            send_command(target, CanMessageType::LampGroup, &msg.to_bytes_full()).await;
-        } else {
-            send_command(target, CanMessageType::LampGroup, &msg.to_bytes_short()).await;
-        }
+        crate::lamps::send(target, msg, has_bank).await;
         return;
     }
 
