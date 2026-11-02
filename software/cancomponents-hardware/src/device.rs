@@ -63,6 +63,18 @@ pub struct Device {
 }
 
 impl Device {
+    /// The custom string, which the node is known by.
+    pub fn name(&self) -> &String<8> {
+        &self.custom_string
+    }
+
+    /// Takes a new custom string (already stored) and announces it.
+    pub fn set_name(&mut self, name: &str) {
+        self.custom_string.clear();
+        let _ = self.custom_string.push_str(name);
+        crate::discovery::announce();
+    }
+
     /// Minutes since boot. Used both by the CAN `Uptime` reply and the CLI's
     /// `show` command.
     pub fn uptime_minutes(&self) -> u64 {
@@ -214,13 +226,10 @@ impl Device {
         } else {
             console_log!("set custom string");
             let s = core::str::from_utf8(data).ok()?;
-            self.custom_string.clear();
-            self.custom_string.push_str(s).ok()?;
+            let s = s.trim_end_matches('\0');
             let mut config = config().await;
-            config
-                .set_str(config::Key::CustomString, &self.custom_string)
-                .await
-                .ok()?;
+            config.set_str(config::Key::CustomString, s).await.ok()?;
+            self.set_name(s);
         }
         Some(())
     }

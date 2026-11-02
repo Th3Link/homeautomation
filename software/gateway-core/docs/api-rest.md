@@ -43,6 +43,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 |---|---|
 | `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv6` (`address` with prefix length and `origin`: `link-local`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`) |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
+| `POST /bus/discover` | every device announces itself, one after the other at random times, until the gateway acks ([ADR 0021](../../../docs/adr/0021-can-discovery.md)); the web UI's *Scan* |
 | `POST /bus/ping`, `/bus/refresh`, `/bus/restart` | to every device |
 | `PUT /bus/silence` `{"on": true}` | tells every device to be quiet / talk again |
 | `POST /device-types/:type/ping`, `/refresh`, `/restart` | to every device of one type (`:type` is the number, e.g. `9` for the heating controller) |
@@ -56,7 +57,13 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /mqtt` | `{"primary": {...}, "secondary": {...}}` |
+| `GET /location` | `latitude`, `longitude` (degrees, north/east positive; `null` until set), `timezone` (a POSIX `TZ` string, default `CET-1CEST,M3.5.0,M10.5.0/3`), `local_time` (`YYYY-MM-DDTHH:MM:SS`) and `utc_offset_minutes` (`null` until the clock is set), `sun`: today's local `HH:MM` of `astronomical_dawn`, `nautical_dawn`, `civil_dawn`, `sunrise`, `noon`, `sunset`, `civil_dusk`, `nautical_dusk`, `astronomical_dusk` (each `null` on a day the sun doesn't reach it; the whole object `null` without a place or a clock) |
+| `PATCH /location` | `latitude` and `longitude` (only together), `timezone`. Answers like `GET` |
+
+| Route | |
+|---|---|
+| `GET /mqtt` | both brokers (`primary`, `secondary`, each as below) and `home_assistant`: whether Home Assistant discovery is on ([ADR 0022](adr/0022-home-assistant-discovery.md)) |
+| `PATCH /mqtt` | `home_assistant` (`true`/`false`); the answer is the new state |
 | `GET /mqtt/:slot` | `slot`, `enabled`, `uri`, `user`, `password_set`, `tls_insecure`, `certificate_pinned`, `tls_check` (how an `mqtts://` broker is checked: `pinned`, `ca` (against the trusted CAs and the host name) or `insecure`, [ADR 0020](adr/0020-trusted-certificate-authorities.md)), `connected` |
 | `PATCH /mqtt/:slot` | `enabled`, `uri` (`mqtt://host[:1883]` or `mqtts://host[:8883]`), `user`, `password` (8+ characters, or `""`), `tls_insecure`. The broker reconnects with the new settings; the answer is the new state |
 | `POST /mqtt/:slot/trust` | the next connection pins the certificate the broker presents (`202`) |
@@ -88,7 +95,7 @@ The heating bodies mean what the MQTT topics' do
 
 | Route | |
 |---|---|
-| `GET /sensors` | every sensor seen on the bus, its latest reading and what its node says about it, sixteen per page: `{"total", "offset", "sensors": [{"device", "device_key", "kind", "unit", "sensor_id", "slot", "name", "role", "lost", "value", "age_s"}]}`. `kind` is `temperature`, `humidity`, `pressure`, `co2`, `voc` or `air_quality`; `sensor_id` is the sensor's own id (the 1-Wire address of a DS18B20). `slot`, `name` and `role` (`none`, `tank0` … `tank6`, `flow`) are `null` until the node has told (the gateway asks for them the first time it sees a sensor). `?offset=` continues, `?device=` (name or `0x…` key) filters |
+| `GET /sensors` | every sensor seen on the bus, its latest reading and what its node says about it, sixteen per page: `{"total", "offset", "sensors": [{"device", "device_key", "kind", "unit", "sensor_id", "named_by_node", "slot", "name", "role", "lost", "value", "age_s"}]}`. `kind` is `temperature`, `humidity`, `pressure`, `co2`, `voc`, `air_quality` or `brightness` (lux, one per device, `sensor_id` 0); `sensor_id` is the sensor's own id (the 1-Wire address of a DS18B20, `0x…680000xx` for a light switch's BME680). `named_by_node` says whether the node has a slot and name for it (only DS18B20s; the others are known by their device). `slot`, `name` and `role` (`none`, `tank0` … `tank6`, `flow`) are `null` until the node has told (the gateway asks for them the first time it sees such a sensor). `?offset=` continues, `?device=` (name or `0x…` key) filters |
 | `PUT /devices/:device/sensors/:slot` | `{"name": "TANK-O1"}` (1-7 characters of `A-Z a-z 0-9 - _`, unique on the node) and/or `{"role": "tank2"}` (`none`, `tank0` … `tank6`, `flow`; the heating controller only). The slot has to be one the node reported (`409 unknown_slot` otherwise — refresh first); the gateway sends the sensor's serial along as a guard, so that a slot that moved is refused by the node instead of renaming or assigning the wrong sensor |
 | `POST /devices/:device/sensors/refresh` | asks the node for its list again (R frame); the answer shows in `GET /sensors` a moment later |
 | `POST /devices/:device/sensors/forget` | the node forgets the sensors that are lost |

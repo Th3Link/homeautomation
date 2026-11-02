@@ -105,10 +105,15 @@ collapses to `hold`. Published from a `PirSensor` CAN frame.
 ### `canbus/<sensor>/<device>/0x<sub_id>`
 
 `<sensor>` is one of `temperature`, `pressure`, `humidity`, `co2`, `voc`,
-`air_quality` (all fixed-point sensor readings) or `brightness` (ambient
+`air_quality`, `co2_measured`, `gas_resistance` (all fixed-point sensor
+readings) or `brightness` (ambient
 light — this one has **no** `/0x<sub_id>` suffix at all). Body: the
 decoded reading as a decimal string (e.g. `"21.5"` for temperature,
 divided-by-16 fixed point; a plain integer for brightness, unscaled).
+`co2` and `voc` are ppm, `air_quality` an index of 0 (clean) to 500. All
+three are estimates from the BME680's gas sensor (VOCs), not measurements
+(ADR 0024). `co2_measured` is ppm from an NDIR sensor (SCD30),
+`gas_resistance` the BME680's raw gas resistance in kΩ.
 
 `<sub_id>` for the fixed-point sensors is the CAN payload's 48-bit
 accompanying id, but formatted from only its **low 32 bits** — a
@@ -177,6 +182,24 @@ When a check fails, the console log says why (`not issued by a trusted CA`,
 
 Limits: certificates with ECDSA P-256/P-384 or RSA keys; a pinned
 certificate at most 2048 bytes, a chain within one 8 KiB TLS record.
+
+### Home Assistant discovery (`homeassistant/…/config`)
+
+Off by default; with it on (console `ha-discovery on`, REST
+`PATCH /mqtt`), the gateway publishes retained Home Assistant discovery
+configurations on the primary broker
+([ADR 0022](adr/0022-home-assistant-discovery.md)):
+
+| Topic | For |
+|---|---|
+| `homeassistant/sensor/canbus_<key>/<kind>_<sub_id>/config` | every sensor reading seen (`<kind>` as in the state topic, `<sub_id>` hex, 0 for brightness) |
+| `homeassistant/binary_sensor/canbus_<key>/presence/config` | a presence sensor seen |
+| `homeassistant/device_automation/canbus_<key>/button<n>_<event>/config` | each button seen, for `single`, `double`, `tripple`, `hold` and `released` |
+
+`<key>` is the device key, 8 hex digits. The configurations point at the
+state topics above; the gateway publishes them again when something they
+describe changes, after connecting, and when Home Assistant publishes
+`online` on `homeassistant/status` (which the gateway subscribes to).
 
 ## Command topics (broker → gateway)
 

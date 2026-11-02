@@ -1,6 +1,7 @@
 //! Decoding for the fixed-point environmental sensor messages
 //! (`TemperatureSensor`, `PressureSensor`, `HumiditySensor`,
-//! `Co2Equivalent`, `VocBreath`, `AirQuality`) and the raw
+//! `Co2Equivalent`, `VocBreath`, `AirQuality`, `Co2Sensor`,
+//! `GasResistance`) and the raw
 //! `AmbientLightSensor`/`AmbientLightSensorWhite` payload.
 
 /// A decoded fixed-point sensor reading.

@@ -33,10 +33,11 @@ extern crate std;
 /// `crate::can_id`/`crate::can_message_type`/`crate::device_type`/
 /// `crate::device_message` paths keep working unchanged.
 pub use common_core::{
-    can_id, can_message_type, device_message, device_type, heating_message, ota, ota_receiver,
-    ota_sender, sensor_config,
+    can_id, can_message_type, device_message, device_type, discovery, heating_message, ota,
+    ota_receiver, ota_sender, sensor_config,
 };
 
+pub mod automation;
 pub mod button;
 pub mod can_ota;
 pub mod command;
@@ -45,14 +46,18 @@ pub mod device_list;
 pub mod docs;
 pub mod error;
 pub mod est;
+pub mod ha_discovery;
 pub mod helper;
 pub mod lamp;
 pub mod lamp_pacer;
+pub mod nts;
 pub mod relais;
 pub mod sensor;
 pub mod sensor_info;
 pub mod sensor_table;
+pub mod sun;
 pub mod tls_pin;
 pub mod topics;
+pub mod tz;
 pub mod web;
 pub mod x509;
