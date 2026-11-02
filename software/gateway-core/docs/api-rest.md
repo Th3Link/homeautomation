@@ -146,25 +146,29 @@ support:
 ## Automation
 
 The gateway's own automation (ADR 0025, `gateway_core::automation`):
-outputs, button bindings, motion lights and schedules, one JSON object per
-item, stored on flash (the `storage` partition). A change is loaded right
+outputs, switch configurations, motion lights and schedules, one JSON
+object per item (a switch configuration's buttons each one of their own),
+stored on flash (the `storage` partition). A change is loaded right
 away; the states of what is still there are kept. `:name` is 1 to 20
-letters, digits, `-` and `_`; outputs, motion lights and schedules each
-have their own names (a motion light and a schedule can't share one). A
+letters, digits, `-` and `_`; outputs, switch configurations, and motion
+lights with schedules each have their own names (a motion light and a
+schedule can't share one). A
 refused item answers `400 invalid` with the `field` it is about.
 
 | Route | Body / answer |
 |---|---|
-| `GET /automation` | `enabled` (the master switch), the counts of `outputs`, `bindings`, `motion`, `schedules`, and `last_button` (the last button event: `trigger` as in a binding and `age_s`, or `null`), for learning a binding |
+| `GET /automation` | `enabled` (the master switch), the counts of `outputs`, `switches`, `motion`, `schedules`, and `last_button` (the last button event: `trigger` `{device, button, event}` and `age_s`, or `null`), for learning a switch |
 | `PATCH /automation` | `enabled`: off, nothing switches by itself (outputs can still be commanded). Answers like `GET` |
 | `GET /automation/outputs` | `items`: the loaded outputs with `name`, `kind` (`light`, `dimmer`, `relay`, `shutter`, `group`), `level`, for lights `top` (the highest level) and for shutters `movement` (`up`, `down`, `stopped`) |
-| `GET /automation/outputs/:name`, `PUT`, `DELETE` | the output: `{"light": {...}}`, `{"dimmer": {...}}`, `{"relay": {...}}`, `{"shutter": {...}}` or `{"group": {"members": [...]}}`. `PUT` answers `201` for a new one, else `200` |
-| `POST /automation/outputs/:name/command` | an operation: `"on"`, `"off"`, `"toggle"`, `{"set": n}`, `"max"`, `"inc"`, `"dec"`, `{"on_for": ms}`, `"up"`, `"down"`, `"up_hold"`, `"down_hold"`, `"stop"`. `202` |
-| `GET /automation/bindings?offset=n` | `total`, `offset`, `items`: up to 8 bindings with their `slot`, `trigger` and `actions` |
-| `POST /automation/bindings` | a binding (`trigger`: `device` `{type, id}`, `button`, `event` `single`/`double`/`triple`/`hold`/`released`; up to 4 `actions`: `{"output": {"name", "op"}}`, `{"automation": {"name", "switch": "enable"/"disable"/"toggle"}}`, `{"nightlight": {"device", "value"}}`). `201` with its `slot` |
-| `GET /automation/bindings/:slot`, `PUT`, `DELETE` | one binding |
+| `GET /automation/outputs/:name`, `PUT`, `DELETE` | the output: `{"light": {...}}`, `{"dimmer": {...}}`, `{"relay": {...}}`, `{"shutter": {...}}` or `{"group": {"members": [...]}}` (up to every other output). `PUT` answers `201` for a new one, else `200` |
+| `POST /automation/outputs/:name/command` | an operation: `"on"`, `"off"`, `"toggle"`, `{"set": n}`, `{"at_least": n}` (on at the last level, at least `n`), `"max"`, `"inc"`, `"dec"`, `{"on_for": ms}`, `"up"`, `"down"`, `"up_hold"`, `"down_hold"`, `"stop"`. `202` |
+| `GET /automation/switches?offset=n` | `total`, `offset`, `items`: up to 8 switch configurations with `name`, `switches` and `buttons` (the buttons with actions, one bit each) |
+| `GET /automation/switches/:name`, `PUT`, `DELETE` | a switch configuration: `switches`, 1–8 devices `{type, id}` (each in one configuration only). `DELETE` removes its buttons too |
+| `GET /automation/switches/:name/:button`, `PUT`, `DELETE` | what button 0–7 does: `events`, each `{event, actions}` with `event` `single`/`double`/`triple`/`hold`/`released` (each once) and up to 4 `actions`: `{"output": {"name", "op"}}`, `{"automation": {"name", "switch": "enable"/"disable"/"toggle"}}`, `{"nightlight": {"device", "value"}}`. No events: the button does nothing |
+| `GET /automation/devices?offset=n` | `total`, `offset`, `items`: up to 16 devices with notes: `device`, `features`, `lamps` (whether it has lamp names) |
+| `GET /automation/devices/:key`, `PUT`, `DELETE` | a device's notes (`:key` like `0x10030600`): `features` (`extension`, `pir`, `nightlight`, `veml7700`, `bme680`, `bme280`, `dht22`, `scd30`) and `lamps` (names by bit, up to 16 characters). Empty notes remove them |
 | `GET /automation/motion` | `items`: `name`, `enabled`, `state` (`idle`, `auto`, `manual`, `lockout`), `remaining_s` in `auto` and `lockout` |
-| `GET /automation/motion/:name`, `PUT`, `DELETE` | the motion light: `detectors`, `output`, `level`, `timeout_s`, `lockout_s`, `conditions`. A new one is enabled |
+| `GET /automation/motion/:name`, `PUT`, `DELETE` | the motion light: `detectors`, `output`, `levels` (up to 4 periods `{from, level}` or `{from, min}`: from a time of day on, a fixed level or the last one with a minimum; none: the last level), `timeout_s`, `lockout_s`, `conditions`. A new one is enabled |
 | `PATCH /automation/motion/:name` | `enabled`. `202` |
 | `GET /automation/schedules` | `items`: `name`, `enabled`, `state` (`running`, `idle`) |
 | `GET /automation/schedules/:name`, `PUT`, `DELETE`, `PATCH` | like the motion lights; a schedule is `output` and up to 4 `windows` |

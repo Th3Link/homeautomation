@@ -10,7 +10,7 @@ use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::{MappedMutexGuard, Mutex, MutexGuard};
 use gateway_core::automation::store::{Named, Section, Slots};
-use gateway_core::automation::{decode, encode};
+use gateway_core::automation::{decode, encode, FORMAT_VERSION, ITEM_MAX};
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
 use sequential_storage::cache::page_pointers::ArrayPagePointers;
 use sequential_storage::cache::page_states::ArrayPageStates;
@@ -24,9 +24,9 @@ pub const PARTITION: Range<u32> = 0x4D000..0x66000;
 const PAGES: usize = (PARTITION.end - PARTITION.start) as usize / 4096;
 /// Where recently used keys are, so most reads don't scan the pages.
 const CACHED_KEYS: usize = 32;
-/// The largest stored item (a light with 8 lamp groups and 15 levels is
-/// about 250 bytes).
-const ITEM: usize = 384;
+/// The largest stored item: a group of every output, or a button with
+/// all its actions.
+const ITEM: usize = ITEM_MAX;
 /// An item plus `sequential-storage`'s overhead.
 const DATA: usize = ITEM + 64;
 
@@ -52,8 +52,10 @@ pub struct Store {
     data: [u8; DATA],
     item: [u8; ITEM],
     /// Which slots of each section ([`Section`] as index) are taken.
-    slots: [Slots; 5],
+    slots: [Slots; SECTIONS],
 }
+
+const SECTIONS: usize = Section::ALL.len();
 
 static STORE: Mutex<CriticalSectionRawMutex, Option<Store>> = Mutex::new(None);
 
@@ -72,14 +74,14 @@ pub async fn init() {
         ),
         data: [0; DATA],
         item: [0; ITEM],
-        slots: [Slots::new(); 5],
+        slots: [Slots::new(); SECTIONS],
     };
     if let Err(e) = store.scan().await {
         console_log!("automation: store unreadable ({e:?}), erasing it");
         if store.map.erase_all().await.is_err() {
             console_log!("automation: erasing the store failed");
         }
-        store.slots = [Slots::new(); 5];
+        store.slots = [Slots::new(); SECTIONS];
     }
     *STORE.lock().await = Some(store);
 }
@@ -92,11 +94,12 @@ pub async fn store() -> MappedMutexGuard<'static, CriticalSectionRawMutex, Store
 }
 
 impl Store {
-    /// Notes the keys of every stored item.
+    /// Notes the keys of every stored item. Items of an older format, or
+    /// of a section that is no longer read, are removed.
     async fn scan(
         &mut self,
     ) -> Result<(), sequential_storage::Error<esp_storage::FlashStorageError>> {
-        let mut keys: heapless::Vec<u16, 256> = heapless::Vec::new();
+        let mut keys: heapless::Vec<u16, 400> = heapless::Vec::new();
         {
             let mut items = self.map.fetch_all_items(&mut self.data).await?;
             while let Some((key, _)) = items.next::<&[u8]>(&mut self.data).await? {
@@ -107,18 +110,22 @@ impl Store {
         }
         // The iteration also returns old values and removed items; a fetch
         // tells what is there now.
+        let mut dropped = 0;
         for key in keys {
-            let Some((section, slot)) = Section::split(key) else {
-                continue;
+            let current = match self.map.fetch_item::<&[u8]>(&mut self.data, &key).await? {
+                Some(v) if !v.is_empty() => v[0] == FORMAT_VERSION,
+                _ => continue,
             };
-            let present = self
-                .map
-                .fetch_item::<&[u8]>(&mut self.data, &key)
-                .await?
-                .is_some_and(|v| !v.is_empty());
-            if present {
-                self.slots[section as usize].take(slot);
+            match Section::split(key) {
+                Some((section, slot)) if current => self.slots[section as usize].take(slot),
+                _ => {
+                    self.map.remove_item(&mut self.data, &key).await?;
+                    dropped += 1;
+                }
             }
+        }
+        if dropped > 0 {
+            console_log!("automation: {dropped} items of an older format removed");
         }
         Ok(())
     }

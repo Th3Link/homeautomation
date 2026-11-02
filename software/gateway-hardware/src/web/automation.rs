@@ -1,6 +1,7 @@
 //! `/api/v1/automation`: the gateway's own automation (ADR 0025) — its
-//! outputs, button bindings, motion lights and schedules, one JSON object
-//! per item, and their live state.
+//! outputs, switch configurations, motion lights and schedules, one JSON
+//! object per item (a switch configuration's buttons each one of their
+//! own), and their live state.
 //!
 //! Items are written to flash as they come; the automation then loads the
 //! configuration again ([`crate::automation::Event::Reload`]), keeping the
@@ -11,13 +12,15 @@ use super::json::{json, with_status};
 use crate::automation::store::{store, StoreError};
 use crate::automation::{post, Event, RUNTIME};
 use core::str::FromStr;
-use gateway_core::automation::binding::{Action, Binding, Op, Trigger};
+use gateway_core::automation::binding::{Action, Op, Trigger};
+use gateway_core::automation::devices::{DeviceNotes, Feature, StoredNotes, MAX_FEATURES};
 use gateway_core::automation::engine::{Kind, Movement, OutputKind};
 use gateway_core::automation::motion::{Mode, MotionLight};
 use gateway_core::automation::output::Output;
 use gateway_core::automation::schedule::Schedule;
-use gateway_core::automation::store::{Named, Section};
-use gateway_core::automation::{valid_name, Invalid, Name, MAX_BINDINGS};
+use gateway_core::automation::store::{button_slot, Named, Section};
+use gateway_core::automation::switches::{ButtonActions, SwitchConfig, BUTTONS, MAX_SWITCHES};
+use gateway_core::automation::{valid_name, DeviceRef, Invalid, Name};
 use heapless::Vec;
 use picoserve::extract::{Json, Query};
 use picoserve::response::{IntoResponse, StatusCode};
@@ -27,10 +30,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 const OUTPUTS: &str = "/outputs";
-const BINDINGS: &str = "/bindings";
+const SWITCHES: &str = "/switches";
 const MOTION: &str = "/motion";
 const SCHEDULES: &str = "/schedules";
-/// Bindings per page of `GET /automation/bindings`.
+const DEVICES: &str = "/devices";
+/// Switch configurations per page of `GET /automation/switches`.
 const PAGE: usize = 8;
 
 /// The routes under `/automation` sit in a router of their own: picoserve
@@ -46,10 +50,23 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
             get(get_output).put(put_output).delete(delete_output),
         )
         .route((OUTPUTS, name(), "/command"), post_route(command))
-        .route(BINDINGS, get(bindings).post(add_binding))
+        .route(SWITCHES, get(switch_configs))
         .route(
-            (BINDINGS, parse_path_segment::<u8>()),
-            get(get_binding).put(put_binding).delete(delete_binding),
+            (SWITCHES, name()),
+            get(get_switch_config)
+                .put(put_switch_config)
+                .delete(delete_switch_config),
+        )
+        .route(
+            (SWITCHES, name(), parse_path_segment::<u8>()),
+            get(get_button).put(put_button).delete(delete_button),
+        )
+        .route(DEVICES, get(device_notes))
+        .route(
+            (DEVICES, parse_path_segment::<DeviceKey>()),
+            get(get_device_notes)
+                .put(put_device_notes)
+                .delete(delete_device_notes),
         )
         .route(MOTION, get(motion_lights))
         .route(
@@ -118,7 +135,7 @@ struct Status {
     /// The master switch.
     enabled: bool,
     outputs: u32,
-    bindings: u32,
+    switches: u32,
     motion: u32,
     schedules: u32,
     last_button: Option<LastButtonView>,
@@ -133,7 +150,7 @@ async fn status() -> Result<impl IntoResponse, ApiError> {
     let status = Status {
         enabled,
         outputs: st.slots(Section::Output).count(),
-        bindings: st.slots(Section::Binding).count(),
+        switches: st.slots(Section::Switch).count(),
         motion: st.slots(Section::Motion).count(),
         schedules: st.slots(Section::Schedule).count(),
         last_button: last_button.map(|b| LastButtonView {
@@ -341,7 +358,7 @@ async fn command(
     with_status(StatusCode::ACCEPTED, &Done { done: false }).await
 }
 
-// ---- bindings ----
+// ---- switches ----
 
 #[derive(Deserialize)]
 struct PageQuery {
@@ -350,32 +367,43 @@ struct PageQuery {
 }
 
 #[derive(Serialize)]
-struct SlotBinding {
-    slot: u8,
-    trigger: Trigger,
-    actions: Vec<Action, { gateway_core::automation::binding::MAX_ACTIONS }, u8>,
+struct SwitchView {
+    name: Name,
+    switches: Vec<DeviceRef, MAX_SWITCHES, u8>,
+    /// The buttons that do something, one bit each.
+    buttons: u8,
 }
 
 #[derive(Serialize)]
 struct Page {
     total: u32,
     offset: u8,
-    items: Vec<SlotBinding, PAGE>,
+    items: Vec<SwitchView, PAGE>,
 }
 
-/// `GET /automation/bindings?offset=n`: [`PAGE`] bindings from the
-/// `offset`th on, in slot order.
-async fn bindings(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, ApiError> {
+/// The buttons of switch configuration `slot` that do something.
+fn used_buttons(st: &crate::automation::store::Store, slot: u8) -> u8 {
+    (0..BUTTONS)
+        .filter(|&b| {
+            let (section, s) = button_slot(slot, b);
+            st.slots(section).taken(s)
+        })
+        .fold(0, |mask, b| mask | 1 << b)
+}
+
+/// `GET /automation/switches?offset=n`: [`PAGE`] switch configurations
+/// from the `offset`th on.
+async fn switch_configs(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, ApiError> {
     let page = {
         let mut st = store().await;
-        let slots = st.slots(Section::Binding);
+        let slots = st.slots(Section::Switch);
         let mut items = Vec::new();
         for slot in slots.iter().skip(usize::from(query.offset)).take(PAGE) {
-            if let Some(binding) = st.get::<Binding>(Section::Binding, slot).await {
-                let _ = items.push(SlotBinding {
-                    slot,
-                    trigger: binding.trigger,
-                    actions: binding.actions,
+            if let Some(named) = st.get::<Named<SwitchConfig>>(Section::Switch, slot).await {
+                let _ = items.push(SwitchView {
+                    name: named.name,
+                    switches: named.item.switches,
+                    buttons: used_buttons(&st, slot),
                 });
             }
         }
@@ -388,9 +416,126 @@ async fn bindings(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, A
     json(&page).await
 }
 
-async fn check_binding(binding: &Binding) -> Result<(), ApiError> {
-    binding.validate().map_err(refused)?;
-    for action in &binding.actions {
+async fn get_switch_config(ItemName(name): ItemName) -> Result<impl IntoResponse, ApiError> {
+    get_named::<SwitchConfig>(Section::Switch, &name).await
+}
+
+async fn put_switch_config(
+    ItemName(name): ItemName,
+    Json(config): Json<SwitchConfig>,
+) -> Result<impl IntoResponse, ApiError> {
+    config.validate().map_err(refused)?;
+    {
+        let mut st = store().await;
+        let own = st.find::<SwitchConfig>(Section::Switch, &name).await;
+        for slot in st.slots(Section::Switch).iter().filter(|&s| Some(s) != own) {
+            if let Some(other) = st.get::<Named<SwitchConfig>>(Section::Switch, slot).await {
+                if other
+                    .item
+                    .switches
+                    .iter()
+                    .any(|d| config.switches.contains(d))
+                {
+                    return Err(ApiError::invalid_field(
+                        "switches",
+                        "a switch is already in another configuration",
+                    ));
+                }
+            }
+        }
+    }
+    put_named(Section::Switch, name, config).await
+}
+
+async fn delete_switch_config(ItemName(name): ItemName) -> Result<impl IntoResponse, ApiError> {
+    {
+        let mut st = store().await;
+        let slot = st
+            .find::<SwitchConfig>(Section::Switch, &name)
+            .await
+            .ok_or(NOT_FOUND)?;
+        for button in 0..BUTTONS {
+            let (section, s) = button_slot(slot, button);
+            if st.slots(section).taken(s) {
+                st.remove(section, s).await.map_err(store_error)?;
+            }
+        }
+        st.remove(Section::Switch, slot)
+            .await
+            .map_err(store_error)?;
+    }
+    post(Event::Reload);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Where the actions of `button` of configuration `name` are stored.
+async fn button_place(name: &Name, button: u8) -> Result<(Section, u8), ApiError> {
+    if button >= BUTTONS {
+        return Err(NOT_FOUND);
+    }
+    let slot = store()
+        .await
+        .find::<SwitchConfig>(Section::Switch, name)
+        .await
+        .ok_or(NOT_FOUND)?;
+    Ok(button_slot(slot, button))
+}
+
+/// `GET /automation/switches/:name/:button`: what the button does; no
+/// events if nothing.
+async fn get_button(
+    (ItemName(name), button): (ItemName, u8),
+) -> Result<impl IntoResponse, ApiError> {
+    let (section, slot) = button_place(&name, button).await?;
+    let actions = store()
+        .await
+        .get::<ButtonActions>(section, slot)
+        .await
+        .unwrap_or_default();
+    json(&actions).await
+}
+
+/// `PUT /automation/switches/:name/:button`; no events removes them.
+async fn put_button(
+    (ItemName(name), button): (ItemName, u8),
+    Json(actions): Json<ButtonActions>,
+) -> Result<impl IntoResponse, ApiError> {
+    actions.validate().map_err(refused)?;
+    for e in &actions.events {
+        check_actions(&e.actions).await?;
+    }
+    let (section, slot) = button_place(&name, button).await?;
+    {
+        let mut st = store().await;
+        if actions.events.is_empty() {
+            if st.slots(section).taken(slot) {
+                st.remove(section, slot).await.map_err(store_error)?;
+            }
+        } else {
+            st.put(section, slot, &actions).await.map_err(store_error)?;
+        }
+    }
+    post(Event::Reload);
+    with_status(StatusCode::OK, &Done { done: true }).await
+}
+
+async fn delete_button(
+    (ItemName(name), button): (ItemName, u8),
+) -> Result<impl IntoResponse, ApiError> {
+    let (section, slot) = button_place(&name, button).await?;
+    {
+        let mut st = store().await;
+        if st.slots(section).taken(slot) {
+            st.remove(section, slot).await.map_err(store_error)?;
+        }
+    }
+    post(Event::Reload);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The outputs and automations the actions name exist.
+async fn check_actions(actions: &[Action]) -> Result<(), ApiError> {
+    for action in actions {
         match action {
             Action::Output { name, .. } if !output_exists(name).await => {
                 return Err(ApiError::invalid_field("actions", "not an output"));
@@ -407,59 +552,131 @@ async fn check_binding(binding: &Binding) -> Result<(), ApiError> {
     Ok(())
 }
 
-#[derive(Serialize)]
-struct Added {
-    slot: u8,
-}
+// ---- device notes ----
 
-async fn add_binding(Json(binding): Json<Binding>) -> Result<impl IntoResponse, ApiError> {
-    check_binding(&binding).await?;
-    let slot = store()
-        .await
-        .add(Section::Binding, &binding)
-        .await
-        .map_err(store_error)?;
-    post(Event::Reload);
-    with_status(StatusCode::CREATED, &Added { slot }).await
-}
+/// The `:device` path segment: a device key, `0x…`.
+pub struct DeviceKey(DeviceRef);
 
-async fn get_binding(slot: u8) -> Result<impl IntoResponse, ApiError> {
-    let binding = store()
-        .await
-        .get::<Binding>(Section::Binding, slot)
-        .await
-        .ok_or(NOT_FOUND)?;
-    json(&binding).await
-}
+impl FromStr for DeviceKey {
+    type Err = ();
 
-async fn put_binding(
-    slot: u8,
-    Json(binding): Json<Binding>,
-) -> Result<impl IntoResponse, ApiError> {
-    if usize::from(slot) >= MAX_BINDINGS {
-        return Err(NOT_FOUND);
+    fn from_str(s: &str) -> Result<Self, ()> {
+        let hex = s.strip_prefix("0x").ok_or(())?;
+        let key = u32::from_str_radix(hex, 16).map_err(|_| ())?;
+        let device = DeviceRef::from_key(key);
+        device.valid().then_some(Self(device)).ok_or(())
     }
-    check_binding(&binding).await?;
-    store()
-        .await
-        .put(Section::Binding, slot, &binding)
-        .await
-        .map_err(store_error)?;
-    post(Event::Reload);
-    json(&Added { slot }).await
 }
 
-async fn delete_binding(slot: u8) -> Result<impl IntoResponse, ApiError> {
+/// Devices with notes per page of `GET /automation/devices`.
+const DEVICE_PAGE: usize = 16;
+
+#[derive(Serialize)]
+struct DeviceFeatures {
+    device: DeviceRef,
+    features: Vec<Feature, MAX_FEATURES, u8>,
+    /// Whether it has lamp names.
+    lamps: bool,
+}
+
+#[derive(Serialize)]
+struct DevicePage {
+    total: u32,
+    offset: u8,
+    items: Vec<DeviceFeatures, DEVICE_PAGE>,
+}
+
+/// `GET /automation/devices?offset=n`: the devices with notes, their
+/// features (the lamp names only by device).
+async fn device_notes(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, ApiError> {
+    let page = {
+        let mut st = store().await;
+        let slots = st.slots(Section::Devices);
+        let mut items = Vec::new();
+        for slot in slots
+            .iter()
+            .skip(usize::from(query.offset))
+            .take(DEVICE_PAGE)
+        {
+            if let Some(stored) = st.get::<StoredNotes>(Section::Devices, slot).await {
+                let _ = items.push(DeviceFeatures {
+                    device: stored.device,
+                    lamps: stored.notes.lamps.iter().any(|n| !n.is_empty()),
+                    features: stored.notes.features,
+                });
+            }
+        }
+        DevicePage {
+            total: slots.count(),
+            offset: query.offset,
+            items,
+        }
+    };
+    json(&page).await
+}
+
+/// The slot of `device`'s notes.
+async fn notes_slot(st: &mut crate::automation::store::Store, device: DeviceRef) -> Option<u8> {
+    for slot in st.slots(Section::Devices).iter() {
+        if let Some(stored) = st.get::<StoredNotes>(Section::Devices, slot).await {
+            if stored.device == device {
+                return Some(slot);
+            }
+        }
+    }
+    None
+}
+
+/// `GET /automation/devices/:device`: no features and no lamp names if
+/// there are no notes.
+async fn get_device_notes(DeviceKey(device): DeviceKey) -> Result<impl IntoResponse, ApiError> {
+    let notes = {
+        let mut st = store().await;
+        match notes_slot(&mut st, device).await {
+            Some(slot) => st
+                .get::<StoredNotes>(Section::Devices, slot)
+                .await
+                .map(|s| s.notes)
+                .unwrap_or_default(),
+            None => DeviceNotes::default(),
+        }
+    };
+    json(&notes).await
+}
+
+/// `PUT /automation/devices/:device`; empty notes remove them.
+async fn put_device_notes(
+    DeviceKey(device): DeviceKey,
+    Json(notes): Json<DeviceNotes>,
+) -> Result<impl IntoResponse, ApiError> {
+    notes.validate().map_err(refused)?;
     {
         let mut st = store().await;
-        if !st.slots(Section::Binding).taken(slot) {
-            return Err(NOT_FOUND);
+        let slot = notes_slot(&mut st, device).await;
+        match (slot, notes.is_empty()) {
+            (Some(slot), true) => st.remove(Section::Devices, slot).await,
+            (None, true) => Ok(()),
+            (Some(slot), false) => {
+                st.put(Section::Devices, slot, &StoredNotes { device, notes })
+                    .await
+            }
+            (None, false) => st
+                .add(Section::Devices, &StoredNotes { device, notes })
+                .await
+                .map(|_| ()),
         }
-        st.remove(Section::Binding, slot)
+        .map_err(store_error)?;
+    }
+    with_status(StatusCode::OK, &Done { done: true }).await
+}
+
+async fn delete_device_notes(DeviceKey(device): DeviceKey) -> Result<impl IntoResponse, ApiError> {
+    let mut st = store().await;
+    if let Some(slot) = notes_slot(&mut st, device).await {
+        st.remove(Section::Devices, slot)
             .await
             .map_err(store_error)?;
     }
-    post(Event::Reload);
     Ok(StatusCode::NO_CONTENT)
 }
 
