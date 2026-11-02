@@ -196,8 +196,12 @@ fn app() -> Router<impl PathRouter> {
     let api = tls::routes(api);
     let api = location::routes(api);
     let api = automation::routes(api);
-    let app = Router::new().nest("/api/v1", api);
-    assets::routes(app).layer(BasicAuth)
+    // The API outermost: every route a request passes on its way costs a
+    // stack frame (see `automation::routes`), and the pages are asked for
+    // only when one loads.
+    assets::routes(Router::new())
+        .nest("/api/v1", api)
+        .layer(BasicAuth)
 }
 
 /// Lets only requests through that carry the configured web credentials in
