@@ -22,6 +22,7 @@ pub mod device_list;
 pub mod dhcpv6;
 pub mod echo;
 pub mod ethernet;
+pub mod ha;
 pub mod heap;
 pub mod heating_state;
 pub mod https;

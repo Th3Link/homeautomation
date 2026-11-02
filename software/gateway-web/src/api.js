@@ -69,6 +69,7 @@ export const location = {
 
 export const mqtt = {
   all: () => get('/mqtt'),
+  updateAll: (changes) => patch('/mqtt', changes),
   update: (slot, changes) => patch(`/mqtt/${slot}`, changes),
   trust: (slot) => post(`/mqtt/${slot}/trust`),
   certificate: (slot) => get(`/mqtt/${slot}/certificate`),

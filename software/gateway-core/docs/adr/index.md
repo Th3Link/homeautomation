@@ -21,4 +21,6 @@ globally-numbered list including cross-cutting decisions.
 | [0018](0018-https-certificate-management.md) | HTTPS for the web UI, with central certificate management | Accepted |
 | [0019](0019-ipv6-first.md) | IPv6 first, with SLAAC and DHCPv6 | Accepted |
 | [0020](0020-trusted-certificate-authorities.md) | Trusted certificate authorities, Let's Encrypt's built in | Accepted |
+| [0022](0022-home-assistant-discovery.md) | Home Assistant MQTT discovery from the gateway | Accepted |
 | [0023](0023-nts.md) | Authenticated time with NTS | Accepted |
+| [0024](0024-open-air-quality.md) | Air quality from the BME680 with our own open calculation | Accepted |

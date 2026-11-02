@@ -112,6 +112,19 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         let mut table = DEVICE_LIST.lock().await;
         let sighting = table.observe(id, data, now_minutes());
         drop(table);
+        // What Home Assistant discovery says about a device: that it
+        // exists, its name, its version.
+        if sighting.is_some()
+            || matches!(
+                id.msg_type,
+                CanMessageType::Discovery
+                    | CanMessageType::CustomString
+                    | CanMessageType::ApplicationVersion
+                    | CanMessageType::ApplicationVersionString
+            )
+        {
+            crate::ha::changed();
+        }
         if let Some(req) = sighting {
             send_raw(
                 gateway_core::can_ota::target_id(req.device_key, CanMessageType::RequestParameter),

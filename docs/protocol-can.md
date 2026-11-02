@@ -75,7 +75,7 @@ discriminants, gaps included:
 ## Message types
 
 `ICAN::MSG_ID_t` / `gateway_core::can_message_type::CanMessageType`. Fixed
-discriminants — gaps (23–29, 43–89, 91–127, 142–149, 159, 163–254) are
+discriminants — gaps (23–29, 45–89, 91–127, 142–149, 159, 163–254) are
 intentional, not omissions:
 
 | Value | Name | Value | Name |
@@ -99,19 +99,40 @@ intentional, not omissions:
 | 16 | `FlashSelect` | 156 | `Ping` |
 | 17 | `FlashErase` | 157 | `PingDisable` |
 | 18 | `FlashRead` | 158 | `Echo` |
-| 19 | `FlashWrite` | 165 | `HeatingCommand` |
-| 20 | `FlashVerify` | 166 | `HeatingState` |
-| 21 | `FlashProgress` | 167 | `SensorConfig` |
-| 22 | `FlashComplete` | 168 | `OtaControl` |
-| 30 | `ButtonEvent` | 169 | `OtaData` |
-| 31 | `TemperatureSensor` | 255 | `InvalidMessage` (decode fallback only, never sent) |
-| 41 | `HwRev` | | |
+| 19 | `FlashWrite` | 159 | `Co2Sensor` |
+| 20 | `FlashVerify` | 165 | `HeatingCommand` |
+| 21 | `FlashProgress` | 166 | `HeatingState` |
+| 22 | `FlashComplete` | 167 | `SensorConfig` |
+| 30 | `ButtonEvent` | 168 | `OtaControl` |
+| 31 | `TemperatureSensor` | 169 | `OtaData` |
+| 41 | `HwRev` | 170 | `GasResistance` |
+| | | 255 | `InvalidMessage` (decode fallback only, never sent) |
 | 42 | `ExtensionMode` | | |
+| 43 | `Discovery` | | |
+| 44 | `DiscoveryAck` | | |
 
 An unrecognized `msg_type` byte decodes to `InvalidMessage` rather than
 failing to decode at all — this makes "ignore an unknown message" an
 explicit, matchable case (the original's C++ `switch` just silently falls
 through with no default case).
+
+## Discovery (`Discovery` / `DiscoveryAck`)
+
+How nodes make themselves known to the gateway
+([ADR 0021](adr/0021-can-discovery.md), `common-core/src/discovery.rs`):
+
+| Frame | From → to | Payload |
+|---|---|---|
+| `Discovery` (43), data | node → gateway, the node's own id | its name (custom string), 0-8 bytes UTF-8 |
+| `DiscoveryAck` (44), data | gateway → node, the node's id | none |
+| `Discovery` (43), R frame | gateway → device 0 (everybody) or one node | none: announce yourself |
+
+A node announces itself after it starts, after its name changed and when
+asked, and repeats until the ack comes: the first `Discovery` after a
+random 0-2 s, then it waits a random 300 ms-2 s for the ack (first five
+tries), then a random 2-5 s, for as long as it takes. The gateway acks
+every `Discovery` at once, takes the name from it, and sends a node it
+didn't know a `RequestParameter` R frame for its other settings.
 
 ## `UpdateSilence` — bus quieting during OTA
 
@@ -433,10 +454,26 @@ button id `8` in its MQTT body regardless of the frame's actual
 [`protocol-mqtt.md`](protocol-mqtt.md#canbuspresence)), and collapses
 every event kind other than `Released` to a single "hold" state.
 
+How the node sends them (the original firmware's behaviour, kept by the
+Rust node firmware, `cancomponents-core/src/button_fsm.rs` and
+`presence.rs`):
+
+- **Buttons** 0-3 on the board, 4-7 on the extension (`ExtensionMode`
+  button), polled every 10 ms. A press sends `Pressed` (count 0); 50 ms
+  after it the level is ignored. Releasing opens a 250 ms window: `Single`
+  or `Double` when it closes, `Tripple` right at the third release (count
+  0); further presses within a click sequence aren't sent. Held, the
+  button sends `Hold` from 2 s on every 500 ms with count 1, 2, …, and
+  `Released` with the last count when let go.
+- **Presence** (`PirSensor`, `button_id` 8): once a second while there is
+  motion, `Pressed` with count 1, then `Hold` with count 2, 3, …; the
+  first second without motion sends `Released` with count 0.
+
 ## Environmental sensors
 
 Fixed-point readings (`TemperatureSensor`, `PressureSensor`,
-`HumiditySensor`, `Co2Equivalent`, `VocBreath`, `AirQuality`) — 8 bytes:
+`HumiditySensor`, `Co2Equivalent`, `VocBreath`, `AirQuality`, `Co2Sensor`,
+`GasResistance`) — 8 bytes:
 
 ```text
 byte:  0..5               6..7
@@ -462,6 +499,24 @@ measured every 10 s; the frames go out every 30 s by default (CLI:
 (`FixedPointReading::signed_value`). The other fixed-point sensors are
 unsigned.
 
+### Temperature, humidity and pressure from a BME680
+
+The light switch's sensor board (`ExtensionMode` sensors) sends its
+BME680's temperature (°C, signed), humidity (%) and pressure (hPa) as
+`TemperatureSensor`, `HumiditySensor` and `PressureSensor` once per send
+interval (`sensor-interval`, default 30 s). `sub_id` is `0x6800_00xx`, the
+low byte the chip's I2C address (0x76 or 0x77): topic id `0x68000077`.
+
+With the same `sub_id` it sends, from its gas sensor:
+- once the air quality calculation is past its warm-up (ADR 0024),
+  `AirQuality` (index 0–500, 0 = clean), `Co2Equivalent` and `VocBreath`
+  (ppm, estimates from VOCs);
+- once per send interval, the last heat-stable gas reading as
+  `GasResistance` (kΩ, the raw resistance), to calibrate that calculation.
+
+An SCD30 on the board (I2C 0x61, optional) sends the measured CO2 (ppm) as
+`Co2Sensor` once per send interval, with `sub_id` `0x3000_0061`.
+
 On the gateway the sensor shows up as `canbus/temperature/<device>/0x<id>`,
 where `<id>` is the low 32 bits of `sub_id` in lowercase hex — for a sensor
 with ROM `28 22 B0 C3 32 20 01 36` that is `0x32c3b022`. The node's
@@ -470,7 +525,12 @@ current temperature, to map physical sensors to topics.
 
 Ambient light (`AmbientLightSensor`, and nominally
 `AmbientLightSensorWhite` though nothing in the live gateway actually
-dispatches that message type) — 4 bytes, raw and **unscaled**:
+dispatches that message type) — 4 bytes. The Rust node firmware sends lux
+from the sensor board's VEML7700, measured every 2 s in one of two ranges
+(up to ~550 lx finely, up to ~35 klx coarsely), on a change of more than
+10 % (at least 2 lx) and otherwise once per send interval
+(`cancomponents-core/src/ambient_light.rs`). The gateway passes the value
+on unscaled:
 
 ```text
 byte:  0..3

@@ -112,6 +112,12 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         CanMessageType::Rollershutter => {
             relais_handler(id, frame.data(), frame.is_remote_frame()).await
         }
+        CanMessageType::Nightlight => {
+            crate::sensors::nightlight(frame.data(), frame.is_remote_frame()).await
+        }
+        CanMessageType::LampGroup => {
+            crate::pwm::lamp_group(frame.data(), frame.is_remote_frame()).await
+        }
         CanMessageType::SensorConfig => {
             crate::sensor_config::handler(id, frame.data(), frame.is_remote_frame()).await
         }
@@ -211,6 +217,9 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
             crate::update::ota_data(frame.data(), frame.is_remote_frame()).await
         }
         CanMessageType::UpdateSilence => silence(frame).await,
+        // The gateway asks everybody (or this node) to announce itself.
+        CanMessageType::Discovery if frame.is_remote_frame() => crate::discovery::announce(),
+        CanMessageType::DiscoveryAck => crate::discovery::acked(),
         CanMessageType::Ping => ping(id).await,
         CanMessageType::Available => ping(id).await,
         CanMessageType::Echo => dispatch_echo().await,
