@@ -26,17 +26,20 @@ use picoserve::Router;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-const OUTPUTS: &str = "/automation/outputs";
-const BINDINGS: &str = "/automation/bindings";
-const MOTION: &str = "/automation/motion";
-const SCHEDULES: &str = "/automation/schedules";
+const OUTPUTS: &str = "/outputs";
+const BINDINGS: &str = "/bindings";
+const MOTION: &str = "/motion";
+const SCHEDULES: &str = "/schedules";
 /// Bindings per page of `GET /automation/bindings`.
 const PAGE: usize = 8;
 
+/// The routes under `/automation` sit in a router of their own: picoserve
+/// tries a router's routes one inside the other, each a stack frame holding
+/// the handler's future, so ten routes here would make every route before
+/// them ten frames deeper.
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let name = || parse_path_segment::<ItemName>();
-    router
-        .route("/automation", get(status).patch(update))
+    let items = Router::new()
         .route(OUTPUTS, get(outputs))
         .route(
             (OUTPUTS, name()),
@@ -63,7 +66,10 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
                 .put(put_schedule)
                 .patch(switch_schedule)
                 .delete(delete_schedule),
-        )
+        );
+    router
+        .nest("/automation", items)
+        .route("/automation", get(status).patch(update))
 }
 
 /// The `:name` path segment: a valid [`Name`].
