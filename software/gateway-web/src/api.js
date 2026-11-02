@@ -170,14 +170,27 @@ export const firmware = {
   },
 };
 
-// The gateway's own automation (ADR 0025): outputs, button bindings, motion
-// lights and schedules, one item per request.
+// The gateway's own automation (ADR 0025): outputs, switch configurations,
+// motion lights, schedules and device notes, one item per request.
 const named = (kind) => ({
   list: () => get(`/automation/${kind}`).then((r) => r.items),
   get: (name) => get(`/automation/${kind}/${seg(name)}`),
   put: (name, item) => put(`/automation/${kind}/${seg(name)}`, item),
   remove: (name) => del(`/automation/${kind}/${seg(name)}`),
 });
+
+// Every page of a paged list.
+async function allPages(path) {
+  const all = [];
+  for (;;) {
+    const page = await get(`${path}?offset=${all.length}`);
+    all.push(...page.items);
+    if (page.items.length === 0 || all.length >= page.total) return all;
+  }
+}
+
+// A device in the automation's device routes: its key.
+const deviceKey = (ref) => '0x' + (0x10000000 + (ref.type << 16) + (ref.id << 8)).toString(16);
 
 export const automation = {
   status: () => get('/automation'),
@@ -187,19 +200,15 @@ export const automation = {
     // `op` as the API takes it: "on", {"set": 4}, …
     command: (name, op) => post(`/automation/outputs/${seg(name)}/command`, op),
   },
-  bindings: {
-    // All pages.
-    async list() {
-      const all = [];
-      for (;;) {
-        const page = await get(`/automation/bindings?offset=${all.length}`);
-        all.push(...page.items);
-        if (page.items.length === 0 || all.length >= page.total) return all;
-      }
-    },
-    add: (binding) => post('/automation/bindings', binding),
-    put: (slot, binding) => put(`/automation/bindings/${slot}`, binding),
-    remove: (slot) => del(`/automation/bindings/${slot}`),
+  switches: {
+    // `{name, switches, buttons}` (buttons: a bit per button with actions).
+    list: () => allPages('/automation/switches'),
+    get: (name) => get(`/automation/switches/${seg(name)}`),
+    put: (name, config) => put(`/automation/switches/${seg(name)}`, config),
+    remove: (name) => del(`/automation/switches/${seg(name)}`),
+    // `{events: [{event, actions}]}`; no events removes the button's.
+    button: (name, button) => get(`/automation/switches/${seg(name)}/${button}`),
+    putButton: (name, button, actions) => put(`/automation/switches/${seg(name)}/${button}`, actions),
   },
   motion: {
     ...named('motion'),
@@ -208,5 +217,12 @@ export const automation = {
   schedules: {
     ...named('schedules'),
     setEnabled: (name, enabled) => patch(`/automation/schedules/${seg(name)}`, { enabled }),
+  },
+  // What devices have on board, and lamp names: `{features, lamps}`.
+  devices: {
+    // `{device, features, lamps}` (lamps: whether it has names).
+    list: () => allPages('/automation/devices'),
+    get: (ref) => get(`/automation/devices/${deviceKey(ref)}`),
+    put: (ref, notes) => put(`/automation/devices/${deviceKey(ref)}`, notes),
   },
 };

@@ -3,6 +3,7 @@ import * as api from '../api.js';
 import { FirmwareUpload } from '../firmware-upload.js';
 import { SensorTable, ROLES, roleLabel, useSensors } from './sensors.js';
 import { html, useLoad, run, notify, ago, Section, Loading, Field, Button } from '../ui.js';
+import { FEATURES, forgetFeatures } from './automation/common.js';
 
 // Device types as the CAN protocol numbers them.
 const HAS_RELAYS = [2, 5, 8, 9];
@@ -30,8 +31,37 @@ export function Device({ device }) {
     ${IS_HEATING.includes(data.device_type) && html`<${SensorAssignment} d=${data} />`}
     ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
     <${Section} title="Sensors"><${SensorTable} device=${data.name || data.key} /><//>
+    <${Features} d=${data} />
     <${Settings} d=${data} reload=${reload} />
     <${DeviceFirmware} d=${data} />`;
+}
+
+// What the device has on board, kept on the gateway: the automation offers
+// it only where it fits (PIRs as motion detectors, …).
+function Features({ d }) {
+  const ref = { type: d.device_type, id: d.device_id };
+  const { data: notes, error, reload } = useLoad(() => api.automation.devices.get(ref));
+  const [busy, setBusy] = useState(false);
+  if (!notes) return html`<${Section} title="On board"><${Loading} error=${error} /><//>`;
+  const toggle = async (f) => {
+    const features = notes.features.includes(f) ? notes.features.filter((x) => x !== f) : [...notes.features, f];
+    setBusy(true);
+    if ((await run(() => api.automation.devices.put(ref, { ...notes, features }), 'Saved')) !== undefined) {
+      forgetFeatures();
+      await reload();
+    }
+    setBusy(false);
+  };
+  return html`<${Section} title="On board">
+    <p class="muted">What this device has, for the automation: it offers motion detectors, brightness sensors and night lights only where they are.</p>
+    <div class="checks">
+      ${FEATURES.map(
+        ([f, label]) => html`<label class="check" key=${f}>
+          <input type="checkbox" disabled=${busy} checked=${notes.features.includes(f)} onChange=${() => toggle(f)} /> ${label}
+        </label>`,
+      )}
+    </div>
+  <//>`;
 }
 
 // Sends a firmware image over the CAN bus: to this device, or one after the

@@ -119,17 +119,32 @@ function Location() {
     }
   };
 
+  // The browser knows where it is (HTTPS, with the gateway's certificate
+  // trusted); it asks first.
+  const locate = () => {
+    if (!navigator.geolocation) return notify('This browser has no location', 'error');
+    navigator.geolocation.getCurrentPosition(
+      (p) => setForm({ ...form, latitude: p.coords.latitude.toFixed(4), longitude: p.coords.longitude.toFixed(4) }),
+      (e) => notify(`No location: ${e.message}`, 'error'),
+      { timeout: 15000 },
+    );
+  };
+
   const offset = data.utc_offset_minutes;
   const zone = offset == null ? '' : `UTC${offset < 0 ? '−' : '+'}${Math.floor(Math.abs(offset) / 60)}${Math.abs(offset) % 60 ? ':' + String(Math.abs(offset) % 60).padStart(2, '0') : ''}`;
   return html`
     <${Section} title="Location and time">
-      <p class="muted">For switching by local time and by the sun.</p>
+      <p class="muted">
+        For switching by local time and by the sun (schedules, motion light levels). Two decimals (about 1 km) are plenty.
+        Take this browser's location, or look the place up on a map: in OpenStreetMap or Google Maps a right click on the house shows
+        latitude and longitude. Save, then check today's sunrise and sunset below.
+      </p>
       <div class="row">
         <${Field} label="Latitude" hint="degrees, north positive"><input inputmode="decimal" value=${value('latitude')} onInput=${set('latitude')} /><//>
         <${Field} label="Longitude" hint="degrees, east positive"><input inputmode="decimal" value=${value('longitude')} onInput=${set('longitude')} /><//>
         <${Field} label="Time zone" hint="POSIX TZ, e.g. CET-1CEST,M3.5.0,M10.5.0/3"><input value=${value('timezone')} onInput=${set('timezone')} /><//>
       </div>
-      <div class="buttons"><${Button} kind="primary" onClick=${save}>Save<//></div>
+      <div class="buttons"><${Button} kind="primary" onClick=${save}>Save<//><button onClick=${locate}>Use this browser's location</button></div>
       <dl class="facts">
         <div><dt>Local time</dt><dd>${data.local_time ? `${data.local_time.replace('T', ' ')} (${zone})` : 'not known yet (no time server answer)'}</dd></div>
         ${data.sun
