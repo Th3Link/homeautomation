@@ -37,6 +37,7 @@ pub use common_core::{
     ota_sender, sensor_config,
 };
 
+pub mod automation;
 pub mod button;
 pub mod can_ota;
 pub mod command;
