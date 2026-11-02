@@ -50,7 +50,12 @@ fn record(line: core::fmt::Arguments<'_>) {
     critical_section::with(|cs| {
         let mut ring = RING.borrow_ref_mut(cs);
         if ring.line_start {
-            let _ = write!(ring, "[{:>6}.{}] ", uptime_ms / 1000, uptime_ms % 1000 / 100);
+            let _ = write!(
+                ring,
+                "[{:>6}.{}] ",
+                uptime_ms / 1000,
+                uptime_ms % 1000 / 100
+            );
         }
         let _ = ring.write_fmt(line);
         ring.push(b"\n");
