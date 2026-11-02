@@ -1,5 +1,5 @@
 //! How the configuration is laid out on flash, and the index the gateway
-//! keeps in RAM to find a button's binding.
+//! keeps in RAM to find what a button does.
 //!
 //! Every item is one entry of a key/value map: the key is
 //! `section << 8 | slot`, the value the item [`super::encode`]d. A slot is
@@ -8,8 +8,10 @@
 //! ([`Named`]), motion lights and schedules also with whether they are
 //! enabled.
 
-use super::binding::Trigger;
-use super::{MAX_BINDINGS, MAX_MOTION_LIGHTS, MAX_OUTPUTS, MAX_SCHEDULES};
+use super::switches::BUTTONS;
+use super::{
+    DeviceRef, MAX_MOTION_LIGHTS, MAX_OUTPUTS, MAX_SCHEDULES, MAX_SWITCH_CONFIGS, MAX_SWITCH_REFS,
+};
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -19,21 +21,34 @@ pub enum Section {
     /// Settings of the automation as a whole (slot [`MASTER_SLOT`]).
     Meta = 0,
     Output = 1,
-    Binding = 2,
+    /// The button bindings of the first version: no longer read.
+    Retired = 2,
     Motion = 3,
     Schedule = 4,
+    /// Switch configurations: which switches.
+    Switch = 5,
+    /// What the buttons of switch configurations 0–15 do ([`button_slot`]).
+    ButtonsLow = 6,
+    /// … and of 16–31.
+    ButtonsHigh = 7,
+    /// Notes on devices ([`super::devices`]).
+    Devices = 8,
 }
 
 /// The slot of the master switch (a `bool`) in [`Section::Meta`].
 pub const MASTER_SLOT: u8 = 0;
 
 impl Section {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 9] = [
         Self::Meta,
         Self::Output,
-        Self::Binding,
+        Self::Retired,
         Self::Motion,
         Self::Schedule,
+        Self::Switch,
+        Self::ButtonsLow,
+        Self::ButtonsHigh,
+        Self::Devices,
     ];
 
     /// How many slots the section has.
@@ -41,9 +56,12 @@ impl Section {
         match self {
             Self::Meta => 1,
             Self::Output => MAX_OUTPUTS,
-            Self::Binding => MAX_BINDINGS,
+            Self::Retired => 0,
             Self::Motion => MAX_MOTION_LIGHTS,
             Self::Schedule => MAX_SCHEDULES,
+            Self::Switch => MAX_SWITCH_CONFIGS,
+            Self::ButtonsLow | Self::ButtonsHigh => BUTTON_SECTION,
+            Self::Devices => super::devices::MAX_DEVICES,
         }
     }
 
@@ -110,70 +128,132 @@ impl Slots {
     }
 }
 
-/// The triggers of the stored bindings, so that a button event finds its
-/// bindings without reading the flash.
-#[derive(Debug, Default)]
-pub struct BindingIndex {
-    entries: Vec<(u32, u8), MAX_BINDINGS, u8>,
+/// Which switch configurations a button event goes to, so that it finds
+/// them without reading the flash: the switches of every configuration,
+/// and which of its buttons do something.
+#[derive(Debug)]
+pub struct SwitchIndex {
+    /// Device key and configuration slot.
+    switches: Vec<(u32, u8), MAX_SWITCH_REFS, u8>,
+    /// Per configuration slot, the buttons with actions, one bit each.
+    buttons: [u8; MAX_SWITCH_CONFIGS],
 }
 
-impl BindingIndex {
+impl Default for SwitchIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SwitchIndex {
     pub const fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            switches: Vec::new(),
+            buttons: [0; MAX_SWITCH_CONFIGS],
         }
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
+        self.switches.clear();
+        self.buttons = [0; MAX_SWITCH_CONFIGS];
     }
 
-    /// Notes that `slot` holds a binding for `trigger` (replacing what the
-    /// slot held before).
-    pub fn insert(&mut self, slot: u8, trigger: Trigger) {
-        self.remove(slot);
-        let _ = self.entries.push((trigger.key(), slot));
-    }
-
-    pub fn remove(&mut self, slot: u8) {
-        self.entries.retain(|&(_, s)| s != slot);
-    }
-
-    /// The slots of the bindings for `trigger`, in slot order.
-    pub fn find(&self, trigger: Trigger) -> Vec<u8, MAX_BINDINGS, u8> {
-        let key = trigger.key();
-        let mut slots: Vec<u8, MAX_BINDINGS, u8> = self
-            .entries
+    /// Notes the switches of configuration `slot` (replacing what it had).
+    /// `false` if there are more switches in all than the index holds.
+    pub fn set_switches(&mut self, slot: u8, switches: &[DeviceRef]) -> bool {
+        self.switches.retain(|&(_, s)| s != slot);
+        switches
             .iter()
-            .filter(|&&(k, _)| k == key)
-            .map(|&(_, s)| s)
-            .collect();
-        slots.sort_unstable();
-        slots
+            .all(|d| self.switches.push((d.key(), slot)).is_ok())
     }
 
-    /// The slot of a binding with exactly `trigger`, if there is one.
-    pub fn slot_of(&self, trigger: Trigger) -> Option<u8> {
-        self.find(trigger).first().copied()
+    /// Notes whether `button` of configuration `slot` does something.
+    pub fn set_button(&mut self, slot: u8, button: u8, used: bool) {
+        if let Some(mask) = self.buttons.get_mut(usize::from(slot)) {
+            if used {
+                *mask |= 1 << (button & 7);
+            } else {
+                *mask &= !(1 << (button & 7));
+            }
+        }
+    }
+
+    /// Forgets configuration `slot`.
+    pub fn remove(&mut self, slot: u8) {
+        self.switches.retain(|&(_, s)| s != slot);
+        self.set_buttons(slot, 0);
+    }
+
+    fn set_buttons(&mut self, slot: u8, mask: u8) {
+        if let Some(m) = self.buttons.get_mut(usize::from(slot)) {
+            *m = mask;
+        }
+    }
+
+    /// The buttons of configuration `slot` that do something, one bit each.
+    pub fn buttons(&self, slot: u8) -> u8 {
+        self.buttons.get(usize::from(slot)).copied().unwrap_or(0)
+    }
+
+    /// The configurations whose `button` of switch `device` does
+    /// something.
+    pub fn find(&self, device: DeviceRef, button: u8) -> impl Iterator<Item = u8> + '_ {
+        let key = device.key();
+        self.switches
+            .iter()
+            .filter(move |&&(k, s)| {
+                k == key && button < BUTTONS && self.buttons(s) & (1 << button) != 0
+            })
+            .map(|&(_, s)| s)
+    }
+
+    /// The configuration a switch belongs to, if any.
+    pub fn config_of(&self, device: DeviceRef) -> Option<u8> {
+        let key = device.key();
+        self.switches
+            .iter()
+            .find(|&&(k, _)| k == key)
+            .map(|&(_, s)| s)
     }
 }
+
+/// Where the actions of `button` of switch configuration `config` are
+/// stored.
+pub fn button_slot(config: u8, button: u8) -> (Section, u8) {
+    let i = usize::from(config) * usize::from(BUTTONS) + usize::from(button % BUTTONS);
+    if i < BUTTON_SECTION {
+        (Section::ButtonsLow, i as u8)
+    } else {
+        (Section::ButtonsHigh, (i - BUTTON_SECTION) as u8)
+    }
+}
+
+/// The switch configuration and button a slot of the button sections
+/// stores; `None` for another section.
+pub fn button_of(section: Section, slot: u8) -> Option<(u8, u8)> {
+    let base = match section {
+        Section::ButtonsLow => 0,
+        Section::ButtonsHigh => BUTTON_SECTION,
+        _ => return None,
+    };
+    let i = base + usize::from(slot);
+    Some((
+        (i / usize::from(BUTTONS)) as u8,
+        (i % usize::from(BUTTONS)) as u8,
+    ))
+}
+
+/// Slots of each of the two button sections.
+const BUTTON_SECTION: usize = 128;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automation::binding::{Binding, Event};
     use crate::automation::output::{Output, Relay};
-    use crate::automation::{decode, encode, DeviceRef, Name};
+    use crate::automation::{decode, encode, Name};
 
-    fn trigger(button: u8, event: Event) -> Trigger {
-        Trigger {
-            device: DeviceRef {
-                device_type: 4,
-                id: 12,
-            },
-            button,
-            event,
-        }
+    fn switch(id: u8) -> DeviceRef {
+        DeviceRef { device_type: 4, id }
     }
 
     #[test]
@@ -183,11 +263,28 @@ mod tests {
         assert_eq!(Section::split(0x0400 | 7), Some((Section::Schedule, 7)));
         // Past a section's capacity, or an unknown section.
         assert_eq!(Section::split(0x0400 | 8), None);
-        assert_eq!(Section::split(0x0900), None);
+        assert_eq!(Section::split(0x0A00), None);
+        // The bindings of the first version are left alone.
+        assert_eq!(Section::split(0x0200), None);
         assert_eq!(
-            Section::split(Section::Binding.key(127)),
-            Some((Section::Binding, 127))
+            Section::split(Section::ButtonsHigh.key(127)),
+            Some((Section::ButtonsHigh, 127))
         );
+    }
+
+    #[test]
+    fn button_slots() {
+        assert_eq!(button_slot(0, 0), (Section::ButtonsLow, 0));
+        assert_eq!(button_slot(15, 7), (Section::ButtonsLow, 127));
+        assert_eq!(button_slot(16, 0), (Section::ButtonsHigh, 0));
+        assert_eq!(button_slot(31, 7), (Section::ButtonsHigh, 127));
+        for config in 0..MAX_SWITCH_CONFIGS as u8 {
+            for button in 0..BUTTONS {
+                let (section, slot) = button_slot(config, button);
+                assert_eq!(button_of(section, slot), Some((config, button)));
+            }
+        }
+        assert_eq!(button_of(Section::Output, 0), None);
     }
 
     #[test]
@@ -209,19 +306,25 @@ mod tests {
     }
 
     #[test]
-    fn binding_index() {
-        let mut index = BindingIndex::new();
-        index.insert(5, trigger(1, Event::Single));
-        index.insert(2, trigger(1, Event::Single));
-        index.insert(3, trigger(1, Event::Double));
-        assert_eq!(index.find(trigger(1, Event::Single)).as_slice(), [2, 5]);
-        assert_eq!(index.slot_of(trigger(1, Event::Double)), Some(3));
-        assert!(index.find(trigger(2, Event::Single)).is_empty());
-        // A slot gets a new trigger.
-        index.insert(5, trigger(2, Event::Single));
-        assert_eq!(index.find(trigger(1, Event::Single)).as_slice(), [2]);
-        index.remove(2);
-        assert!(index.find(trigger(1, Event::Single)).is_empty());
+    fn switch_index() {
+        let mut index = SwitchIndex::new();
+        assert!(index.set_switches(3, &[switch(12), switch(13)]));
+        assert!(index.set_switches(5, &[switch(13)]));
+        index.set_button(3, 1, true);
+        index.set_button(5, 1, true);
+        index.set_button(5, 2, true);
+        let found = |d, b| index.find(switch(d), b).collect::<std::vec::Vec<_>>();
+        assert_eq!(found(12, 1), [3]);
+        assert_eq!(found(13, 1), [3, 5]);
+        assert_eq!(found(12, 2), []);
+        assert_eq!(found(14, 1), []);
+        assert_eq!(index.config_of(switch(13)), Some(3));
+        index.set_button(3, 1, false);
+        index.remove(5);
+        let found = |d, b| index.find(switch(d), b).collect::<std::vec::Vec<_>>();
+        assert_eq!(found(13, 1), []);
+        assert_eq!(index.buttons(5), 0);
+        assert_eq!(index.config_of(switch(13)), Some(3));
     }
 
     #[test]
@@ -242,11 +345,5 @@ mod tests {
         let bytes = encode(&output, &mut buffer).unwrap();
         assert!(bytes.len() < 20, "{}", bytes.len());
         assert_eq!(decode::<Named<Output>>(bytes), Some(output));
-
-        let json = r#"{"trigger":{"device":{"type":4,"id":12},"button":1,"event":"single"},
-            "actions":[{"output":{"name":"stairs","op":"toggle"}}]}"#;
-        let (binding, _): (Binding, _) = serde_json_core::from_str(json).unwrap();
-        let bytes = encode(&binding, &mut buffer).unwrap();
-        assert_eq!(decode::<Binding>(bytes), Some(binding));
     }
 }

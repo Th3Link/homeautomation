@@ -13,6 +13,8 @@ import {
   TimeEdit,
   timeText,
   useDevices,
+  useFeatures,
+  withFeature,
 } from './common.js';
 
 const NAME = /^[A-Za-z0-9_-]{1,20}$/;
@@ -29,15 +31,16 @@ function OutputSelect({ value, onChange, outputs }) {
 }
 
 // The editor both kinds share: a name, then the kind's own fields.
-function NamedEditor({ title, oldName, initial, api: calls, done, children }) {
+function NamedEditor({ title, intro, oldName, initial, api: calls, done, children }) {
   const [name, setName] = useState(oldName || '');
   const [item, setItem] = useState(initial);
   const [error, setError] = useState('');
-  const save = async () => {
-    if (!NAME.test(name)) return setError('name: 1–20 letters, digits, - and _');
-    if (JSON.stringify(item).includes('"sensor":{"type":0,')) return setError('Choose the brightness sensor');
+  const save = async (text) => {
+    const it = text || item;
+    if (!NAME.test(name)) return setError('Name: 1–20 letters, digits, - and _');
+    if (JSON.stringify(it).includes('"sensor":{"type":0,')) return setError('Choose the brightness sensor');
     // Detector rows that weren't filled in.
-    const clean = item.detectors ? { ...item, detectors: item.detectors.filter(Boolean) } : item;
+    const clean = it.detectors ? { ...it, detectors: it.detectors.filter(Boolean) } : it;
     try {
       await calls.put(name, clean);
       if (oldName && oldName !== name) await calls.remove(oldName);
@@ -47,7 +50,8 @@ function NamedEditor({ title, oldName, initial, api: calls, done, children }) {
       setError(errorText(e));
     }
   };
-  return html`<${Editor} title=${oldName ? `${title} ${oldName}` : `New ${title.toLowerCase()}`} onSave=${save} onCancel=${() => done(false)} error=${error}>
+  return html`<${Editor} title=${oldName ? `${title} ${oldName}` : `New ${title.toLowerCase()}`} onSave=${save} onCancel=${() => done(false)} error=${error}
+    value=${item} onText=${setItem} intro=${intro}>
     <div class="row">
       <${Field} label="Name" hint="Letters, digits, - and _; also the MQTT topic and the switch in Home Assistant">
         <input value=${name} maxlength="20" onInput=${(e) => setName(e.target.value.trim())} />
@@ -64,20 +68,35 @@ const newMotion = (outputs) => ({
   output: outputs[0] ? outputs[0].name : '',
   timeout_s: 180,
   lockout_s: 60,
+  levels: [],
   conditions: [],
 });
 
-function MotionFields({ m, set, outputs, devices }) {
+const MOTION_INTRO =
+  'Motion switches the output on; it goes off again after a while without motion. ' +
+  'Switched on by hand (a button, Home Assistant), it stays on until switched off. ' +
+  'After it went off, motion is ignored for a moment, so it does not come straight back on for someone leaving.';
+
+// The level from a time of day on: fixed, or the last one with a minimum.
+function PeriodEdit({ value, onChange }) {
+  const fixed = value.level !== undefined && value.level !== null;
+  return html`<span class="period">
+    <small>From</small><${TimeEdit} value=${value.from} onChange=${(from) => onChange({ ...value, from })} />
+    <select aria-label="Level" value=${fixed ? 'fixed' : 'last'} onChange=${(e) =>
+      onChange(e.target.value === 'fixed' ? { from: value.from, level: 1 } : { from: value.from, min: 1 })}>
+      <option value="fixed">always level</option>
+      <option value="last">the last level, at least</option>
+    </select>
+    <input type="number" class="short" min="1" max="255" aria-label="Level" value=${fixed ? value.level : value.min || 0}
+      onInput=${(e) => onChange(fixed ? { from: value.from, level: +e.target.value } : { from: value.from, min: +e.target.value })} />
+  </span>`;
+}
+
+function MotionFields({ m, set, outputs, devices, features }) {
   const patch = (p) => set({ ...m, ...p });
   return html`
     <div class="row">
       <${Field} label="Switches"><${OutputSelect} value=${m.output} outputs=${outputs} onChange=${(output) => patch({ output })} /><//>
-      <${Field} label="At level" hint="Empty: the level it had last">
-        <input type="number" min="0" max="255" value=${m.level ?? ''} onInput=${(e) => {
-          const { level, ...rest } = m;
-          set(e.target.value === '' ? rest : { ...rest, level: +e.target.value });
-        }} />
-      <//>
       <${Field} label="Off after no motion for (min)">
         <input type="number" min="0.1" max="1440" step="0.5" value=${m.timeout_s / 60} onInput=${(e) => patch({ timeout_s: Math.max(1, Math.round(+e.target.value * 60)) })} />
       <//>
@@ -86,9 +105,15 @@ function MotionFields({ m, set, outputs, devices }) {
       <//>
     </div>
     <h3>Motion detectors</h3>
+    <p class="muted">Switches with a PIR (marked on their device page).</p>
     <${ListEdit} items=${m.detectors} max=${4} addLabel="motion detector" onChange=${(detectors) => patch({ detectors })}
       make=${() => null}
-      render=${(d, setD) => html`<${DeviceSelect} value=${d} devices=${devices} onChange=${setD} />`} />
+      render=${(d, setD) => html`<${DeviceSelect} value=${d} devices=${withFeature(devices, features, 'pir')} onChange=${setD} />`} />
+    <h3>Level by the time of day</h3>
+    <p class="muted">Without any: the level it had last. E.g. from 22:00 always level 1; from sunrise the last level, but at least 4.</p>
+    <${ListEdit} items=${m.levels || []} max=${4} addLabel="time of day" onChange=${(levels) => patch({ levels })}
+      make=${() => ({ from: { clock: { hour: 22, minute: 0 } }, level: 1 })}
+      render=${(p, setP) => html`<${PeriodEdit} value=${p} onChange=${setP} />`} />
     <h3>Only switches on if</h3>
     <p class="muted">All of these hold. One that can't be told (no reading, no clock) counts as holding. Switching it on by hand stops the timer until it is switched off.</p>
     <${ListEdit} items=${m.conditions || []} max=${3} addLabel="condition" onChange=${(conditions) => patch({ conditions })}
@@ -97,6 +122,10 @@ function MotionFields({ m, set, outputs, devices }) {
 }
 
 // ---- schedules -----------------------------------------------------------
+
+const SCHEDULE_INTRO =
+  'Switches an output on and off in time windows: by the clock, relative to the sun, and off early when it gets bright. ' +
+  'Only the start and the end switch, so switching it off by hand in between sticks. Sun times use the location on the Gateway page.';
 
 const newWindow = () => ({ start: { sun: { event: 'civil_dusk', offset_min: -30 } }, end: [{ at: { clock: { hour: 23, minute: 0 } } }], days: 0x7f });
 
@@ -170,6 +199,7 @@ const MODE = { idle: ['Waiting', 'muted'], auto: ['On by motion', 'ok'], manual:
 
 function List({ kind, title, items, outputs, reload, empty }) {
   const devices = useDevices();
+  const features = useFeatures();
   const [editing, setEditing] = useState(null);
   const calls = kind === 'motion' ? api.automation.motion : api.automation.schedules;
   const [configs, setConfigs] = useState({});
@@ -194,14 +224,14 @@ function List({ kind, title, items, outputs, reload, empty }) {
   };
 
   if (editing)
-    return html`<${NamedEditor} title=${title} ...${editing} api=${calls}
+    return html`<${NamedEditor} title=${title} ...${editing} api=${calls} intro=${kind === 'motion' ? MOTION_INTRO : SCHEDULE_INTRO}
       done=${(saved) => {
         setEditing(null);
         if (saved) setTimeout(reload, 300);
       }}>
       ${(item, set) =>
         kind === 'motion'
-          ? html`<${MotionFields} m=${item} set=${set} outputs=${outputs} devices=${devices} />`
+          ? html`<${MotionFields} m=${item} set=${set} outputs=${outputs} devices=${devices} features=${features} />`
           : html`<${ScheduleFields} s=${item} set=${set} outputs=${outputs} devices=${devices} />`}
     <//>`;
 
@@ -228,7 +258,7 @@ function List({ kind, title, items, outputs, reload, empty }) {
                   ${c &&
                   html`<tr class="details"><td colspan="4">
                     ${kind === 'motion'
-                      ? `${c.output}${c.level !== undefined ? ' at ' + c.level : ''}; off ${c.timeout_s / 60} min after the last motion at ${c.detectors.map((d) => deviceName(devices, d)).join(', ')}; locked ${c.lockout_s} s${(c.conditions || []).length ? '; only if ' + c.conditions.map((x) => conditionText(x, devices)).join(' and ') : ''}`
+                      ? `${c.output}${(c.levels || []).length ? ' (' + c.levels.map((p) => `from ${timeText(p.from)} ${p.level ? 'level ' + p.level : 'at least ' + p.min}`).join(', ') + ')' : ''}; off ${c.timeout_s / 60} min after the last motion at ${c.detectors.map((d) => deviceName(devices, d)).join(', ')}; locked ${c.lockout_s} s${(c.conditions || []).length ? '; only if ' + c.conditions.map((x) => conditionText(x, devices)).join(' and ') : ''}`
                       : html`${c.output}: ${c.windows.map((w) => html`<div>${windowText(w, devices)}</div>`)}`}
                   </td></tr>`}`;
               })}

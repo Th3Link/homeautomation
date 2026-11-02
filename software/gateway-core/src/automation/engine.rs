@@ -3,17 +3,17 @@
 //!
 //! The engine keeps what it needs at every event in RAM: per output its
 //! kind and state, the motion lights and the schedules. A light's level
-//! table and the bindings' actions stay with the caller (on flash): a
-//! button event comes in with its [`Binding`], and a light level goes out
+//! table and the buttons' actions stay with the caller (on flash): a
+//! button press comes in with its actions, and a light level goes out
 //! as [`Command::Light`], for the caller to turn into frames with
 //! [`super::output::Light::frames`].
 //!
 //! Monotonic time (`now`, milliseconds) runs the timers; wall-clock time
 //! (in the [`Context`]) runs the schedules and the conditions.
 
-use super::binding::{Action, Binding, Op, Switch};
+use super::binding::{Action, Op, Switch};
 use super::motion::{self, MotionLight};
-use super::output::{Dimmer, Output, Relay, Shutter, MAX_MEMBERS};
+use super::output::{Dimmer, Output, Relay, Shutter};
 use super::schedule::{self, Schedule};
 use super::when::Context;
 use super::{invalid, DeviceRef, Invalid, Name, MAX_MOTION_LIGHTS, MAX_OUTPUTS, MAX_SCHEDULES};
@@ -70,7 +70,8 @@ pub enum Kind {
     Schedule,
 }
 
-pub type Commands = Vec<Command, 48, u8>;
+/// Room for a group of every output: a command and a state each.
+pub type Commands = Vec<Command, { 2 * MAX_OUTPUTS + 16 }, u8>;
 
 /// A shutter's movement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -100,8 +101,8 @@ enum Spec {
     Dimmer(Dimmer),
     Relay(Relay),
     Shutter(Shutter),
-    /// Member indices.
-    Group(Vec<u8, MAX_MEMBERS, u8>),
+    /// Member indices, one bit each.
+    Group(u64),
 }
 
 /// An output's state.
@@ -163,7 +164,7 @@ impl Engine {
             Output::Relay(r) => Spec::Relay(*r),
             Output::Shutter(s) => Spec::Shutter(*s),
             Output::Group(g) => {
-                let mut members = Vec::new();
+                let mut members = 0u64;
                 for m in &g.members {
                     let Some(i) = self.output(m) else {
                         return invalid("members", "not an output");
@@ -171,7 +172,7 @@ impl Engine {
                     if matches!(self.outputs[i].spec, Spec::Group(_)) {
                         return invalid("members", "not a group");
                     }
-                    let _ = members.push(i as u8);
+                    members |= 1 << i;
                 }
                 Spec::Group(members)
             }
@@ -319,9 +320,9 @@ impl Engine {
         (self.outputs.len(), self.motion.len(), self.schedules.len())
     }
 
-    /// A button event with its binding: does the actions in order.
-    pub fn button(&mut self, now: u64, binding: &Binding, out: &mut Commands) {
-        for action in &binding.actions {
+    /// A button press: does its actions in order.
+    pub fn actions(&mut self, now: u64, actions: &[Action], out: &mut Commands) {
+        for action in actions {
             match action {
                 Action::Output { name, op } => {
                     if let Some(i) = self.output(name) {
@@ -394,7 +395,8 @@ impl Engine {
             let conditions = &config.conditions;
             let decision = state.motion(config, now, || conditions.iter().all(|c| c.holds(ctx)));
             if decision == Some(motion::Do::On) {
-                self.motion_switch(i, true, now, out);
+                let op = self.motion[i].1.on_op(ctx);
+                self.motion_switch(i, op, now, out);
             }
         }
     }
@@ -467,7 +469,7 @@ impl Engine {
         for i in 0..self.motion.len() {
             let (_, config, state) = &mut self.motion[i];
             if state.tick(config, now) == Some(motion::Do::Off) {
-                self.motion_switch(i, false, now, out);
+                self.motion_switch(i, Op::Off, now, out);
             }
         }
         for i in 0..self.outputs.len() {
@@ -514,15 +516,9 @@ impl Engine {
         (timers, schedules)
     }
 
-    fn motion_switch(&mut self, motion: usize, on: bool, now: u64, out: &mut Commands) {
-        let config = &self.motion[motion].1;
-        let Some(i) = self.output(&config.output) else {
+    fn motion_switch(&mut self, motion: usize, op: Op, now: u64, out: &mut Commands) {
+        let Some(i) = self.output(&self.motion[motion].1.output) else {
             return;
-        };
-        let op = match (on, config.level) {
-            (false, _) => Op::Off,
-            (true, Some(level)) => Op::Set(level),
-            (true, None) => Op::On,
         };
         self.apply(i, op, now, Source::Motion(motion), out);
     }
@@ -533,8 +529,8 @@ impl Engine {
         let state = slot.state;
         match slot.spec.clone() {
             Spec::Group(members) => {
-                for m in members {
-                    self.apply(usize::from(m), op, now, source, out);
+                for m in (0..MAX_OUTPUTS).filter(|m| members & (1 << m) != 0) {
+                    self.apply(m, op, now, source, out);
                 }
             }
             Spec::Light { top, default_level } => {
@@ -553,6 +549,8 @@ impl Engine {
                     Op::Max => top,
                     Op::Inc => (state.level + 1).min(top),
                     Op::Dec => state.level.saturating_sub(1),
+                    Op::AtLeast(n) if state.level == 0 => on_level.max(n).min(top),
+                    Op::AtLeast(n) => state.level.max(n).min(top),
                     _ => return,
                 };
                 // Explicit levels go out even when unchanged, to resync.
@@ -581,6 +579,8 @@ impl Engine {
                     Op::Max => u8::MAX,
                     Op::Inc => state.level.saturating_add(DIMMER_STEP),
                     Op::Dec => state.level.saturating_sub(DIMMER_STEP),
+                    Op::AtLeast(n) if state.level == 0 => on_value.max(n),
+                    Op::AtLeast(n) => state.level.max(n),
                     _ => return,
                 };
                 let _ = out.push(Command::Lamp {
@@ -596,7 +596,7 @@ impl Engine {
             }
             Spec::Relay(r) => {
                 let (on, time_ms) = match op {
-                    Op::On | Op::Set(1..) | Op::Max => (true, 0),
+                    Op::On | Op::Set(1..) | Op::Max | Op::AtLeast(_) => (true, 0),
                     Op::Off | Op::Set(0) => (false, 0),
                     Op::Toggle => (state.level == 0, 0),
                     Op::OnFor(ms) => (true, ms),
@@ -770,15 +770,10 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automation::binding::{Event, Trigger};
     use crate::automation::output::{Group, LampGroup, Light};
     use crate::automation::when::tests::{cet, local, BERLIN};
     use crate::tz::TimeZone;
 
-    const SWITCH: DeviceRef = DeviceRef {
-        device_type: 4,
-        id: 12,
-    };
     const LAMPS: DeviceRef = DeviceRef {
         device_type: 3,
         id: 6,
@@ -845,16 +840,8 @@ mod tests {
     }
 
     fn press(e: &mut Engine, now: u64, actions: &[Action]) -> Commands {
-        let binding = Binding {
-            trigger: Trigger {
-                device: SWITCH,
-                button: 0,
-                event: Event::Single,
-            },
-            actions: Vec::from_slice(actions).unwrap(),
-        };
         let mut out = Commands::new();
-        e.button(now, &binding, &mut out);
+        e.actions(now, actions, &mut out);
         out
     }
 
@@ -1146,6 +1133,44 @@ mod tests {
     fn saved_state_is_small() {
         let size = core::mem::size_of::<Saved>();
         assert!(size < 4 * 1024, "{size}");
+    }
+
+    #[test]
+    fn at_least_and_big_groups() {
+        let mut e = engine();
+        let now = 1000;
+        // Off: on at the last level (the default, 3), but at least 5.
+        press(&mut e, now, &[op("bad", Op::AtLeast(5))]);
+        assert_eq!(e.output_state(0).unwrap().level, 5);
+        press(&mut e, now, &[op("bad", Op::Set(7))]);
+        press(&mut e, now, &[op("bad", Op::AtLeast(5))]);
+        assert_eq!(e.output_state(0).unwrap().level, 7);
+
+        // A group of 40 relays switches them all.
+        let mut e = Engine::new();
+        let mut members = Vec::new();
+        for i in 0..40u8 {
+            let n = name(&std::format!("r{i}"));
+            e.add_output(
+                &n,
+                &Output::Relay(Relay {
+                    device: RELAYS,
+                    channel: i,
+                    bank: 0,
+                }),
+            )
+            .unwrap();
+            members.push(n).unwrap();
+        }
+        e.add_output("everything", &Output::Group(Group { members }))
+            .unwrap();
+        let out = press(&mut e, now, &[op("everything", Op::On)]);
+        let relays = out
+            .iter()
+            .filter(|c| matches!(c, Command::Relais { .. }))
+            .count();
+        assert_eq!(relays, 40);
+        assert!((0..40).all(|i| e.output_state(i).unwrap().level == 1));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 // Pieces the automation pages share: devices by name, times, conditions,
 // the operations per output kind, and an editor dialog.
+import { dump, load } from 'js-yaml';
 import { useEffect, useState } from 'preact/hooks';
 import * as api from '../../api.js';
 import { html, Field } from '../../ui.js';
@@ -29,6 +30,53 @@ export function deviceName(devices, ref) {
   const d = devices.find((d) => d.device_type === ref.type && d.device_id === ref.id);
   if (d && d.name) return d.name;
   return `${d ? d.type_name : 'type ' + ref.type} / 0x${ref.id.toString(16).padStart(2, '0')}`;
+}
+
+// ---- device notes ---------------------------------------------------------
+
+// What devices have on board (`/automation/devices`), loaded once per page:
+// a Map from refKey to the features.
+let notesPromise;
+export function useFeatures() {
+  const [features, setFeatures] = useState(new Map());
+  useEffect(() => {
+    notesPromise =
+      notesPromise ||
+      api.automation.devices
+        .list()
+        .then((all) => new Map(all.map((n) => [refKey(n.device), n.features])))
+        .catch(() => ((notesPromise = undefined), new Map()));
+    notesPromise.then(setFeatures);
+  }, []);
+  return features;
+}
+export const forgetFeatures = () => (notesPromise = undefined);
+
+export const FEATURES = [
+  ['extension', 'Extension board (buttons 4–7)'],
+  ['pir', 'Motion detector (PIR)'],
+  ['nightlight', 'Night light'],
+  ['veml7700', 'Brightness (VEML7700)'],
+  ['bme680', 'BME680'],
+  ['bme280', 'BME280'],
+  ['dht22', 'DHT22'],
+  ['scd30', 'SCD30 (CO₂)'],
+];
+
+// The devices that have `feature`; all of them while none is marked so.
+export function withFeature(devices, features, feature) {
+  const marked = devices.filter((d) => (features.get(refKey({ type: d.device_type, id: d.device_id })) || []).includes(feature));
+  return marked.length ? marked : devices;
+}
+
+export const hasFeature = (features, ref, feature) => (features.get(refKey(ref)) || []).includes(feature);
+
+// How the device routes (`/devices/:device/…`) name a device: its name,
+// else its key.
+export function devicePath(devices, ref) {
+  const d = devices.find((d) => d.device_type === ref.type && d.device_id === ref.id);
+  if (d) return d.name || d.key;
+  return '0x' + (0x10000000 + (ref.type << 16) + (ref.id << 8)).toString(16);
 }
 
 // A device: from the list, or typed as type and id for one that isn't on the
@@ -208,8 +256,8 @@ export const OUTPUT_KINDS = [
 
 // What can be done to an output of each kind: [op, label, takes a value].
 export const OPS = {
-  light: [['toggle', 'Toggle'], ['on', 'On (last level)'], ['off', 'Off'], ['set', 'Level', true], ['max', 'Brightest'], ['inc', 'Brighter'], ['dec', 'Darker']],
-  dimmer: [['toggle', 'Toggle'], ['on', 'On (last value)'], ['off', 'Off'], ['set', 'Value', true], ['max', 'Full'], ['inc', 'Brighter'], ['dec', 'Darker']],
+  light: [['toggle', 'Toggle'], ['on', 'On (last level)'], ['at_least', 'On, at least level', true], ['off', 'Off'], ['set', 'Level', true], ['max', 'Brightest'], ['inc', 'Brighter'], ['dec', 'Darker']],
+  dimmer: [['toggle', 'Toggle'], ['on', 'On (last value)'], ['at_least', 'On, at least value', true], ['off', 'Off'], ['set', 'Value', true], ['max', 'Full'], ['inc', 'Brighter'], ['dec', 'Darker']],
   relay: [['toggle', 'Toggle'], ['on', 'On'], ['off', 'Off'], ['on_for', 'On for (ms)', true]],
   shutter: [['up', 'Up / stop'], ['down', 'Down / stop'], ['up_hold', 'Up (while held)'], ['down_hold', 'Down (while held)'], ['stop', 'Stop']],
   group: [['toggle', 'Toggle'], ['on', 'On'], ['off', 'Off'], ['up', 'Up / stop'], ['down', 'Down / stop'], ['stop', 'Stop']],
@@ -240,20 +288,86 @@ export function OpSelect({ value, onChange, kind }) {
 
 // ---- layout --------------------------------------------------------------
 
+// ---- text ----------------------------------------------------------------
+
+// YAML in block style, with the small things on one line: `{type: 3, id: 6}`,
+// a level `[2, 2]`, an action `{name: wz, op: toggle}`.
+const flow = (v) => dump(v, { flowLevel: 0, lineWidth: -1 }).trim();
+const isScalar = (v) => v === null || typeof v !== 'object';
+const isLeaf = (v) => (Array.isArray(v) ? v : Object.values(v)).every(isScalar) && flow(v).length <= 60;
+
+function emit(v, indent) {
+  const lines = [];
+  const entries = Array.isArray(v) ? v.map((x) => [null, x]) : Object.entries(v);
+  if (!entries.length) return [indent + flow(v)];
+  for (const [key, x] of entries) {
+    const head = key === null ? '- ' : `${flow(key)}: `;
+    if (isScalar(x) || isLeaf(x)) {
+      lines.push(indent + head + flow(x));
+    } else if (key === null) {
+      const inner = emit(x, indent + '  ');
+      lines.push(indent + '- ' + inner[0].slice(indent.length + 2), ...inner.slice(1));
+    } else {
+      lines.push(indent + head.trimEnd(), ...emit(x, indent + '  '));
+    }
+  }
+  return lines;
+}
+
+export const toYaml = (value) => (isScalar(value) ? flow(value) : emit(value, '').join('\n')) + '\n';
+export const fromYaml = (text) => load(text);
+
 // An editor shown as a card in place of the list, with its own error line.
-export function Editor({ title, children, onSave, onCancel, error }) {
+// With `value`, the item can also be edited as YAML: back to the form,
+// `onText` gets the parsed item; saving from the text, `onSave` gets it
+// (else nothing: the form's state).
+export function Editor({ title, intro, children, onSave, onCancel, error, value, onText }) {
   const [busy, setBusy] = useState(false);
+  const [text, setText] = useState(null);
+  const [textError, setTextError] = useState('');
+  const parse = () => {
+    try {
+      const v = fromYaml(text);
+      if (!v || typeof v !== 'object') throw new Error('not an object');
+      setTextError('');
+      return v;
+    } catch (e) {
+      setTextError(e.message);
+      return undefined;
+    }
+  };
+  const toForm = () => {
+    if (text === null) return;
+    const v = parse();
+    if (v === undefined) return;
+    onText(v);
+    setText(null);
+  };
   const save = async () => {
+    let parsed;
+    if (text !== null && (parsed = parse()) === undefined) return;
     setBusy(true);
     try {
-      await onSave();
+      await onSave(parsed);
     } finally {
       setBusy(false);
     }
   };
   return html`<section class="card editor">
-    <header><h2>${title}</h2></header>
-    ${children}
+    <header><h2>${title}</h2>
+      ${value !== undefined &&
+      html`<div class="seg" role="group" aria-label="Edit as">
+        <button class=${text === null ? 'active' : ''} onClick=${toForm}>Form</button>
+        <button class=${text !== null ? 'active' : ''} onClick=${() => text === null && setText(toYaml(value))}>YAML</button>
+      </div>`}
+    </header>
+    ${intro && html`<p class="muted intro">${intro}</p>`}
+    ${text === null
+      ? children
+      : html`<textarea class="code" rows=${Math.min(30, Math.max(8, text.split('\n').length + 1))} spellcheck="false"
+          value=${text} onInput=${(e) => setText(e.target.value)} />
+          ${textError && html`<p class="error">${textError}</p>`}
+          <p class="muted">Back to the form with <em>Form</em>; <em>Save</em> saves the text as it is.</p>`}
     ${error && html`<p class="error">${error}</p>`}
     <div class="buttons">
       <button class="primary" disabled=${busy} onClick=${save}>Save</button>

@@ -10,9 +10,13 @@ use serde::{Deserialize, Serialize};
 pub const MAX_LAMP_GROUPS: usize = 8;
 /// The most levels a [`Light`] has (besides off).
 pub const MAX_LEVELS: usize = 15;
-/// The most members of a [`Group`].
-pub const MAX_MEMBERS: usize = 16;
+/// The most members of a [`Group`]: every other output.
+pub const MAX_MEMBERS: usize = super::MAX_OUTPUTS;
 
+// A group's names make it ~1 KB, the others are small. An output is only
+// ever decoded one at a time (the engine keeps a compact form), and there
+// is no heap to box it on.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Output {
