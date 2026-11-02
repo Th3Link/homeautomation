@@ -389,5 +389,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "e1e231f6b7f841a1e78a412d9269f5351a791176",
+  "date": "2026-11-02T22:40:40+01:00",
+  "subject": "Merge pull request #55 from Th3Link/feat/automation-ui",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 487536,
+    "iram": 18680,
+    "dram_static": 41304,
+    "stack_budget": 155304,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509315,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
