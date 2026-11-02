@@ -17,10 +17,9 @@ export class ApiError extends Error {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The gateway serves only a few connections at a time and refuses the rest,
-// which looks like a network error: try those again before giving up. A
-// string `body` is sent as it is (a PEM file), anything else as JSON.
-async function request(method, path, body) {
-  const raw = typeof body === 'string';
+// which looks like a network error: try those again before giving up.
+// `body` is sent as JSON, or as it is when `raw` (a PEM file).
+async function request(method, path, body, raw = false) {
   for (let attempt = 1; ; attempt++) {
     let response;
     try {
@@ -49,6 +48,7 @@ async function request(method, path, body) {
 const get = (path) => request('GET', path);
 const post = (path, body) => request('POST', path, body);
 const put = (path, body) => request('PUT', path, body);
+const putPem = (path, pem) => request('PUT', path, pem, true);
 const patch = (path, body) => request('PATCH', path, body);
 const del = (path) => request('DELETE', path);
 const seg = encodeURIComponent;
@@ -84,10 +84,10 @@ export const tls = {
   update: (changes) => patch('/tls', changes),
   selfSigned: (validityYears) => post('/tls/self-signed', { validity_years: validityYears }),
   csrUrl: () => `${BASE}/tls/csr`,
-  installCertificate: (pem) => put('/tls/certificate', pem),
-  setTrustAnchor: (pem) => put('/tls/trust-anchor', pem),
+  installCertificate: (pem) => putPem('/tls/certificate', pem),
+  setTrustAnchor: (pem) => putPem('/tls/trust-anchor', pem),
   removeTrustAnchor: () => del('/tls/trust-anchor'),
-  setIdentity: (pem) => put('/tls/est/identity', pem),
+  setIdentity: (pem) => putPem('/tls/est/identity', pem),
   removeIdentity: () => del('/tls/est/identity'),
   enroll: () => post('/tls/est/enroll'),
 };
