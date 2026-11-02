@@ -29,6 +29,7 @@ pub mod heating_state;
 pub mod https;
 pub mod lamps;
 pub mod location;
+pub mod log_buffer;
 pub mod mqtt;
 pub mod nts;
 pub mod resolve;

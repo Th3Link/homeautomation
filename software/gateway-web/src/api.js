@@ -170,6 +170,13 @@ export const firmware = {
   },
 };
 
+// The latest log lines, from position `from` in the stream of everything
+// logged since boot, and the switch for mirroring CAN frames to MQTT.
+export const logs = {
+  read: (from) => get(`/logs?from=${from}`),
+  setCanToMqtt: (on) => patch('/logs', { can_to_mqtt: on }),
+};
+
 // The gateway's own automation (ADR 0025): outputs, switch configurations,
 // motion lights, schedules and device notes, one item per request.
 const named = (kind) => ({

@@ -4,6 +4,7 @@ import { Device } from './pages/device.js';
 import { Devices } from './pages/devices.js';
 import { Gateway } from './pages/gateway.js';
 import { Https } from './pages/https.js';
+import { Log } from './pages/log.js';
 import { Mqtt } from './pages/mqtt.js';
 import { Sensors } from './pages/sensors.js';
 import { Link, match, usePath } from './router.js';
@@ -20,6 +21,7 @@ const routes = [
   { path: '/mqtt', title: 'MQTT', page: Mqtt },
   { path: '/gateway', title: 'Gateway', page: Gateway },
   { path: '/https', title: 'HTTPS', page: Https },
+  { path: '/log', title: 'Log', page: Log },
 ];
 
 const nav = [
@@ -29,6 +31,7 @@ const nav = [
   ['/mqtt', 'MQTT'],
   ['/gateway', 'Gateway'],
   ['/https', 'HTTPS'],
+  ['/log', 'Log'],
 ];
 
 function App() {

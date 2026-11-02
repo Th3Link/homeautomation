@@ -47,6 +47,27 @@ pub static DEVICE_TYPE: AtomicU8 = AtomicU8::new(0xFF);
 /// `send(uint32_t, ...)` overload).
 pub static SILENCE: AtomicBool = AtomicBool::new(false);
 
+/// Mirrors every frame sent and received to `canbus/log/0x<id>` (the
+/// original's "MQTT logging"): `0x` and the data bytes in hex, or `R` and
+/// the bytes for a request. Off at boot; for debugging, it is a lot of
+/// messages.
+pub static MQTT_LOG: AtomicBool = AtomicBool::new(false);
+
+async fn mqtt_log(id: u32, data: &[u8], request: bool) {
+    use core::fmt::Write;
+    if !MQTT_LOG.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut topic: heapless::String<24> = heapless::String::new();
+    let _ = write!(topic, "canbus/log/0x{id:x}");
+    let mut body: heapless::String<18> = heapless::String::new();
+    let _ = body.push_str(if request { "R" } else { "0x" });
+    for b in data {
+        let _ = write!(body, "{b:02x}");
+    }
+    crate::mqtt::publish(&topic, &body).await;
+}
+
 const ACCEPT_ALL_ID: [u8; 29] = [b'x'; 29];
 const ACCEPT_ALL_RTR: [u8; 1] = *b"x";
 
@@ -101,6 +122,7 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
     };
     let data = frame.data();
     let request = frame.is_remote_frame();
+    mqtt_log(u32::from(id), data, request).await;
 
     if id.msg_type == CanMessageType::UpdateSilence {
         if let Some(&b) = data.first() {
@@ -160,6 +182,7 @@ pub async fn send_can_message(msg_type: CanMessageType, data: &[u8], request: bo
 /// CAN-OTA orchestration and the debug passthrough, both of which target
 /// arbitrary devices rather than speaking as this one.
 pub async fn send_raw(can_id: u32, data: &[u8], request: bool) {
+    mqtt_log(can_id & 0x1FFF_FFFF, data, request).await;
     let ext = embedded_can::ExtendedId::new(can_id & 0x1FFF_FFFF)
         .expect("29-bit mask always fits an ExtendedId");
     let ext: esp_hal::twai::ExtendedId = ext.into();

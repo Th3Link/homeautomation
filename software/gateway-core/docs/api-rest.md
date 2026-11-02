@@ -42,6 +42,8 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | Route | |
 |---|---|
 | `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv6` (`address` with prefix length and `origin`: `link-local`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`) |
+| `GET /logs?from=n` | the latest console log lines (the gateway keeps the last 6 KiB): `from` (where `text` starts in the stream of everything logged since boot; later than asked if that was overwritten), `text` (whole lines, up to 1200 bytes), `next` (ask from there next time), `can_to_mqtt` |
+| `PATCH /logs` | `can_to_mqtt`: mirror every CAN frame to `canbus/log/0x<id>` (off at boot). Answers like `GET` |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
 | `POST /bus/discover` | every device announces itself, one after the other at random times, until the gateway acks ([ADR 0021](../../../docs/adr/0021-can-discovery.md)); the web UI's *Scan* |
 | `POST /bus/ping`, `/bus/refresh`, `/bus/restart` | to every device |
@@ -175,7 +177,7 @@ refused item answers `400 invalid` with the `field` it is about.
 
 ## The browser UI
 
-`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/automation`, `/automation/:tab`, `/devices/:device` answer with `index.html`,
+`GET /`, `/sensors`, `/mqtt`, `/gateway`, `/https`, `/log`, `/automation`, `/automation/:tab`, `/devices/:device` answer with `index.html`,
 `/assets/app.js` and `/assets/style.css` with the rest, all gzip'd and part
 of the firmware (`gateway-hardware/src/web/assets.rs`). Edit the sources in
 `software/gateway-web/src` and run `npm run build` there: the result in

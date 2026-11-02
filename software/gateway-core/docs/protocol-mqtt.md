@@ -138,12 +138,13 @@ announcement on MQTT (re)connect — see "Connection" above. `<hex>` is
 this gateway's own device key, hex, no `0x` prefix and no leading zero
 padding.
 
-### `canbus/log/0x<hex>` (planned in the original, not currently wired up)
+### `canbus/log/0x<hex>`
 
-The original's `Logging` decorator mirrors sent/received CAN frames here
-when a runtime "MQTT logging" flag is enabled (toggled via the
-`mqtt_logging` `/control.json` verb). Reserved for parity; not yet wired
-into `gateway-hardware`'s CAN transport.
+Every CAN frame the gateway sends or receives, while "CAN traffic to MQTT"
+is on (the web UI's log page, `PATCH /api/v1/logs`; off at boot, as the
+original's `mqtt_logging` flag). `<hex>` is the 29-bit CAN id in lower-case
+hex without padding; the body is `0x` and the data bytes in hex, or `R`
+and the bytes for a request (remote) frame. Not retained.
 
 ### Encryption (`mqtts://`)
 
@@ -288,7 +289,9 @@ exactly as given. Body: `<count>/<hex-byte-pairs...>` — `<count>` is
 parsed as an integer but its value is otherwise unused (a no-op
 validation-only field, reproduced as-is); everything after the first `/`
 is read as consecutive 2-hex-digit byte pairs, capped at 8 bytes (the CAN
-frame limit), and sent verbatim as that CAN message's payload.
+frame limit), and sent verbatim as that CAN message's payload. A retained
+message is ignored (it would go out again after every reconnect); a body
+that doesn't parse is logged.
 
 ### `canbus/gateway/restart`
 

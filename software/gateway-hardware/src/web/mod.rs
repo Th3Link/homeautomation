@@ -21,6 +21,7 @@ mod error;
 mod firmware;
 mod json;
 mod location;
+mod logs;
 mod mqtt;
 mod sensors;
 mod settings;
@@ -196,6 +197,7 @@ fn app() -> Router<impl PathRouter> {
     let api = tls::routes(api);
     let api = location::routes(api);
     let api = automation::routes(api);
+    let api = logs::routes(api);
     // The API outermost: every route a request passes on its way costs a
     // stack frame (see `automation::routes`), and the pages are asked for
     // only when one loads.
