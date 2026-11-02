@@ -364,9 +364,12 @@ bytes) decodes the same way.
 the wire; callers interpret `0`/`1`/`2`/`3` as
 off/up/down/on by convention only.
 
-**`RelaisState` reports are simpler still**: only byte 0 (the state) is
-read; nothing else in the frame is interpreted, even though a sender
-might put more there.
+**`RelaisState` reports** have the same layout: byte 0 is the channel
+(`number`), byte 1 the state, byte 5 the bank. Legacy nodes report the
+state as `0`/`1`, Rust nodes echo the commanded value (`3` = on). The
+original gateway published only byte 0, i.e. the channel number, as
+`canbus/relais_state/<device>`; that topic stays for compatibility, and
+`canbus/relais_state/<device>/<bank>/<number>` carries the state.
 
 ## Lamps (`LampGroup` / `Nightlight`)
 

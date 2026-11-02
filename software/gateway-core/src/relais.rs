@@ -15,8 +15,10 @@
 //!   This is *also* the shape `RollershutterState` reports are decoded
 //!   with ([`RelaisMsg::from_bytes`]).
 //!
-//! `RelaisState` (as opposed to `RollershutterState`) reports are simpler
-//! still: the gateway only ever reads byte 0 ([`decode_relais_state`]).
+//! `RelaisState` reports have the same [`RelaisMsg`] layout: byte 0 is the
+//! channel, byte 1 the state. The original gateway published only byte 0
+//! ([`decode_relais_state`], kept for its topic); the per-channel topic
+//! decodes the whole frame.
 
 /// A `Relais`/`Rollershutter` command as sent by an MQTT
 /// `canbus/relais_command/#` / `canbus/rollershutter_command/#` topic.
@@ -85,9 +87,10 @@ impl RelaisMsg {
     }
 }
 
-/// Decodes a `RelaisState` report: the gateway only ever reads the first
-/// byte (`BridgeRelais::dispatch`'s `RELAIS_STATE` branch), unlike
-/// `RollershutterState` which uses the full [`RelaisMsg`] layout.
+/// Byte 0 of a `RelaisState` report, which is the *channel*, not the state.
+/// The original gateway published this (`BridgeRelais::dispatch`'s
+/// `RELAIS_STATE` branch), so `canbus/relais_state/<device>` keeps it for
+/// compatibility. The state is in [`RelaisMsg::from_bytes`]'s `state`.
 pub fn decode_relais_state(data: &[u8]) -> Option<u8> {
     data.first().copied()
 }
@@ -179,5 +182,12 @@ mod tests {
     fn relais_state_reads_first_byte_only() {
         assert_eq!(decode_relais_state(&[1, 2, 3, 4]), Some(1));
         assert_eq!(decode_relais_state(&[]), None);
+    }
+
+    #[test]
+    fn relais_state_report_has_channel_then_state() {
+        // A Rust node's report for channel 9 switched on, bank 0.
+        let msg = RelaisMsg::from_bytes(&[9, 3, 0, 0, 0, 0]).unwrap();
+        assert_eq!((msg.number, msg.state, msg.bank), (9, 3, 0));
     }
 }
