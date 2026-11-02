@@ -27,6 +27,21 @@ pub fn relais_state_topic(device_key: u32, custom_string: &str) -> Topic {
     t
 }
 
+/// `canbus/relais_state/0x<id>/<bank>/<number>` or
+/// `canbus/relais_state/<custom_string>/<bank>/<number>`: one relay
+/// channel's state, unlike [`relais_state_topic`], which carries only the
+/// channel number.
+pub fn relais_channel_state_topic(
+    device_key: u32,
+    custom_string: &str,
+    bank: u8,
+    number: u8,
+) -> Topic {
+    let mut t = relais_state_topic(device_key, custom_string);
+    let _ = write!(t, "/{bank}/{number}");
+    t
+}
+
 /// `canbus/rollershutter_state/0x<id>/<bank>/<number>` or
 /// `canbus/rollershutter_state/<custom_string>/<bank>/<number>`.
 pub fn rollershutter_state_topic(
@@ -84,6 +99,18 @@ mod tests {
         assert_eq!(
             relais_state_topic(0x1005_0100, "kitchen").as_str(),
             "canbus/relais_state/kitchen"
+        );
+    }
+
+    #[test]
+    fn relais_channel_state_topic_includes_bank_and_number() {
+        assert_eq!(
+            relais_channel_state_topic(0x1005_8000, "", 0, 9).as_str(),
+            "canbus/relais_state/0x10058000/0/9"
+        );
+        assert_eq!(
+            relais_channel_state_topic(0x1005_8000, "basement", 0, 9).as_str(),
+            "canbus/relais_state/basement/0/9"
         );
     }
 
