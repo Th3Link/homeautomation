@@ -22,7 +22,8 @@ const J2000: f64 = 2_451_545.0;
 const MINUTES_PER_DAY: f64 = 1440.0;
 
 /// A moment of the day defined by the sun.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Event {
     AstronomicalDawn,
     NauticalDawn,
