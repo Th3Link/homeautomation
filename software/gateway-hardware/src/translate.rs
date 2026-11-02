@@ -98,7 +98,9 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
         | CanMessageType::HumiditySensor
         | CanMessageType::Co2Equivalent
         | CanMessageType::VocBreath
-        | CanMessageType::AirQuality => {
+        | CanMessageType::AirQuality
+        | CanMessageType::Co2Sensor
+        | CanMessageType::GasResistance => {
             if let Ok(reading) = FixedPointReading::from_bytes(data) {
                 let mut body: HString<24> = HString::new();
                 // Only temperatures can be below zero; the other sensors'

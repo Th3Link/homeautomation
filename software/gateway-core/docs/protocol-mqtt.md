@@ -97,10 +97,15 @@ collapses to `hold`. Published from a `PirSensor` CAN frame.
 ### `canbus/<sensor>/<device>/0x<sub_id>`
 
 `<sensor>` is one of `temperature`, `pressure`, `humidity`, `co2`, `voc`,
-`air_quality` (all fixed-point sensor readings) or `brightness` (ambient
+`air_quality`, `co2_measured`, `gas_resistance` (all fixed-point sensor
+readings) or `brightness` (ambient
 light — this one has **no** `/0x<sub_id>` suffix at all). Body: the
 decoded reading as a decimal string (e.g. `"21.5"` for temperature,
 divided-by-16 fixed point; a plain integer for brightness, unscaled).
+`co2` and `voc` are ppm, `air_quality` an index of 0 (clean) to 500. All
+three are estimates from the BME680's gas sensor (VOCs), not measurements
+(ADR 0024). `co2_measured` is ppm from an NDIR sensor (SCD30),
+`gas_resistance` the BME680's raw gas resistance in kΩ.
 
 `<sub_id>` for the fixed-point sensors is the CAN payload's 48-bit
 accompanying id, but formatted from only its **low 32 bits** — a
