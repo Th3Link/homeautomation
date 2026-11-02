@@ -7,11 +7,13 @@
 # The small partitions before them are where the original C++ gateway
 # (software/legacy/mqtt_gateway) had them, so a gateway that is re-flashed
 # over USB with this table keeps its configuration in `nvs`. `storage`
-# (SPIFFS) is unused by the Rust firmware, it only keeps the offsets.
+# (SPIFFS in the original) holds the automation's configuration
+# (src/automation/store.rs; erased once if it holds something else).
 # The original's table ended after 4 MB and OTA never rewrites the partition
 # table, so a deployed C++ gateway has to be flashed over USB once.
 #
-# Keep CONFIG_PARTITION in src/config.rs in sync with `nvs`, and
+# Keep CONFIG_PARTITION in src/config.rs in sync with `nvs`, PARTITION in
+# src/automation/store.rs with `storage`, and
 # GATEWAY_MAX_SIZE in src/web/firmware.rs with the OTA slot size.
 #
 # Name,     Type,   SubType,    Offset,     Size, Flags

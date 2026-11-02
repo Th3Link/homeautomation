@@ -70,16 +70,20 @@ pub fn tls() -> Option<TlsReference<'static>> {
 /// HTTP request buffer and the buffer responses are collected in. Kept here
 /// once instead of in every web task, since only the slot holder uses them.
 pub struct Buffers {
-    pub http: [u8; 1536],
+    pub http: [u8; HTTP_BUFFER],
     pub out: [u8; OUT_BUFFER],
 }
+
+/// A request with its headers and body: an automation item's JSON (a light
+/// with its level table) after a browser's headers.
+pub const HTTP_BUFFER: usize = 2048;
 
 /// How much of a response is collected before it goes out as one TLS
 /// record (each record costs a header, a tag and an encryption pass).
 pub const OUT_BUFFER: usize = 2048;
 
 static SLOT: Mutex<CriticalSectionRawMutex, Buffers> = Mutex::new(Buffers {
-    http: [0; 1536],
+    http: [0; HTTP_BUFFER],
     out: [0; OUT_BUFFER],
 });
 

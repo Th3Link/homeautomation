@@ -1,4 +1,5 @@
 import { render } from 'preact';
+import { Automation } from './pages/automation/index.js';
 import { Device } from './pages/device.js';
 import { Devices } from './pages/devices.js';
 import { Gateway } from './pages/gateway.js';
@@ -14,6 +15,8 @@ const routes = [
   { path: '/', title: 'Devices', page: Devices },
   { path: '/devices/:device', title: 'Device', page: Device },
   { path: '/sensors', title: 'Sensors', page: Sensors },
+  { path: '/automation', title: 'Automation', page: Automation },
+  { path: '/automation/:tab', title: 'Automation', page: Automation },
   { path: '/mqtt', title: 'MQTT', page: Mqtt },
   { path: '/gateway', title: 'Gateway', page: Gateway },
   { path: '/https', title: 'HTTPS', page: Https },
@@ -22,6 +25,7 @@ const routes = [
 const nav = [
   ['/', 'Devices'],
   ['/sensors', 'Sensors'],
+  ['/automation', 'Automation'],
   ['/mqtt', 'MQTT'],
   ['/gateway', 'Gateway'],
   ['/https', 'HTTPS'],

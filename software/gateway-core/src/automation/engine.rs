@@ -73,11 +73,22 @@ pub enum Kind {
 pub type Commands = Vec<Command, 48, u8>;
 
 /// A shutter's movement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Movement {
+    #[default]
     Stopped,
     Up,
     Down,
+}
+
+/// What kind of output an output is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputKind {
+    Light,
+    Dimmer,
+    Relay,
+    Shutter,
+    Group,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +105,7 @@ enum Spec {
 }
 
 /// An output's state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OutputState {
     /// Light level, dimmer value, or relay 0/1. Unknown until switched or
     /// reported: 0.
@@ -247,6 +258,16 @@ impl Engine {
 
     pub fn output_state(&self, index: u8) -> Option<OutputState> {
         self.outputs.get(usize::from(index)).map(|s| s.state)
+    }
+
+    pub fn output_kind(&self, index: u8) -> Option<OutputKind> {
+        Some(match self.outputs.get(usize::from(index))?.spec {
+            Spec::Light { .. } => OutputKind::Light,
+            Spec::Dimmer(_) => OutputKind::Dimmer,
+            Spec::Relay(_) => OutputKind::Relay,
+            Spec::Shutter(_) => OutputKind::Shutter,
+            Spec::Group(_) => OutputKind::Group,
+        })
     }
 
     /// Whether the output is a light (its level is 0 to its top level).
@@ -655,6 +676,97 @@ impl Engine {
     }
 }
 
+/// What [`Engine::save`] keeps of an engine's state over a new
+/// configuration: the outputs' levels and movements, the motion lights'
+/// modes and the schedules' states, by name.
+#[derive(Debug, Default)]
+pub struct Saved {
+    outputs: Vec<(Name, OutputKind, OutputState), MAX_OUTPUTS, u8>,
+    motion: Vec<(Name, motion::Mode), MAX_MOTION_LIGHTS, u8>,
+    /// With a fingerprint of the configuration ([`fingerprint`]).
+    schedules: Vec<(Name, u32, schedule::State), MAX_SCHEDULES, u8>,
+}
+
+/// A 32-bit FNV-1a hash of `value`, to tell whether a configuration
+/// changed without keeping a copy of it.
+fn fingerprint(value: &impl core::hash::Hash) -> u32 {
+    struct Fnv(u32);
+    impl core::hash::Hasher for Fnv {
+        fn finish(&self) -> u64 {
+            u64::from(self.0)
+        }
+        fn write(&mut self, bytes: &[u8]) {
+            for &b in bytes {
+                self.0 = (self.0 ^ u32::from(b)).wrapping_mul(0x0100_0193);
+            }
+        }
+    }
+    let mut hasher = Fnv(0x811C_9DC5);
+    value.hash(&mut hasher);
+    hasher.0
+}
+
+impl Engine {
+    /// The state worth keeping when the configuration is loaded again.
+    pub fn save(&self, saved: &mut Saved) {
+        saved.outputs.clear();
+        saved.motion.clear();
+        saved.schedules.clear();
+        for (i, slot) in self.outputs.iter().enumerate() {
+            if let Some(kind) = self.output_kind(i as u8) {
+                let _ = saved.outputs.push((slot.name.clone(), kind, slot.state));
+            }
+        }
+        for (name, _, state) in &self.motion {
+            let _ = saved.motion.push((name.clone(), state.mode));
+        }
+        for (name, config, state) in &self.schedules {
+            let _ = saved
+                .schedules
+                .push((name.clone(), fingerprint(config), *state));
+        }
+    }
+
+    /// Forgets every output, motion light and schedule.
+    pub fn clear(&mut self) {
+        self.outputs.clear();
+        self.motion.clear();
+        self.schedules.clear();
+    }
+
+    /// Takes over what [`Engine::save`] kept, for what has the same name
+    /// (and kind) again. A schedule only keeps its state if neither its
+    /// configuration nor its enabled flag changed; a disabled motion light
+    /// starts over.
+    pub fn restore(&mut self, saved: &Saved) {
+        for i in 0..self.outputs.len() {
+            let kind = self.output_kind(i as u8);
+            let slot = &mut self.outputs[i];
+            if let Some((_, _, state)) = saved
+                .outputs
+                .iter()
+                .find(|(name, k, _)| *name == slot.name && Some(*k) == kind)
+            {
+                slot.state = *state;
+            }
+        }
+        for (name, _, state) in &mut self.motion {
+            if let Some((_, mode)) = saved.motion.iter().find(|(n, _)| n == name) {
+                if state.enabled {
+                    state.mode = *mode;
+                }
+            }
+        }
+        for (name, config, state) in &mut self.schedules {
+            if let Some((_, _, old)) = saved.schedules.iter().find(|(n, f, old)| {
+                n == name && *f == fingerprint(config) && old.enabled == state.enabled
+            }) {
+                *state = *old;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1004,6 +1116,36 @@ mod tests {
             r#"{"detectors":[{"type":4,"id":77}],"output":"nope","timeout_s":180,"lockout_s":60}"#;
         let (m, _): (MotionLight, _) = serde_json_core::from_str(json).unwrap();
         assert_eq!(e.add_motion("x", m, true).unwrap_err().field, "output");
+    }
+
+    #[test]
+    fn reloading_keeps_the_state_by_name() {
+        let mut e = motion_engine();
+        press(&mut e, 0, &[op("bad", Op::Set(4))]);
+        press(&mut e, 0, &[op("stairs", Op::On)]);
+        assert_eq!(e.motion_mode(0), Some(motion::Mode::Manual));
+        let mut saved = Saved::default();
+        e.save(&mut saved);
+        e.clear();
+        assert_eq!(e.counts(), (0, 0, 0));
+        // Again, but "stairs" is a light now and "wc" is gone.
+        e.add_output("bad", &light()).unwrap();
+        e.add_output("stairs", &light()).unwrap();
+        let json =
+            r#"{"detectors":[{"type":4,"id":77}],"output":"bad","timeout_s":180,"lockout_s":60}"#;
+        let (m, _): (MotionLight, _) = serde_json_core::from_str(json).unwrap();
+        e.add_motion("bad-pir", m, true).unwrap();
+        e.restore(&saved);
+        assert_eq!(level(&e, "bad"), 4);
+        assert_eq!(level(&e, "stairs"), 0);
+        assert_eq!(e.motion_mode(0), Some(motion::Mode::Manual));
+        assert_eq!(e.output_kind(1), Some(OutputKind::Light));
+    }
+
+    #[test]
+    fn saved_state_is_small() {
+        let size = core::mem::size_of::<Saved>();
+        assert!(size < 4 * 1024, "{size}");
     }
 
     #[test]

@@ -24,14 +24,14 @@ fn every_day() -> u8 {
     EVERY_DAY
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Schedule {
     /// The output switched: a light (at its last level), dimmer or relay.
     pub output: Name,
     pub windows: Vec<Window, MAX_WINDOWS, u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Window {
     pub start: Time,
     /// Checked once, at the start: the window only runs if it holds (one
@@ -45,7 +45,7 @@ pub struct Window {
     pub days: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum End {
     /// At a time (the next one after the start).
