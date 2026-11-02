@@ -9,6 +9,8 @@ export class ApiError extends Error {
     super(body && body.message ? body.message : `HTTP ${status}`);
     this.status = status;
     this.code = body && body.error;
+    // The request's field the error is about, if it names one.
+    this.field = body && body.field;
   }
 }
 
@@ -165,5 +167,46 @@ export const firmware = {
       xhr.onerror = () => reject(new ApiError(0, { message: 'upload failed' }));
       xhr.send(bytes);
     });
+  },
+};
+
+// The gateway's own automation (ADR 0025): outputs, button bindings, motion
+// lights and schedules, one item per request.
+const named = (kind) => ({
+  list: () => get(`/automation/${kind}`).then((r) => r.items),
+  get: (name) => get(`/automation/${kind}/${seg(name)}`),
+  put: (name, item) => put(`/automation/${kind}/${seg(name)}`, item),
+  remove: (name) => del(`/automation/${kind}/${seg(name)}`),
+});
+
+export const automation = {
+  status: () => get('/automation'),
+  setEnabled: (enabled) => patch('/automation', { enabled }),
+  outputs: {
+    ...named('outputs'),
+    // `op` as the API takes it: "on", {"set": 4}, …
+    command: (name, op) => post(`/automation/outputs/${seg(name)}/command`, op),
+  },
+  bindings: {
+    // All pages.
+    async list() {
+      const all = [];
+      for (;;) {
+        const page = await get(`/automation/bindings?offset=${all.length}`);
+        all.push(...page.items);
+        if (page.items.length === 0 || all.length >= page.total) return all;
+      }
+    },
+    add: (binding) => post('/automation/bindings', binding),
+    put: (slot, binding) => put(`/automation/bindings/${slot}`, binding),
+    remove: (slot) => del(`/automation/bindings/${slot}`),
+  },
+  motion: {
+    ...named('motion'),
+    setEnabled: (name, enabled) => patch(`/automation/motion/${seg(name)}`, { enabled }),
+  },
+  schedules: {
+    ...named('schedules'),
+    setEnabled: (name, enabled) => patch(`/automation/schedules/${seg(name)}`, { enabled }),
   },
 };

@@ -97,7 +97,7 @@ async fn redirect_task(stack: Stack<'static>) -> ! {
 
 async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
     let app = app();
-    let mut http_buffer = [0u8; 1536];
+    let mut http_buffer = [0u8; crate::https::HTTP_BUFFER];
     let mut tcp_rx = [0u8; 4096];
     let mut tcp_tx = [0u8; 1024];
     picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
