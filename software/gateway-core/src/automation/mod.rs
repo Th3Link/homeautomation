@@ -3,11 +3,13 @@
 //!
 //! - [`output`]: what can be switched, named once: room lights in levels,
 //!   dimmers, relays, roller shutters and groups of them.
-//! - [`binding`]: a button event and what it does.
+//! - [`switches`]: what the buttons of a wall switch (or of several
+//!   switches alike) do; [`binding`] has the actions.
 //! - [`motion`]: a light switched by motion detectors, with a timeout, a
 //!   lockout after switching off and a manual mode.
 //! - [`schedule`]: an output switched in time windows, by the clock, the sun
 //!   or the brightness.
+//! - [`devices`]: what devices have on board, and lamp names.
 //! - [`when`]: the times and conditions the last two use.
 //! - [`engine`]: the state of all of them and what to send when something
 //!   happens.
@@ -17,11 +19,13 @@
 //! JSON on the REST API, `postcard` on flash ([`encode`], [`decode`]).
 
 pub mod binding;
+pub mod devices;
 pub mod engine;
 pub mod motion;
 pub mod output;
 pub mod schedule;
 pub mod store;
+pub mod switches;
 pub mod when;
 
 use crate::can_id::CanId;
@@ -33,7 +37,9 @@ pub const NAME_CAP: usize = 20;
 
 /// How many of each there can be.
 pub const MAX_OUTPUTS: usize = 48;
-pub const MAX_BINDINGS: usize = 128;
+pub const MAX_SWITCH_CONFIGS: usize = 32;
+/// Switches in all switch configurations together.
+pub const MAX_SWITCH_REFS: usize = 64;
 pub const MAX_MOTION_LIGHTS: usize = 12;
 pub const MAX_SCHEDULES: usize = 8;
 
@@ -71,7 +77,7 @@ impl DeviceRef {
         }
     }
 
-    fn valid(self) -> bool {
+    pub fn valid(self) -> bool {
         self.device_type < 64 && self.id != 0
     }
 }
@@ -87,8 +93,13 @@ pub(crate) fn invalid<T>(field: &'static str, reason: &'static str) -> Result<T,
     Err(Invalid { field, reason })
 }
 
-/// The format version byte in front of every stored configuration.
-pub const FORMAT_VERSION: u8 = 1;
+/// The format version byte in front of every stored configuration. 2:
+/// motion lights with levels by the time of day.
+pub const FORMAT_VERSION: u8 = 2;
+
+/// The largest stored item: a group of every output, or a button with
+/// every kind of press and action at their longest.
+pub const ITEM_MAX: usize = 1024;
 
 /// Writes `value` to `buffer` as postcard behind [`FORMAT_VERSION`], and
 /// returns the bytes used. `None` if it doesn't fit.

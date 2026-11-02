@@ -1,9 +1,7 @@
-//! A button event and what it does: the gateway's version of a wall
-//! switch's key table.
+//! Button events and the actions they can do (see [`super::switches`]).
 
-use super::{invalid, valid_name, DeviceRef, Invalid, Name};
+use super::{DeviceRef, Name};
 use crate::button::ButtonEventKind;
-use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
 /// The most actions one button event has.
@@ -82,6 +80,9 @@ pub enum Op {
     Inc,
     /// Lights: one level darker, down to off.
     Dec,
+    /// Lights and dimmers: on at the last level, but at least this one
+    /// (and brighter to it if on below it). Relays: on.
+    AtLeast(u8),
     /// Relays: on for that many milliseconds; the node switches it off.
     OnFor(u32),
     /// Shutters: up, or stop if it is already moving up.
@@ -122,69 +123,31 @@ pub enum Action {
     },
 }
 
-/// A button event and its actions, done in order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Binding {
-    pub trigger: Trigger,
-    pub actions: Vec<Action, MAX_ACTIONS, u8>,
-}
-
-impl Binding {
-    pub fn validate(&self) -> Result<(), Invalid> {
-        if !self.trigger.device.valid() {
-            return invalid("trigger.device", "a device type below 64 and an id 1-255");
-        }
-        if self.trigger.button > 31 {
-            return invalid("trigger.button", "0-31");
-        }
-        if self.actions.is_empty() {
-            return invalid("actions", "at least one");
-        }
-        for action in &self.actions {
-            match action {
-                Action::Output { name, op } => {
-                    if !valid_name(name) {
-                        return invalid("actions.name", "an output name");
-                    }
-                    if let Op::OnFor(ms) = op {
-                        if *ms == 0 || *ms > 0x00FF_FFFF {
-                            return invalid("actions.op.on_for", "1-16777215 ms");
-                        }
-                    }
-                }
-                Action::Automation { name, .. } if !valid_name(name) => {
-                    return invalid("actions.name", "a motion light or schedule name");
-                }
-                Action::Nightlight { device, .. } if !device.valid() => {
-                    return invalid("actions.device", "a device type below 64 and an id 1-255");
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn json_shape() {
-        let json = r#"{"trigger":{"device":{"type":4,"id":12},"button":2,"event":"double"},
-            "actions":[{"output":{"name":"wz","op":{"set":2}}},
+        let json = r#"[{"output":{"name":"wz","op":{"set":2}}},
                        {"output":{"name":"wz_sued1","op":"down"}},
-                       {"automation":{"name":"bad","switch":"disable"}}]}"#;
-        let (b, _): (Binding, _) = serde_json_core::from_str(json).unwrap();
-        assert_eq!(b.trigger.event, Event::Double);
+                       {"output":{"name":"flur","op":{"at_least":4}}},
+                       {"automation":{"name":"bad","switch":"disable"}}]"#;
+        let (actions, _): (heapless::Vec<Action, 4>, _) = serde_json_core::from_str(json).unwrap();
         assert_eq!(
-            b.actions[0],
+            actions[0],
             Action::Output {
                 name: Name::try_from("wz").unwrap(),
                 op: Op::Set(2)
             }
         );
-        assert_eq!(b.validate(), Ok(()));
+        assert_eq!(
+            actions[2],
+            Action::Output {
+                name: Name::try_from("flur").unwrap(),
+                op: Op::AtLeast(4)
+            }
+        );
     }
 
     #[test]
@@ -231,19 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn validation() {
-        let b = Binding {
-            trigger: Trigger {
-                device: DeviceRef {
-                    device_type: 4,
-                    id: 12,
-                },
-                button: 0,
-                event: Event::Single,
-            },
-            actions: Vec::new(),
-        };
-        assert_eq!(b.validate().unwrap_err().field, "actions");
+    fn events() {
         assert_eq!(Event::from_kind(ButtonEventKind::Pressed), None);
         assert_eq!(
             Event::from_kind(ButtonEventKind::Tripple),

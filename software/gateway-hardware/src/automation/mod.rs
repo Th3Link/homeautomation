@@ -1,13 +1,13 @@
-//! The gateway's own automation (ADR 0025): button bindings, motion lights
+//! The gateway's own automation (ADR 0025): wall switches, motion lights
 //! and schedules run here, on the CAN bus, without MQTT or a hub.
 //!
 //! [`gateway_core::automation`] has the logic; this module feeds it. The
 //! configuration lives in [`store`] on flash; what every event needs is in
-//! RAM ([`Runtime`]: the engine, the bindings' triggers, which flash slot
-//! each output came from). One task ([`automation_task`]) takes the events
+//! RAM ([`Runtime`]: the engine, which switch configurations each switch
+//! is in, which flash slot each output came from). One task ([`automation_task`]) takes the events
 //! from the CAN dispatch, MQTT and the web UI ([`post`]) one after the
 //! other, ticks the timers and schedules, and sends what the engine
-//! answers. A light's level table and a binding's actions are read from
+//! answers. A light's level table and a button's actions are read from
 //! flash when they are needed.
 
 pub mod store;
@@ -19,12 +19,15 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant, Timer};
-use gateway_core::automation::binding::{Binding, Event as ButtonKind, Op, Switch, Trigger};
+use gateway_core::automation::binding::{Event as ButtonKind, Op, Switch, Trigger};
 use gateway_core::automation::engine::{Command, Commands, Engine, Kind, Saved};
 use gateway_core::automation::motion::MotionLight;
 use gateway_core::automation::output::Output;
 use gateway_core::automation::schedule::Schedule;
-use gateway_core::automation::store::{BindingIndex, Named, Section, MASTER_SLOT};
+use gateway_core::automation::store::{
+    button_of, button_slot, Named, Section, SwitchIndex, MASTER_SLOT,
+};
+use gateway_core::automation::switches::{ButtonActions, SwitchConfig};
 use gateway_core::automation::when::Context;
 use gateway_core::automation::{DeviceRef, Name, MAX_MOTION_LIGHTS, MAX_OUTPUTS, MAX_SCHEDULES};
 use gateway_core::button::ButtonEventKind;
@@ -83,7 +86,7 @@ pub fn post(event: Event) {
     }
 }
 
-/// The last button event seen, for learning a binding in the web UI.
+/// The last button event seen, for learning a switch in the web UI.
 #[derive(Debug, Clone, Copy)]
 pub struct LastButton {
     pub trigger: Trigger,
@@ -98,7 +101,7 @@ pub struct Runtime {
     output_slots: Vec<u8, MAX_OUTPUTS, u8>,
     motion_slots: Vec<u8, MAX_MOTION_LIGHTS, u8>,
     schedule_slots: Vec<u8, MAX_SCHEDULES, u8>,
-    bindings: BindingIndex,
+    pub switches: SwitchIndex,
     /// The master switch: off, the automation does nothing (but keeps
     /// track of states).
     pub enabled: bool,
@@ -111,7 +114,7 @@ pub static RUNTIME: Mutex<CriticalSectionRawMutex, Runtime> = Mutex::new(Runtime
     output_slots: Vec::new(),
     motion_slots: Vec::new(),
     schedule_slots: Vec::new(),
-    bindings: BindingIndex::new(),
+    switches: SwitchIndex::new(),
     enabled: true,
     last_button: None,
     guard: Guard::new(),
@@ -127,7 +130,7 @@ struct Guard {
 }
 
 /// More commands than this in one second pause the automation.
-const GUARD_LIMIT: u32 = 60;
+const GUARD_LIMIT: u32 = 2 * gateway_core::automation::MAX_OUTPUTS as u32 + 24;
 const GUARD_PAUSE_MS: u64 = 10_000;
 
 impl Guard {
@@ -203,7 +206,7 @@ async fn load(rt: &mut Runtime) {
     rt.output_slots.clear();
     rt.motion_slots.clear();
     rt.schedule_slots.clear();
-    rt.bindings.clear();
+    rt.switches.clear();
 
     rt.enabled = st
         .get::<bool>(Section::Meta, MASTER_SLOT)
@@ -231,9 +234,21 @@ async fn load(rt: &mut Runtime) {
             }
         }
     }
-    for slot in st.slots(Section::Binding).iter() {
-        if let Some(binding) = st.get::<Binding>(Section::Binding, slot).await {
-            rt.bindings.insert(slot, binding.trigger);
+    for slot in st.slots(Section::Switch).iter() {
+        if let Some(named) = st.get::<Named<SwitchConfig>>(Section::Switch, slot).await {
+            if !rt.switches.set_switches(slot, &named.item.switches) {
+                console_log!(
+                    "automation: too many switches, {} not loaded fully",
+                    named.name
+                );
+            }
+        }
+    }
+    for section in [Section::ButtonsLow, Section::ButtonsHigh] {
+        for slot in st.slots(section).iter() {
+            if let Some((config, button)) = button_of(section, slot) {
+                rt.switches.set_button(config, button, true);
+            }
         }
     }
     for slot in st.slots(Section::Motion).iter() {
@@ -274,8 +289,8 @@ async fn load(rt: &mut Runtime) {
     rt.engine.restore(&saved);
     let (outputs, motion, schedules) = rt.engine.counts();
     console_log!(
-        "automation: {outputs} outputs, {} bindings, {motion} motion lights, {schedules} schedules{}",
-        st.slots(Section::Binding).count(),
+        "automation: {outputs} outputs, {} switch configurations, {motion} motion lights, {schedules} schedules{}",
+        st.slots(Section::Switch).count(),
         if rt.enabled { "" } else { " (switched off)" }
     );
 }
@@ -311,10 +326,12 @@ async fn handle(rt: &mut Runtime, event: Event, inputs: &Inputs, out: &mut Comma
             if !rt.enabled {
                 return;
             }
-            for slot in rt.bindings.find(trigger) {
-                let binding = store().await.get::<Binding>(Section::Binding, slot).await;
-                if let Some(binding) = binding {
-                    rt.engine.button(now, &binding, out);
+            let configs: Vec<u8, 8> = rt.switches.find(trigger.device, button).take(8).collect();
+            for config in configs {
+                let (section, slot) = button_slot(config, button);
+                let actions = store().await.get::<ButtonActions>(section, slot).await;
+                if let Some(actions) = actions.as_ref().and_then(|a| a.actions(event)) {
+                    rt.engine.actions(now, actions, out);
                 }
             }
         }
@@ -356,7 +373,16 @@ async fn handle(rt: &mut Runtime, event: Event, inputs: &Inputs, out: &mut Comma
 
 /// Sends what the engine answered.
 async fn execute(rt: &mut Runtime, out: &Commands) {
-    if !rt.guard.allow(now_ms(), out.len()) {
+    let sends = out
+        .iter()
+        .filter(|c| {
+            !matches!(
+                c,
+                Command::OutputState { .. } | Command::AutomationState { .. }
+            )
+        })
+        .count();
+    if !rt.guard.allow(now_ms(), sends) {
         return;
     }
     for command in out {

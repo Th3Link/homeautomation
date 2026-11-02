@@ -6,9 +6,15 @@
 //! any off, motion is ignored for `lockout_s`, so the light doesn't come
 //! straight back on for someone leaving the room. Disabled, it ignores
 //! motion and leaves the light alone.
+//!
+//! The level it switches on at can depend on the time of day: from each
+//! [`Period`]'s start on, a fixed level (at night: 1) or the last level
+//! with a minimum (in the daytime: at least 4).
 
-use super::when::Condition;
+use super::binding::Op;
+use super::when::{Condition, Context, Time};
 use super::{invalid, valid_name, DeviceRef, Invalid, Name};
+use crate::x509::time::DAY;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +22,19 @@ use serde::{Deserialize, Serialize};
 pub const MAX_DETECTORS: usize = 4;
 /// The most conditions of one motion light.
 pub const MAX_CONDITIONS: usize = 3;
+/// The most periods with their own level.
+pub const MAX_PERIODS: usize = 4;
+
+/// From `from` on (every day, until the next period starts), switch on at
+/// `level`; without one, at the last level but at least `min`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Period {
+    pub from: Time,
+    #[serde(default)]
+    pub level: Option<u8>,
+    #[serde(default)]
+    pub min: u8,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MotionLight {
@@ -23,10 +42,10 @@ pub struct MotionLight {
     pub detectors: Vec<DeviceRef, MAX_DETECTORS, u8>,
     /// The output switched: a light, dimmer or relay.
     pub output: Name,
-    /// The level (light) or value (dimmer) to switch on at; without one,
-    /// the last one.
+    /// The level (light) or value (dimmer) to switch on at, by the time of
+    /// day; without any, the last one.
     #[serde(default)]
-    pub level: Option<u8>,
+    pub levels: Vec<Period, MAX_PERIODS, u8>,
     pub timeout_s: u32,
     pub lockout_s: u32,
     /// All must hold for motion to switch the light on.
@@ -48,7 +67,34 @@ impl MotionLight {
         if self.lockout_s > 3600 {
             return invalid("lockout_s", "0-3600");
         }
+        for p in &self.levels {
+            p.from.validate()?;
+            if p.level == Some(0) {
+                return invalid("levels.level", "1-255, or none for the last level");
+            }
+        }
         self.conditions.iter().try_for_each(|c| c.validate())
+    }
+
+    /// What switches the light on now: the level of the period that
+    /// started last (today, or yesterday's last one), else the last level.
+    pub fn on_op(&self, ctx: &Context<'_>) -> Op {
+        let Some(now) = ctx.local_now() else {
+            return Op::On;
+        };
+        let day = now.div_euclid(DAY);
+        let current = self
+            .levels
+            .iter()
+            .flat_map(|p| [day - 1, day].map(|d| (ctx.on_day(d, p.from), p)))
+            .filter_map(|(at, p)| Some((at?, p)))
+            .filter(|(at, _)| *at <= now)
+            .max_by_key(|(at, _)| *at);
+        match current {
+            Some((_, Period { level: Some(n), .. })) => Op::Set(*n),
+            Some((_, Period { min, .. })) if *min > 0 => Op::AtLeast(*min),
+            _ => Op::On,
+        }
     }
 }
 
@@ -178,7 +224,7 @@ mod tests {
             }])
             .unwrap(),
             output: Name::try_from("bad").unwrap(),
-            level: None,
+            levels: Vec::new(),
             timeout_s: 180,
             lockout_s: 60,
             conditions: Vec::new(),
@@ -266,8 +312,46 @@ mod tests {
             "conditions":[{"dark":{"sensor":{"type":4,"id":77},"lux":40}}]}"#;
         let (m, _): (MotionLight, _) = serde_json_core::from_str(json).unwrap();
         assert_eq!(m.validate(), Ok(()));
-        assert_eq!(m.level, None);
+        assert!(m.levels.is_empty());
         let bad = MotionLight { timeout_s: 0, ..m };
         assert_eq!(bad.validate().unwrap_err().field, "timeout_s");
+    }
+
+    #[test]
+    fn level_by_the_time_of_day() {
+        use crate::automation::when::tests::{cet, local, BERLIN};
+        // At night (from 22:00) level 1; in the daytime (from sunrise) the
+        // last level, but at least 4.
+        let json = r#"{"detectors":[{"type":4,"id":77}],"output":"flur","timeout_s":180,"lockout_s":60,
+            "levels":[{"from":{"clock":{"hour":22,"minute":0}},"level":1},
+                      {"from":{"sun":{"event":"sunrise","offset_min":0}},"min":4}]}"#;
+        let (m, _): (MotionLight, _) = serde_json_core::from_str(json).unwrap();
+        assert_eq!(m.validate(), Ok(()));
+        let tz = cet();
+        let no_lux = |_| None;
+        let at = |h, mi| {
+            let ctx = Context {
+                now: Some(local(&tz, 2026, 6, 21, h, mi)),
+                tz: &tz,
+                place: Some(BERLIN),
+                lux: &no_lux,
+            };
+            m.on_op(&ctx)
+        };
+        assert_eq!(at(23, 0), Op::Set(1));
+        // After midnight: still yesterday's 22:00 period.
+        assert_eq!(at(2, 0), Op::Set(1));
+        assert_eq!(at(12, 0), Op::AtLeast(4));
+        // Without a clock: the last level.
+        let ctx = Context {
+            now: None,
+            tz: &tz,
+            place: Some(BERLIN),
+            lux: &no_lux,
+        };
+        assert_eq!(m.on_op(&ctx), Op::On);
+        let mut zero = m.clone();
+        zero.levels[0].level = Some(0);
+        assert_eq!(zero.validate().unwrap_err().field, "levels.level");
     }
 }
