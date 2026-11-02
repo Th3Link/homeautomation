@@ -13,6 +13,7 @@ extern crate alloc;
 pub use common_hardware::console_log;
 pub use common_hardware::{flash, logging};
 
+pub mod automation;
 pub mod can;
 pub mod can_update;
 pub mod cert;

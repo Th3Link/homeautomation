@@ -10,12 +10,16 @@ pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: &'static str,
+    /// The field of the request the error is about, if one is.
+    field: Option<&'static str>,
 }
 
 #[derive(Serialize)]
 struct Body {
     error: &'static str,
     message: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field: Option<&'static str>,
 }
 
 impl ApiError {
@@ -24,6 +28,15 @@ impl ApiError {
             status,
             code,
             message,
+            field: None,
+        }
+    }
+
+    /// A `400` about one field of the request.
+    pub const fn invalid_field(field: &'static str, message: &'static str) -> Self {
+        Self {
+            field: Some(field),
+            ..Self::invalid(message)
         }
     }
 
@@ -48,6 +61,7 @@ impl IntoResponse for ApiError {
         let body = Body {
             error: self.code,
             message: self.message,
+            field: self.field,
         };
         match with_status(self.status, &body).await {
             Ok(response) => response_writer.write_response(connection, response).await,
