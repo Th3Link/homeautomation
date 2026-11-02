@@ -209,13 +209,8 @@ async fn lamps(
         bank,
     };
     // The full form, with the bank (the RPC's `lamp_sends` leaves it out).
-    let sends = command::targeted_sends(
-        &target(&name).await?,
-        CanMessageType::LampGroup,
-        &msg.to_bytes_full(),
-        false,
-    );
-    send_all(sends).await
+    crate::lamps::send(device_key(&name).await?, msg, true).await;
+    with_status(StatusCode::ACCEPTED, &Sent { sent: 1 }).await
 }
 
 // ---- heating controller --------------------------------------------------
