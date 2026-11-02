@@ -11,6 +11,7 @@ common-core = { path = "../common-core/" }
 embedded-can = { version = "0.4.1" }
 embassy-time = { version = "0.5" }
 heapless = { version = "0.9" }
+libm = { version = "0.2.16" }
 num_enum = { version = "0.7", default-features = false }
 # NTS (RFC 8915): AEAD_AES_SIV_CMAC_256. 0.7 shares aes, ctr and cipher with
 # embedded-tls' AES-GCM.

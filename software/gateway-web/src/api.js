@@ -61,6 +61,12 @@ export const config = {
   update: (changes) => patch('/config', changes),
 };
 
+// Where the gateway is and its time zone, with today's sun times.
+export const location = {
+  get: () => get('/location'),
+  update: (changes) => patch('/location', changes),
+};
+
 export const mqtt = {
   all: () => get('/mqtt'),
   update: (slot, changes) => patch(`/mqtt/${slot}`, changes),

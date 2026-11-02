@@ -7,7 +7,7 @@ export function Gateway() {
   // One request for both sections: the gateway serves one HTTPS session
   // at a time.
   const system = useLoad(api.system.get, 5000);
-  return html`<${Info} ...${system} /><${Network} ...${system} /><${Settings} /><${Firmware} />`;
+  return html`<${Info} ...${system} /><${Network} ...${system} /><${Settings} /><${Location} /><${Firmware} />`;
 }
 
 function Info({ data, error }) {
@@ -82,6 +82,60 @@ function Settings() {
         <${Field} label="New password" hint="at least 8 characters; empty keeps it"><input type="password" value=${form.web_password || ''} onInput=${set('web_password')} autocomplete="new-password" /><//>
       </div>
       <div class="buttons"><${Button} kind="primary" onClick=${save}>Save<//></div>
+    <//>`;
+}
+
+const SUN = [
+  ['astronomical_dawn', 'Astronomical dawn'],
+  ['nautical_dawn', 'Nautical dawn'],
+  ['civil_dawn', 'Civil dawn'],
+  ['sunrise', 'Sunrise'],
+  ['noon', 'Solar noon'],
+  ['sunset', 'Sunset'],
+  ['civil_dusk', 'Civil dusk'],
+  ['nautical_dusk', 'Nautical dusk'],
+  ['astronomical_dusk', 'Astronomical dusk'],
+];
+
+function Location() {
+  const { data, error, reload } = useLoad(api.location.get);
+  const [form, setForm] = useState({});
+  if (!data) return html`<${Section} title="Location and time"><${Loading} error=${error} /><//>`;
+  const value = (key) => (key in form ? form[key] : data[key] ?? '');
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  const save = async () => {
+    const changes = {};
+    if ('latitude' in form || 'longitude' in form) {
+      changes.latitude = parseFloat(value('latitude'));
+      changes.longitude = parseFloat(value('longitude'));
+      if (Number.isNaN(changes.latitude) || Number.isNaN(changes.longitude)) return notify('Latitude and longitude are numbers');
+    }
+    if ('timezone' in form) changes.timezone = form.timezone.trim();
+    if (Object.keys(changes).length === 0) return notify('Nothing changed');
+    if (await run(() => api.location.update(changes), 'Saved')) {
+      setForm({});
+      reload();
+    }
+  };
+
+  const offset = data.utc_offset_minutes;
+  const zone = offset == null ? '' : `UTC${offset < 0 ? '−' : '+'}${Math.floor(Math.abs(offset) / 60)}${Math.abs(offset) % 60 ? ':' + String(Math.abs(offset) % 60).padStart(2, '0') : ''}`;
+  return html`
+    <${Section} title="Location and time">
+      <p class="muted">For switching by local time and by the sun.</p>
+      <div class="row">
+        <${Field} label="Latitude" hint="degrees, north positive"><input inputmode="decimal" value=${value('latitude')} onInput=${set('latitude')} /><//>
+        <${Field} label="Longitude" hint="degrees, east positive"><input inputmode="decimal" value=${value('longitude')} onInput=${set('longitude')} /><//>
+        <${Field} label="Time zone" hint="POSIX TZ, e.g. CET-1CEST,M3.5.0,M10.5.0/3"><input value=${value('timezone')} onInput=${set('timezone')} /><//>
+      </div>
+      <div class="buttons"><${Button} kind="primary" onClick=${save}>Save<//></div>
+      <dl class="facts">
+        <div><dt>Local time</dt><dd>${data.local_time ? `${data.local_time.replace('T', ' ')} (${zone})` : 'not known yet (no time server answer)'}</dd></div>
+        ${data.sun
+          ? SUN.map(([key, label]) => html`<div><dt>${label}</dt><dd>${data.sun[key] || html`<span class="muted">not today</span>`}</dd></div>`)
+          : html`<div><dt>Sun times</dt><dd class="muted">${data.latitude == null ? 'set the location first' : 'once the time is known'}</dd></div>`}
+      </dl>
     <//>`;
 }
 
