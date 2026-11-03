@@ -27,6 +27,8 @@ workspace under `software/`:
   lights.
 - [`tools/mqtt-log-reader`](software/tools/mqtt-log-reader) — a small
   Python tool for reading back the gateway's MQTT log/debug topics.
+- [`sim/`](software/sim) — runs the unchanged gateway and node firmware in
+  QEMU, on a virtual CAN bus, with simulated buttons, relays and sensors.
 - [`legacy/`](software/legacy) — the original C++/ESP-IDF implementation,
   kept for reference. No longer built by CI.
 

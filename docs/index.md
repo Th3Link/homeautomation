@@ -25,6 +25,8 @@ whole system, plus the documentation tying it together.
 - **`mechanics/`** — OpenSCAD/STL enclosures and mounts.
 - **`software/tools/mqtt-log-reader/`** — a small Python tool for reading
   back the gateway's MQTT log/debug topics.
+- **`software/sim/`** — runs the unchanged gateway and node firmware in
+  QEMU, on a virtual CAN bus, with simulated buttons, relays and sensors.
 - **`software/legacy/`** — the original C++/ESP-IDF implementation
   (`mqtt_gateway`, `cancomponents`, and their shared `library`), kept for
   reference. No longer built by CI; superseded by the Rust crates above.
