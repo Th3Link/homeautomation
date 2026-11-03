@@ -1,0 +1,104 @@
+name: QEMU sync
+
+# Keeps the simulation's QEMU (software/sim) on top of Espressif's QEMU:
+# rebases branch esp32-sim of Th3Link/qemu onto espressif/qemu esp-develop,
+# builds it, checks that the models are there and force-pushes the result.
+# A rebase or build that fails leaves the branch alone and opens an issue
+# here.
+#
+# Runs here and not in the fork so the fork needs no Actions (Espressif's
+# own workflows come along with its tree). Pushing to the fork needs the
+# secret QEMU_PUSH_TOKEN: a fine-grained token for Th3Link/qemu with
+# Contents and Workflows read/write. Workflows, because Espressif's commits
+# touch .github/workflows.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: qemu-sync
+
+env:
+  FORK: Th3Link/qemu
+  BRANCH: esp32-sim
+  UPSTREAM: https://github.com/espressif/qemu.git
+  UPSTREAM_BRANCH: esp-develop
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch
+        run: |
+          git clone --filter=blob:none --branch "$BRANCH" "https://github.com/$FORK.git" qemu
+          cd qemu
+          git remote add upstream "$UPSTREAM"
+          git fetch --filter=blob:none upstream "$UPSTREAM_BRANCH"
+          echo "OLD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Rebase
+        id: rebase
+        working-directory: qemu
+        run: |
+          if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
+            echo "Already on top of $UPSTREAM_BRANCH."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rebase "upstream/$UPSTREAM_BRANCH"
+          git log --oneline "upstream/$UPSTREAM_BRANCH..HEAD"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        if: steps.rebase.outputs.changed == 'true'
+        working-directory: qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libglib2.0-dev libpixman-1-dev \
+            libslirp-dev libgcrypt20-dev
+          ./configure --target-list=xtensa-softmmu --enable-gcrypt --enable-slirp \
+            --disable-werror --disable-user --disable-docs
+          ninja -C build qemu-system-xtensa
+
+      - name: Models present
+        if: steps.rebase.outputs.changed == 'true'
+        working-directory: qemu
+        run: |
+          printf 'info qom-tree\nquit\n' | timeout 30 build/qemu-system-xtensa \
+            -machine esp32 -m 4M -display none -S -monitor stdio -serial null \
+            -nic user,model=esp32.emac -chardev null,id=i2c0 \
+            -global driver=esp32.i2c,property=remote,value=i2c > qom.txt 2>&1
+          for t in esp32.emac esp32.gpio esp32.twai i2c-remote misc.esp32.ana_i2c; do
+            grep -qF "($t)" qom.txt || { echo "missing: $t"; cat qom.txt; exit 1; }
+          done
+
+      - name: Push
+        if: steps.rebase.outputs.changed == 'true'
+        working-directory: qemu
+        env:
+          TOKEN: ${{ secrets.QEMU_PUSH_TOKEN }}
+        run: |
+          git push --force-with-lease="$BRANCH:$OLD" \
+            "https://x-access-token:${TOKEN}@github.com/$FORK.git" "HEAD:$BRANCH"
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="QEMU sync: $BRANCH no longer applies on $UPSTREAM_BRANCH"
+          body="The weekly rebase of $FORK $BRANCH onto espressif/qemu $UPSTREAM_BRANCH failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. The branch is unchanged. Rebase it by hand (software/sim/README.md)."
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

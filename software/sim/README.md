@@ -28,6 +28,14 @@ inject frames. Outside the chip:
   ```
 
   The scripts take `qemu-system-xtensa` from `PATH`, or from `QEMU=…`.
+
+  `.github/workflows/qemu-sync.yml` rebases `esp32-sim` onto Espressif's
+  `esp-develop` every Monday. It builds the result, checks that the models
+  are there and force-pushes. If the rebase or the build fails, the branch
+  stays as it is and an issue opens here. A local checkout then follows
+  with `git fetch && git reset --hard origin/esp32-sim`. For a hand rebase,
+  run `git rebase` onto espressif's `esp-develop` and push with
+  `--force-with-lease`.
 - **`vcan0`** (as root, once per boot):
 
   ```sh
