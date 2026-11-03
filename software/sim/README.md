@@ -14,13 +14,14 @@ inject frames. Outside the chip:
 
 ## Prerequisites
 
-- **QEMU**: Espressif's QEMU with the models this needs, branch `esp32-sim`.
-  It is still local, on top of espressif/qemu `febae18`, and becomes a fork
-  under Th3Link. Upstream Espressif QEMU boots neither firmware: it has no
+- **QEMU**: Espressif's QEMU with the models this needs, branch `esp32-sim`
+  of [Th3Link/qemu](https://github.com/Th3Link/qemu/tree/esp32-sim), on top
+  of espressif/qemu `febae18`. Upstream Espressif QEMU boots neither firmware: it has no
   interrupt status registers, no GPIO, no external I2C, no Ethernet MAC and
   no analog I2C for the APLL.
 
   ```sh
+  git clone -b esp32-sim https://github.com/Th3Link/qemu.git && cd qemu
   ./configure --target-list=xtensa-softmmu --enable-gcrypt --enable-slirp \
   --disable-werror --disable-user --disable-docs
   ninja -C build
