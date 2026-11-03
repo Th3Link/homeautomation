@@ -481,5 +481,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "f809d4e7696a5508297efea8214cbd6d20230c24",
+  "date": "2026-11-03T22:31:00+01:00",
+  "subject": "Merge pull request #50 from Th3Link/renovate/aes-siv-0.x",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 490606,
+    "iram": 18680,
+    "dram_static": 41320,
+    "stack_budget": 155288,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509417,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
