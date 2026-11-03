@@ -319,6 +319,18 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
         return;
     }
 
+    // Raw CAN frames, as given (not retained ones: they would go out again
+    // after every reconnect).
+    if gateway_core::topics::debug::is_debug_topic(topic) {
+        if !retained {
+            match gateway_core::topics::debug::parse_debug_command(topic, body) {
+                Ok((id, bytes)) => crate::can::send_raw(id, &bytes, false).await,
+                Err(_) => crate::console_log!("mqtt: {topic}: not a CAN frame: {body}"),
+            }
+        }
+        return;
+    }
+
     if relais_topics::is_relais_command_topic(topic)
         || relais_topics::is_rollershutter_command_topic(topic)
     {

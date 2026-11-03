@@ -32,6 +32,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // Marks the unused main stack, for `stack_untouched` in `GET /system`.
     gateway_hardware::stack::paint();
+    gateway_hardware::log_buffer::install();
     console_log!("gateway-hardware booting");
     // `CoreSw` after a panic restart (see `custom_halt`) as well as after a
     // deliberate reboot; a stream of them without a reboot request is a

@@ -124,8 +124,3 @@ design-quality complaints above:
   (ADR 0019). The workspace takes all three from forks
   ([`software/patches`](../../patches/README.md)); each goes once a release
   has its fixes. embassy-net never will: its main has moved to xarxa.
-- **CAN-bus MQTT logging passthrough** (`canbus/log/0x<hex>`, toggled by
-  the `mqtt_logging` RPC verb in the original) is speced in
-  [`protocol-mqtt.md`](protocol-mqtt.md#canbuslog0xhex-planned-in-the-original-not-currently-wired-up)
-  but not implemented — there's no code in `gateway-hardware` mirroring
-  every sent/received CAN frame to MQTT yet.

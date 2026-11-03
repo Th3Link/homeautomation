@@ -21,6 +21,7 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
         .route("/sensors", get(index))
         .route("/gateway", get(index))
         .route("/https", get(index))
+        .route("/log", get(index))
         .route("/automation", get(index))
         // The tabs: any short segment.
         .route(
