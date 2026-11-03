@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""sim — the gateway and node firmware, unchanged, in QEMU on virtual CAN
+buses, with buttons, PIR, relays and light you can play.
+
+  sim up                      start everything in sim.toml, show what happens
+  sim status                  what runs, IPs, relays
+  sim press taster-flur 0     press a button (single, double, triple, hold)
+  sim motion taster-flur      the PIR sees someone
+  sim lux taster-flur 20      make it dark
+  sim console gw-eg           the chip's serial console (Ctrl-] leaves)
+  sim web gw-eg               open the gateway's web UI
+  sim can                     the CAN traffic, decoded
+  sim log taster-flur -f      the chip's serial log
+  sim build                   images from the release builds (up does this too)
+  sim reset relais-keller     a factory-fresh image for a chip
+  sim doctor                  check the setup
+
+Chips can be named by a unique prefix: `sim press taster-f 0`.
+"""
+
+import argparse
+import concurrent.futures
+import os
+import select
+import sys
+import termios
+import time
+import tty
+import webbrowser
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from simlib import can, images, qemu, supervisor, ui  # noqa: E402
+from simlib.topology import SIM_DIR, Topology, TopologyError  # noqa: E402
+
+
+def load(args):
+    try:
+        return Topology(args.file)
+    except TopologyError as e:
+        ui.die(str(e))
+
+
+def chip_or_die(topo, name):
+    try:
+        return topo.chip(name)
+    except TopologyError as e:
+        ui.die(str(e))
+
+
+def ask(topo, req, timeout=None):
+    answer = supervisor.request(topo, req, timeout)
+    if answer is None:
+        ui.die("the simulation isn't running", "start it with: ./sim up")
+    if isinstance(answer, dict) and "error" in answer:
+        ui.die(answer["error"])
+    return answer
+
+
+def missing_buses(topo, chips):
+    return [b for b in sorted({c.bus for c in chips}) if not can.interface_exists(b)]
+
+
+def vcan_hint(buses):
+    lines = ["sudo modprobe vcan"]
+    for b in buses:
+        lines.append(f"sudo ip link add {b} type vcan && sudo ip link set {b} up")
+    return "\n  ".join(lines)
+
+
+# Commands
+
+
+def cmd_build(args, topo=None, chips=None):
+    topo = topo or load(args)
+    chips = chips if chips is not None else [chip_or_die(topo, n) for n in args.chips] or topo.chips
+    if supervisor.request(topo, {"cmd": "status"}, 2) is not None:
+        ui.die("the simulation is running", "stop it first: ./sim down")
+    try:
+        qemu_path = qemu.find()
+    except qemu.QemuError as e:
+        ui.die(str(e))
+    imgs = images.Images(topo, log=lambda m: print(ui.dim("· " + m)))
+    bases = {}
+    try:
+        for kind in sorted({images.kind_of(c) for c in chips}):
+            bases[kind] = imgs.base(kind, getattr(args, f"{kind}_elf", None))
+    except images.ImageError as e:
+        ui.die(str(e))
+    reset = getattr(args, "reset", False)
+    width = max(len(c.name) for c in chips)
+
+    def prepare(chip):
+        base, firmware = bases[images.kind_of(chip)]
+        return imgs.prepare(chip, base, firmware, qemu_path, reset=reset)
+
+    failed = False
+    with concurrent.futures.ThreadPoolExecutor(max(2, (os.cpu_count() or 4) // 2)) as pool:
+        futures = {pool.submit(prepare, c): c for c in chips}
+        for future in concurrent.futures.as_completed(futures):
+            chip = futures[future]
+            name = ui.chip_name(chip.name, chip.is_gateway, width)
+            try:
+                done = future.result()
+            except Exception as e:  # noqa: BLE001
+                failed = True
+                print(f"{ui.red('✗')} {name}  {e}")
+                continue
+            if done:
+                print(f"{ui.green('✓')} {name}  {done}")
+            elif not getattr(args, "quiet_build", False):
+                print(f"{ui.dim('·')} {name}  {ui.dim('up to date')}")
+    if failed:
+        ui.die("some images failed", f"the console transcripts are in {topo.state_dir / 'chips'}/*/setup.log")
+    return imgs, qemu_path
+
+
+def cmd_reset(args):
+    if not args.chips and not args.all:
+        ui.die("which chips?", "./sim reset <name>…, or every chip: ./sim reset --all")
+    args.reset = True
+    cmd_build(args)
+
+
+def cmd_up(args):
+    topo = load(args)
+    chips = [chip_or_die(topo, n) for n in args.chips] or topo.chips
+    if supervisor.request(topo, {"cmd": "status"}, 2) is not None:
+        ui.die("the simulation is already running", "./sim status shows it, ./sim down stops it")
+    missing = missing_buses(topo, chips)
+    if missing:
+        ui.die(f"no CAN interface {', '.join(missing)}", "create it (once per boot):\n  " + vcan_hint(missing))
+    args.quiet_build = True
+    imgs, qemu_path = cmd_build(args, topo, chips)
+
+    width = max(len(c.name) for c in topo.chips)
+    print()
+    print(ui.bold(f"  {len(chips)} chips") + ui.dim(f"  from {topo.path}"))
+    for c in chips:
+        name = ui.chip_name(c.name, c.is_gateway, width)
+        if c.is_gateway:
+            detail = f"{c.bus}  {ui.cyan(c.url)}"
+        else:
+            parts = [f"{c.bus}", f"id {c.device_id}"]
+            if c.buttons:
+                parts.append(f"buttons {','.join(map(str, c.buttons))}")
+            if c.pir_pin is not None:
+                parts.append("PIR")
+            if c.has_sensors:
+                parts.append(f"{c.lux:g} lx")
+            if c.has_relays:
+                parts.append(f"relays ({c.relay_mode})")
+            detail = "  ".join(parts)
+        print(f"  {name}  {ui.dim(c.kind.ljust(8))} {detail}")
+    print(ui.dim("\n  Ctrl-C stops everything. In another terminal: ./sim status, ./sim press …, ./sim console …\n"))
+    sup = supervisor.Supervisor(topo, imgs, qemu_path, chips, show_all=args.all, serial=args.serial)
+    sup.run()
+
+
+def cmd_down(args):
+    topo = load(args)
+    if supervisor.request(topo, {"cmd": "down"}, 5) is None:
+        ui.die("the simulation isn't running")
+    for _ in range(150):
+        if supervisor.request(topo, {"cmd": "status"}, 1) is None:
+            print(ui.green("✓ stopped"))
+            return
+        time.sleep(0.1)
+    ui.die("still running after 15 s")
+
+
+def relay_bar(relays):
+    return "".join(ui.green("●") if r else ui.dim("○") for r in relays)
+
+
+def cmd_status(args):
+    topo = load(args)
+    answer = supervisor.request(topo, {"cmd": "status"}, 5)
+    if answer is None:
+        print(ui.dim("not running") + "  (./sim up)")
+        rows = [[ui.chip_name(c.name, c.is_gateway), c.kind, c.bus,
+                 "" if c.is_gateway else c.device_id,
+                 "built" if images.Images(topo).flash(c).is_file() else ui.dim("no image")]
+                for c in topo.chips]
+        ui.table(["NAME", "KIND", "BUS", "ID", "IMAGE"], rows)
+        return
+    states = {"running": ui.green, "booting": ui.yellow, "stopped": ui.red, "stopping": ui.yellow}
+    rows = []
+    for s in answer["chips"]:
+        detail = []
+        if s["kind"] == "gateway":
+            detail.append(s["ip"] or ui.dim("no network yet"))
+            detail.append(ui.cyan(s["url"]))
+        else:
+            if s.get("relays") is not None:
+                detail.append("relays " + relay_bar(s["relays"]))
+            if s.get("lux") is not None:
+                detail.append(f"{s['lux']:g} lx")
+            if not s["discovered"] and s["state"] == "running":
+                detail.append(ui.yellow("not discovered"))
+        rows.append([
+            ui.chip_name(s["name"], s["kind"] == "gateway"), s["kind"], s["bus"],
+            s.get("id", ""), states.get(s["state"], str)(s["state"]),
+            ui.duration(s["uptime"]) if s["uptime"] else "", s["frames"] or "",
+            "  ".join(detail),
+        ])
+    ui.table(["NAME", "KIND", "BUS", "ID", "STATE", "UP", "FRAMES", ""], rows)
+    if answer["events"]:
+        print()
+        for e in answer["events"][-6:]:
+            print(ui.dim("  " + e))
+
+
+def cmd_press(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    kind = {"click": "single", "1": "single", "2": "double", "3": "triple"}.get(args.kind, args.kind)
+    ask(topo, {"cmd": "press", "chip": chip.name, "button": args.button, "kind": kind, "secs": args.secs},
+        timeout=args.secs + 10)
+    print(ui.green("✓ ") + f"{chip.name} button {args.button} {kind}")
+
+
+def cmd_motion(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    ask(topo, {"cmd": "motion", "chip": chip.name, "secs": args.secs})
+    print(ui.green("✓ ") + f"{chip.name}: motion for {args.secs:g} s")
+
+
+def cmd_lux(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    ask(topo, {"cmd": "lux", "chip": chip.name, "lux": args.lux})
+    print(ui.green("✓ ") + f"{chip.name}: {args.lux:g} lx" + ui.dim("  (the node reports changes over 10 %)"))
+
+
+def cmd_pin(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    ask(topo, {"cmd": "pin", "chip": chip.name, "pin": args.pin, "level": args.level})
+
+
+def cmd_restart(args):
+    topo = load(args)
+    for name in args.chips:
+        chip = chip_or_die(topo, name)
+        ask(topo, {"cmd": "restart", "chip": chip.name}, timeout=30)
+        print(ui.green("✓ ") + f"{chip.name} restarted")
+
+
+def cmd_console(args):
+    if not sys.stdin.isatty():
+        ui.die("the console needs a terminal")
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    sock = ask(topo, {"cmd": "console", "chip": chip.name})
+    f = sock.makefile("rb")
+    answer = f.readline()
+    if b"error" in answer:
+        ui.die(answer.decode().strip())
+    print(ui.dim(f"── {chip.name} console · Enter wakes it · Ctrl-] leaves ──"), flush=True)
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            r, _, _ = select.select([fd, sock], [], [])
+            if sock in r:
+                data = sock.recv(4096)
+                if not data:
+                    break
+                os.write(sys.stdout.fileno(), data.replace(b"\n", b"\r\n").replace(b"\r\r\n", b"\r\n"))
+            if fd in r:
+                data = os.read(fd, 1024)
+                if b"\x1d" in data:
+                    break
+                sock.sendall(data)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        sock.close()
+    print(ui.dim(f"\n── left {chip.name} ──"))
+
+
+def cmd_log(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    path = images.Images(topo).logfile(chip)
+    if not path.is_file():
+        ui.die(f"no log for {chip.name} yet")
+    with open(path, errors="replace") as f:
+        lines = f.readlines()
+        sys.stdout.writelines(lines[-args.lines:])
+        if not args.follow:
+            return
+        try:
+            while True:
+                line = f.readline()
+                if line:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                else:
+                    time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
+
+
+def cmd_can(args):
+    topo = load(args)
+    buses = [args.bus] if args.bus else topo.buses
+    missing = [b for b in buses if not can.interface_exists(b)]
+    if missing:
+        ui.die(f"no CAN interface {', '.join(missing)}", vcan_hint(missing))
+    socks = {can.open_bus(b): b for b in buses}
+    width = max(len(c.name) for c in topo.chips)
+    print(ui.dim(f"── {', '.join(buses)} · {'everything' if args.all else 'without housekeeping (--all shows it)'} · Ctrl-C ──"))
+    try:
+        while True:
+            r, _, _ = select.select(list(socks), [], [])
+            for s in r:
+                frame = can.read(s)
+                if frame is None or (frame.chatter and not args.all):
+                    continue
+                bus = socks[s]
+                node = topo.node_by_can(bus, frame.device_type, frame.device_id)
+                who = ui.chip_name(node.name, width=width) if node else ui.dim(frame.device.ljust(width))
+                raw = ui.dim(f"{frame.raw_id:08X}#{frame.data.hex().upper()}")
+                print(f"{ui.dim(time.strftime('%H:%M:%S'))}  {ui.dim(bus)}  {who}  {frame.describe():<34} {raw}", flush=True)
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_web(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip) if args.chip else (topo.gateways[0] if topo.gateways else None)
+    if chip is None or not chip.is_gateway:
+        ui.die("which gateway?")
+    print(chip.url + ui.dim("  (self-signed certificate; user and password as configured on the gateway)"))
+    if not args.no_open:
+        webbrowser.open(chip.url)
+
+
+def cmd_doctor(args):
+    topo = load(args)
+    ok = True
+
+    def check(good, text, hint=None):
+        nonlocal ok
+        ok &= good
+        print(f"{ui.green('✓') if good else ui.red('✗')} {text}")
+        if not good and hint:
+            print("    " + hint.replace("\n", "\n    "))
+
+    check(True, f"topology {topo.path}: {len(topo.gateways)} gateways, {len(topo.nodes)} nodes")
+    try:
+        path = qemu.find()
+        check(True, f"QEMU with the esp32-sim models: {path}")
+    except qemu.QemuError as e:
+        check(False, "QEMU", str(e))
+    missing = missing_buses(topo, topo.chips)
+    check(not missing, f"CAN interfaces {', '.join(topo.buses)}", vcan_hint(missing) if missing else None)
+    import shutil
+    check(bool(shutil.which("espflash")), "espflash", "cargo install espflash")
+    for kind in ("node", "gateway"):
+        elf = images.default_elf(kind)
+        check(elf.is_file(), f"{kind} firmware {elf}",
+              f"cd software/{images.FIRMWARE[kind]['crate']} && cargo build --release")
+    import socket
+    for gw in topo.gateways:
+        for port in (gw.https, gw.http):
+            s = socket.socket()
+            try:
+                s.bind(("127.0.0.1", port))
+                free = True
+            except OSError:
+                free = supervisor.request(topo, {"cmd": "status"}, 1) is not None
+            finally:
+                s.close()
+            check(free, f"port {port} for {gw.name}", "used by something else: change https/http in the topology")
+    sys.exit(0 if ok else 1)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="sim", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-f", "--file", default=os.environ.get("SIM_TOPOLOGY", SIM_DIR / "sim.toml"),
+                   help="the topology (default: sim.toml next to this script, or $SIM_TOPOLOGY)")
+    sub = p.add_subparsers(dest="command", metavar="command")
+
+    def add(name, func, help, aliases=()):
+        sp = sub.add_parser(name, help=help, description=help, aliases=list(aliases))
+        sp.set_defaults(func=func)
+        return sp
+
+    sp = add("up", cmd_up, "build what's missing, start the chips and show what happens")
+    sp.add_argument("chips", nargs="*", help="only these (default: all)")
+    sp.add_argument("-a", "--all", action="store_true", help="also show CAN housekeeping")
+    sp.add_argument("-s", "--serial", action="store_true", help="also show every serial log line")
+    sp.add_argument("--node-elf", help="node firmware (default: the release build)")
+    sp.add_argument("--gateway-elf", help="gateway firmware (default: the release build)")
+
+    add("down", cmd_down, "stop a running simulation")
+    add("status", cmd_status, "what runs, network, relays, light", aliases=["st"])
+
+    sp = add("build", cmd_build, "flash images from the release builds; keeps each chip's data")
+    sp.add_argument("chips", nargs="*")
+    sp.add_argument("--node-elf")
+    sp.add_argument("--gateway-elf")
+
+    sp = add("reset", cmd_reset, "factory-fresh images: configuration and data are gone")
+    sp.add_argument("chips", nargs="*")
+    sp.add_argument("--all", action="store_true", help="every chip")
+    sp.add_argument("--node-elf")
+    sp.add_argument("--gateway-elf")
+
+    sp = add("press", cmd_press, "press a button: single (default), double, triple or hold")
+    sp.add_argument("chip")
+    sp.add_argument("button", type=int, help="0-3 on the board, 4-7 on a button extension")
+    sp.add_argument("kind", nargs="?", default="single",
+                    choices=["single", "click", "double", "triple", "hold", "1", "2", "3"])
+    sp.add_argument("-t", "--secs", type=float, default=3.0, help="how long to hold (default 3)")
+
+    sp = add("motion", cmd_motion, "the PIR sees motion")
+    sp.add_argument("chip")
+    sp.add_argument("secs", type=float, nargs="?", default=10.0, help="how long (default 10 s)")
+
+    sp = add("lux", cmd_lux, "set the light the VEML7700 measures")
+    sp.add_argument("chip")
+    sp.add_argument("lux", type=float)
+
+    sp = add("console", cmd_console, "the chip's serial console (Ctrl-] leaves)", aliases=["con"])
+    sp.add_argument("chip")
+
+    sp = add("log", cmd_log, "the chip's serial log")
+    sp.add_argument("chip")
+    sp.add_argument("-f", "--follow", action="store_true")
+    sp.add_argument("-n", "--lines", type=int, default=40)
+
+    sp = add("can", cmd_can, "the CAN traffic, decoded and named")
+    sp.add_argument("bus", nargs="?")
+    sp.add_argument("-a", "--all", action="store_true", help="also housekeeping")
+
+    sp = add("web", cmd_web, "open a gateway's web UI")
+    sp.add_argument("chip", nargs="?")
+    sp.add_argument("-n", "--no-open", action="store_true", help="only print the address")
+
+    sp = add("restart", cmd_restart, "restart chips (a power cycle)")
+    sp.add_argument("chips", nargs="+")
+
+    sp = add("pin", cmd_pin, "drive a GPIO input directly")
+    sp.add_argument("chip")
+    sp.add_argument("pin", type=int)
+    sp.add_argument("level", type=int, choices=[0, 1])
+
+    add("doctor", cmd_doctor, "check QEMU, CAN interfaces, firmware and ports")
+
+    args = p.parse_args()
+    if not args.command:
+        p.print_help()
+        return
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

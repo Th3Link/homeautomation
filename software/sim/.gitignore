@@ -1,2 +1,3 @@
-# Flash and eFuse images (make-image.sh, make-efuse.py)
-*.bin
+# Images, logs (sim build / sim up)
+.sim/
+__pycache__/

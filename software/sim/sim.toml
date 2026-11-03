@@ -1,0 +1,99 @@
+# A simulated installation: two gateways, each with its own CAN bus, and
+# ten nodes. `./sim up` starts it, `./sim status` shows it. Copy this file
+# to try your own (`./sim -f mine.toml up`).
+#
+# Gateway:  name, bus (vcanN), https/http (host ports for the web UI),
+#           console (console commands run once on a fresh image)
+# Node:     name, type (button | relay | shutter | heating), id (1-255),
+#           gateway (whose bus it is on) or bus, hwrev (button 1/2,
+#           relay 1/2, shutter 1), extension (off | button | sensors),
+#           relay_mode (relay: off | relais, shutter: software_rollershutter
+#           | hardware_rollershutter), lux (VEML7700 with extension =
+#           "sensors", default 200), console (more console commands)
+#
+# The firmware is the release build in target/; another one with
+#   [firmware]
+#   node = "path/to/cancomponents"
+#   gateway = "path/to/gateway-hardware"
+
+[[gateway]]
+name = "gw-eg"
+bus = "vcan0"
+https = 8443
+http = 8080
+
+[[gateway]]
+name = "gw-og"
+bus = "vcan1"
+https = 8444
+http = 8081
+
+# Ground floor (gw-eg)
+
+[[node]]
+name = "taster-flur"
+type = "button"
+id = 10
+gateway = "gw-eg"
+extension = "sensors"
+
+[[node]]
+name = "taster-kueche"
+type = "button"
+id = 11
+gateway = "gw-eg"
+
+[[node]]
+name = "taster-wz"
+type = "button"
+id = 12
+gateway = "gw-eg"
+extension = "button"
+
+[[node]]
+name = "relais-keller"
+type = "relay"
+id = 128
+gateway = "gw-eg"
+extension = "sensors"
+lux = 40
+
+[[node]]
+name = "rollo-eg"
+type = "shutter"
+id = 1
+gateway = "gw-eg"
+
+# Upper floor (gw-og)
+
+[[node]]
+name = "taster-bad"
+type = "button"
+id = 20
+gateway = "gw-og"
+extension = "sensors"
+
+[[node]]
+name = "taster-kind"
+type = "button"
+id = 21
+gateway = "gw-og"
+hwrev = 2
+
+[[node]]
+name = "taster-schlafen"
+type = "button"
+id = 22
+gateway = "gw-og"
+
+[[node]]
+name = "relais-og"
+type = "relay"
+id = 129
+gateway = "gw-og"
+
+[[node]]
+name = "rollo-og"
+type = "shutter"
+id = 2
+gateway = "gw-og"
