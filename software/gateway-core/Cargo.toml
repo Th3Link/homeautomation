@@ -18,7 +18,7 @@ postcard = { version = "1", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
 # NTS (RFC 8915): AEAD_AES_SIV_CMAC_256. 0.7 shares aes, ctr and cipher with
 # embedded-tls' AES-GCM.
-aes-siv = { version = "0.7", default-features = false }
+aes-siv = { version = "0.8", default-features = false }
 
 [dev-dependencies]
 serde-json-core = { version = "0.7", default-features = false }

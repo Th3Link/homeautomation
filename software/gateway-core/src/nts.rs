@@ -286,7 +286,7 @@ pub fn request(
     // (the SIV tag alone: nothing is encrypted).
     let mut siv = Aes128Siv::new((&keys.c2s).into());
     let tag = siv
-        .encrypt_in_place_detached([&out[..at], &nonce[..]], &mut [])
+        .encrypt_inout_detached([&out[..at], &nonce[..]], (&mut [][..]).into())
         .ok()?;
     let mut body = [0u8; 4 + NONCE_LEN + 16];
     body[..2].copy_from_slice(&(NONCE_LEN as u16).to_be_bytes());
@@ -440,8 +440,9 @@ fn authenticate(
     let (tag, encrypted) = ciphertext.split_at(16);
     let mut plaintext: Vec<u8, PLAINTEXT_CAP> =
         Vec::from_slice(encrypted).map_err(|_| AnswerError::Malformed)?;
+    let tag = Tag::try_from(tag).map_err(|_| AnswerError::Malformed)?;
     let mut siv = Aes128Siv::new((&keys.s2c).into());
-    siv.decrypt_in_place_detached([associated, nonce], &mut plaintext, Tag::from_slice(tag))
+    siv.decrypt_inout_detached([associated, nonce], (&mut plaintext[..]).into(), &tag)
         .map_err(|_| AnswerError::Unauthenticated)?;
 
     // The encrypted extension fields: the fresh cookies.
@@ -514,7 +515,7 @@ mod tests {
         let ad = unhex("101112131415161718191a1b1c1d1e1f2021222324252627");
         let mut text = unhex("112233445566778899aabbccddee");
         let tag = Aes128Siv::new((&key).into())
-            .encrypt_in_place_detached([&ad[..]], &mut text)
+            .encrypt_inout_detached([&ad[..]], (&mut text[..]).into())
             .unwrap();
         assert_eq!(tag.as_slice(), unhex("85632d07c6e8f37f950acd320a2ecc93"));
         assert_eq!(text, unhex("40c02b9690c4dc04daef7f6afe5c"));
@@ -614,9 +615,9 @@ mod tests {
                 AUTHENTICATOR => {
                     assert_eq!(at + length, request.len(), "authenticator last");
                     let nonce = &body[4..20];
-                    let tag = Tag::from_slice(&body[20..36]);
+                    let tag = Tag::try_from(&body[20..36]).unwrap();
                     Aes128Siv::new((&KEYS.c2s).into())
-                        .decrypt_in_place_detached([&request[..at], nonce], &mut [], tag)
+                        .decrypt_inout_detached([&request[..at], nonce], (&mut [][..]).into(), &tag)
                         .expect("authenticator verifies");
                 }
                 _ => {}
@@ -643,7 +644,7 @@ mod tests {
         }
         let nonce = [0x77u8; 16];
         let tag = Aes128Siv::new(key.into())
-            .encrypt_in_place_detached([&p[..], &nonce[..]], &mut plaintext)
+            .encrypt_inout_detached([&p[..], &nonce[..]], (&mut plaintext[..]).into())
             .unwrap();
         let body_len = 4 + 16 + 16 + plaintext.len();
         p.extend_from_slice(&[0x04, 0x04]);
