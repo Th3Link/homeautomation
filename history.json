@@ -435,5 +435,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "cb5ca4d1b058a7438763f9684ece6444f2b468c2",
+  "date": "2026-11-03T15:27:20+01:00",
+  "subject": "Merge pull request #56 from Th3Link/feat/logs-and-raw-can",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 486836,
+    "iram": 18680,
+    "dram_static": 41308,
+    "stack_budget": 155300,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509339,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
