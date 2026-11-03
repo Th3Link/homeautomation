@@ -1,0 +1,2 @@
+# Flash and eFuse images (make-image.sh, make-efuse.py)
+*.bin
