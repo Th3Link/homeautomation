@@ -10,7 +10,7 @@
   "dependencies": {
     "crc-32": "1.2.2",
     "htm": "3.1.1",
-    "js-yaml": "4.1.0",
+    "js-yaml": "4.3.2",
     "preact": "10.26.9"
   },
   "devDependencies": {
