@@ -47,8 +47,8 @@ static_cell         = { version = "2.1", features = ["nightly"] }
 heapless            = { version = "0.9" }
 async-trait         = { version = "0.1" }
 sequential-storage  = { version = "8.0" }
-bareminal_cli       = { version = "0.3", default-features = false, features = ["async-no-std"] }
-bareminal_macros    = { version = "0.3" }
+bareminal_cli       = { version = "0.4", default-features = false, features = ["async-no-std"] }
+bareminal_macros    = { version = "0.4" }
 num_enum            = { version = "0.7", default-features = false }
 cancomponents-core  = { path = "../cancomponents-core/" }
 common-hardware     = { path = "../common-hardware/" }
