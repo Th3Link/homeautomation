@@ -170,30 +170,27 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bareminal_cli"
-version = "0.3.6"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3535384d88e6eff9d4ab92d337158fe8299ffadf128dc5891a9db5f147bef9fc"
+checksum = "fb5c05bc4eb4da6745c97a655abbd0287cb9aaa4f28bfbb1f9660bc595f1c01e"
 dependencies = [
- "defmt",
  "embassy-futures",
  "embedded-io-async 0.7.0",
  "heapless 0.9.3",
- "serde",
- "serde-json-core 0.6.0",
 ]
 
 [[package]]
 name = "bareminal_macros"
-version = "0.3.6"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40c07f6b19b5b733039a78a7947d1c8ce000a9ed2eff85d3526f721496d18b9b"
+checksum = "c2771c71a91a8528e1b2008140518a6302493b5321933b14a9ce9ec7dbb263d9"
 dependencies = [
  "bareminal_cli",
  "heapless 0.9.3",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
