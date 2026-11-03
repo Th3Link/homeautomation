@@ -458,5 +458,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "8c8c59cb8162172eae1a301a235038dd75b865a0",
+  "date": "2026-11-03T21:16:34+01:00",
+  "subject": "Merge pull request #62 from Th3Link/feat/sim",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 486836,
+    "iram": 18680,
+    "dram_static": 41308,
+    "stack_budget": 155300,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509383,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
