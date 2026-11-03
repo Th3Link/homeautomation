@@ -90,6 +90,16 @@ extension. To try your own, copy it (`./sim -f mine.toml up`, or set
 
 `extension = "sensors"` adds the PIR and a VEML7700 light sensor.
 
+**MQTT:** start a broker on the host, for example
+`mosquitto -p 1883 -v`; mosquitto 2 only accepts other hosts with a
+listener and `allow_anonymous true` in a config file. The gateways reach it
+as 10.0.2.2. Give each gateway the broker in its `console` list. The next
+`./sim up` types the commands in, as it does with every changed setting:
+
+```toml
+console = ["mqtt-uri mqtt://10.0.2.2:1883", "mqtt-enabled on"]
+```
+
 ## Images
 
 Each chip has its own flash image under `.sim/<topology>/chips/<name>/`.
