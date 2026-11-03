@@ -70,9 +70,11 @@ pub struct Relais {
 }
 
 impl Relais {
-    /// Sets up the two I2C GPIO-expander banks (register `0x3` = direction,
-    /// all bits output; register `0x1` = output latch, all initially low
-    /// i.e. all relays off) and spawns the task that drives them.
+    /// Sets up the two I2C GPIO-expander banks (register `0x1` = output
+    /// latch, all low i.e. all relays off; then register `0x3` = direction,
+    /// all bits output) and spawns the task that drives them. The latch comes
+    /// first: it powers up as `0xFF`, so turning the pins into outputs before
+    /// clearing it would switch every relay on for a moment.
     pub async fn init(
         i2c0: esp_hal::peripherals::I2C0<'static>,
         sda: impl PeripheralInput<'static> + PeripheralOutput<'static>,
@@ -93,10 +95,10 @@ impl Relais {
             .with_scl(scl)
             .into_async();
 
-        i2c.write_async(bank_addr[0], &[0x3, 0x0]).await.ok();
-        i2c.write_async(bank_addr[1], &[0x3, 0x0]).await.ok();
         i2c.write_async(bank_addr[0], &[0x1, 0x0]).await.ok();
         i2c.write_async(bank_addr[1], &[0x1, 0x0]).await.ok();
+        i2c.write_async(bank_addr[0], &[0x3, 0x0]).await.ok();
+        i2c.write_async(bank_addr[1], &[0x3, 0x0]).await.ok();
 
         let relais = Relais {
             i2c,
@@ -177,7 +179,8 @@ impl Relais {
     }
 
     /// Sets or clears one physical relay bit and writes the whole expander
-    /// output latch (register `0x1`) back out.
+    /// output latch (register `0x1`) back out, then makes sure the pins are
+    /// outputs (register `0x3`).
     async fn sethw(&mut self, num: usize, state: State) {
         if let Some(&(expander, bit)) = Self::MAPPING.get(num) {
             let mask = 1 << bit;
@@ -192,14 +195,16 @@ impl Relais {
                 self.expanders[expander],
                 self.bank_addr[expander]
             );
-            self.i2c
-                .write_async(self.bank_addr[expander], &[0x3, 0x0])
-                .await
-                .ok();
+            // Latch before direction, as in `init`: an expander that reset
+            // since the last write holds `0xFF` in its latch.
             self.i2c
                 .write_async(self.bank_addr[expander], &[0x1, self.expanders[expander]])
                 .await
                 .inspect_err(|e| console_log!("{e}"))
+                .ok();
+            self.i2c
+                .write_async(self.bank_addr[expander], &[0x3, 0x0])
+                .await
                 .ok();
         }
     }
