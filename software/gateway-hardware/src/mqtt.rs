@@ -38,7 +38,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use gateway_core::config::BrokerConfig;
 use gateway_core::config::MQTT_BROKERS;
-use gateway_core::helper::BrokerAddress;
+use gateway_core::helper::{mqtt_client_id, BrokerAddress};
 use heapless::String;
 use heapless::Vec;
 use rust_mqtt::buffer::BumpBuffer;
@@ -398,7 +398,12 @@ async fn session<N: Transport>(
         }
     }
 
-    let client_id = MqttString::from_str("gateway-hardware").ok();
+    let mac: [u8; 6] = esp_hal::efuse::base_mac_address()
+        .as_bytes()
+        .try_into()
+        .expect("MAC address is always 6 bytes");
+    let id = mqtt_client_id(mac);
+    let client_id = MqttString::from_str(id.as_str()).ok();
     if let Err(e) = client.connect(net, &connect_options, client_id).await {
         console_log!("mqtt{broker}: connect failed: {e:?}");
         Timer::after(Duration::from_secs(5)).await;

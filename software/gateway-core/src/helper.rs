@@ -1,5 +1,6 @@
 //! String/hex utilities ported from the original C++ `helper.cpp`.
 
+use core::fmt::Write as _;
 use heapless::String;
 
 /// Returns the `pos`-th `/`-delimited, non-empty segment of `s` (matching
@@ -18,7 +19,6 @@ pub fn mqtt_split(s: &str, pos: usize) -> &str {
 /// throughout the MQTT topic scheme add it themselves, same as the
 /// original call sites do).
 pub fn to_hex_string(n: u32) -> String<8> {
-    use core::fmt::Write;
     let mut s = String::new();
     let _ = write!(s, "{n:x}");
     s
@@ -76,9 +76,29 @@ pub fn parse_broker_uri(uri: &str) -> Option<BrokerAddress<'_>> {
     Some(BrokerAddress { tls, host, port })
 }
 
+/// The MQTT client id: `gateway-` and the MAC address in hex, so two
+/// gateways on one broker don't take each other's session (a broker drops
+/// the older connection of a client id that connects again). 20 characters,
+/// within the 23 bytes every broker has to accept (MQTT 5.0, 3.1.3.1).
+pub fn mqtt_client_id(mac: [u8; 6]) -> String<20> {
+    let mut id = String::new();
+    let _ = write!(
+        id,
+        "gateway-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    );
+    id
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mqtt_client_id_is_the_mac() {
+        let id = mqtt_client_id([0x02, 0x53, 0x49, 0x4d, 0x00, 0x0a]);
+        assert_eq!(id.as_str(), "gateway-0253494d000a");
+    }
 
     #[test]
     fn mqtt_split_returns_nth_segment() {

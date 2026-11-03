@@ -31,7 +31,10 @@ refuses more than four unconfirmed ones).
   [encrypted](#encryption-mqtts)).
 - Credentials: optional per-broker username/password, sent as the MQTT
   CONNECT username/password if non-empty.
-- Client id: `"gateway-hardware"`, fixed (on each broker).
+- Client id: `gateway-` and the gateway's MAC address in hex (for example
+  `gateway-a4cf12345678`), the same on each broker. Unique per gateway: a
+  broker drops the older connection when a client id connects again, so a
+  fixed id made two gateways on one broker throw each other off.
 - `clean_start` is set on every connect — no persisted session across
   reconnects.
 - On disconnect, the gateway reconnects with a fixed backoff and
