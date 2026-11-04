@@ -6,10 +6,17 @@
 #           console (console commands run once on a fresh image)
 # Node:     name, type (button | relay | shutter | heating), id (1-255),
 #           gateway (whose bus it is on) or bus, hwrev (button 1/2,
-#           relay 1/2, shutter 1), extension (off | button | sensors),
-#           relay_mode (relay: off | relais, shutter: software_rollershutter
-#           | hardware_rollershutter), lux (VEML7700 with extension =
-#           "sensors", default 200), console (more console commands)
+#           relay 1/2, shutter 1), extension (off | button | sensors |
+#           pwm), relay_mode (relay: off | relais, shutter:
+#           software_rollershutter | hardware_rollershutter), console (more
+#           console commands)
+#   extension = "sensors":  sensors = ["veml7700", "bme680", "nightlight"]
+#           (the default; also "scd30", or "bme280" instead of the BME680),
+#           start values per part: [node.bme680] temperature = 22, or
+#           lux = 40 for the VEML7700
+#   extension = "pwm":      pwm_boards = 1-16 (PCA9685 at 0x40, 0x41, …)
+#   relay and heating boards: ds18b20 = [21.5, 48.0] on the 1-wire header
+#   your own I2C parts:     [[node.i2c]] bus, addr, model = "file.py:Class"
 #
 # The firmware is the release build in target/; another one with
 #   [firmware]
@@ -36,6 +43,7 @@ type = "button"
 id = 10
 gateway = "gw-eg"
 extension = "sensors"
+sensors = ["veml7700", "bme680", "scd30", "nightlight"]
 
 [[node]]
 name = "taster-kueche"
@@ -57,6 +65,11 @@ id = 128
 gateway = "gw-eg"
 extension = "sensors"
 lux = 40
+ds18b20 = [12.5]
+
+[node.bme680]
+temperature = 14.0
+humidity = 70
 
 [[node]]
 name = "rollo-eg"
@@ -85,12 +98,14 @@ name = "taster-schlafen"
 type = "button"
 id = 22
 gateway = "gw-og"
+extension = "pwm"
 
 [[node]]
 name = "relais-og"
 type = "relay"
 id = 129
 gateway = "gw-og"
+ds18b20 = [48.5, 39.0]
 
 [[node]]
 name = "rollo-og"
