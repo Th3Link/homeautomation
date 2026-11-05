@@ -159,7 +159,7 @@ jobs:
         # Needed by build.rs, which shells out to `espflash save-image` to
         # turn the linked ELF into a flashable raw image.
         run: |
-          curl -sSL -o /tmp/espflash.zip "https://github.com/esp-rs/espflash/releases/latest/download/espflash-x86_64-unknown-linux-gnu.zip"
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/espflash.zip "https://github.com/esp-rs/espflash/releases/latest/download/espflash-x86_64-unknown-linux-gnu.zip"
           mkdir -p "$HOME/.local/bin"
           unzip -o /tmp/espflash.zip -d "$HOME/.local/bin"
           chmod +x "$HOME/.local/bin/espflash"
@@ -296,9 +296,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install cargo-sbom
+        # -f: an error page (a 504 from GitHub once) fails the step instead
+        # of being saved as the binary; --retry rides out short outages.
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -sSL -o "$HOME/.local/bin/cargo-sbom" "https://github.com/psastras/sbom-rs/releases/download/cargo-sbom-latest/cargo-sbom-x86_64-unknown-linux-gnu"
+          curl -fsSL --retry 5 --retry-all-errors -o "$HOME/.local/bin/cargo-sbom" "https://github.com/psastras/sbom-rs/releases/download/cargo-sbom-latest/cargo-sbom-x86_64-unknown-linux-gnu"
           chmod +x "$HOME/.local/bin/cargo-sbom"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Run from the repo root (not cd'd into the crate dir): this job
