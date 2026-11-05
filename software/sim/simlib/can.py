@@ -116,9 +116,10 @@ class Frame:
         if m == "PirSensor" and len(d) >= 2:
             return "motion" if d[1] else "motion over"
         if m in ("Relais", "RelaisState") and len(d) >= 2:
+            relay = f"relay {d[5]}/{d[0]}" if len(d) >= 6 and d[5] else f"relay {d[0]}"
             if m == "RelaisState":
-                return f"relay {d[0]} is {'on' if d[1] else 'off'}"
-            return f"relay {d[0]} → {'on' if d[1] else 'off'}"
+                return f"{relay} is {'on' if d[1] else 'off'}"
+            return f"{relay} → {'on' if d[1] else 'off'}"
         if m in ("Rollershutter", "RollershutterState") and d:
             states = {0: "stop", 1: "up", 2: "down"}
             return f"{m} {' '.join(str(states.get(b, b)) for b in d[:2])}"

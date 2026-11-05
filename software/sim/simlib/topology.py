@@ -25,7 +25,9 @@ NODE_TYPES = {
                 "relay_mode": "relais", "onewire": True},
 }
 RELAY_MODES = ("off", "relais", "software_rollershutter", "hardware_rollershutter")
-EXTENSIONS = ("off", "button", "sensors", "pwm")
+EXTENSIONS = ("off", "button", "sensors", "pwm", "relais")
+# Extension modes with an I2C bus, where relay boards without a µC can sit.
+I2C_EXTENSIONS = ("sensors", "pwm", "relais")
 # The relay board's 1-wire header (DS18B20s).
 ONEWIRE_PIN = 4
 
@@ -33,7 +35,7 @@ ONEWIRE_PIN = 4
 BUTTON_PINS = {1: (33, 35, 12, 34), 2: (25, 26, 5, 15)}
 # The extension header: buttons 4-7 in "button" mode; in "sensors" mode
 # SDA, SCL (I2C1), 1-wire and the PIR (active high, pull-down); in "pwm"
-# mode SDA and SCL of the PCA9685 boards.
+# and "relais" mode SDA and SCL of the PCA9685 or relay boards.
 EXTENSION_PINS = {
     ("button", 1): (4, 16, 17, 18),
     ("button", 2): (4, 16, 17, 18),
@@ -98,6 +100,10 @@ class Node(Chip):
     ds18b20: list = field(default_factory=list)
     # Your own I2C devices: {"bus", "addr", "model", values…}.
     custom: list = field(default_factory=list)
+    # The node's own relay board ("relais" or "ssr"), and the boards without
+    # a µC on the extension bus: {bank 1-4: kind}.
+    relay_board: str = "relais"
+    relay_boards: dict = field(default_factory=dict)
 
     @property
     def device_type(self):
@@ -106,6 +112,12 @@ class Node(Chip):
     @property
     def has_relays(self):
         return NODE_TYPES[self.kind]["relays"]
+
+    @property
+    def relay_banks(self):
+        """{bank: board kind} of every relay board the node drives."""
+        own = {0: self.relay_board} if self.has_relays else {}
+        return {**own, **self.relay_boards}
 
     @property
     def has_sensors(self):
@@ -163,8 +175,10 @@ class Node(Chip):
             f"device-id {self.device_id}",
             f"extension-mode {self.extension}",
         ]
-        if self.has_relays:
+        if self.relay_banks:
             commands.append(f"relais-mode {self.relay_mode}")
+        for bank, kind in self.relay_banks.items():
+            commands.append(f"relais-board {bank} {kind}")
         commands.append(f"custom-string {self.name[:8]}")
         return commands + list(self.console)
 
@@ -205,12 +219,13 @@ class Topology:
                 bus = by_name[n["gateway"]].bus
             else:
                 bus = n.get("bus", "vcan0")
+            boards = n.get("relay_boards", {})
             node = Node(
                 name=name, kind=kind, bus=bus, index=index,
                 console=n.get("console", []), device_id=n.get("id", 0),
                 hwrev=n.get("hwrev", spec["hwrev"]),
-                extension=n.get("extension", "off"),
-                relay_mode=n.get("relay_mode", spec.get("relay_mode", "off")),
+                extension=n.get("extension", "relais" if boards else "off"),
+                relay_mode=n.get("relay_mode", spec.get("relay_mode", "relais" if boards else "off")),
                 pwm_boards=n.get("pwm_boards", 1))
             self._parts(node, n)
             if not 1 <= node.device_id <= 255:
@@ -254,6 +269,24 @@ class Topology:
             serial = entry.get("serial", node.index << 16 | (i + 1))
             node.ds18b20.append({"name": entry.get("name", f"ds18b20-{i}"), "serial": serial,
                                  "temperature": float(entry.get("temperature", 21.0))})
+        node.relay_board = n.get("relay_board", "relais")
+        if node.relay_board not in devices.RELAY_BOARDS:
+            raise TopologyError(f"{name}: relay_board is relais (12 relays) or ssr (16 outputs)")
+        if "relay_board" in n and not node.has_relays:
+            raise TopologyError(f"{name}: a {node.kind} has no relay board of its own (relay_boards?)")
+        boards = n.get("relay_boards", {})
+        if isinstance(boards, list):
+            boards = {bank: kind for bank, kind in enumerate(boards, 1) if kind}
+        for bank, kind in boards.items():
+            if not str(bank).isdigit() or not 1 <= int(bank) <= 4:
+                raise TopologyError(f"{name}: relay_boards are banks 1-4 (A1/A2 solder bridges)")
+            if kind not in devices.RELAY_BOARDS:
+                raise TopologyError(f"{name}: a relay board is relais (12 relays) or ssr (16 outputs)")
+            node.relay_boards[int(bank)] = kind
+        node.relay_boards = dict(sorted(node.relay_boards.items()))
+        if node.relay_boards and node.extension not in I2C_EXTENSIONS:
+            raise TopologyError(f"{name}: relay boards need the extension's I2C bus "
+                                f"(extension = {' | '.join(I2C_EXTENSIONS)})")
         for c in n.get("i2c", []):
             if not {"bus", "addr", "model"} <= set(c):
                 raise TopologyError(f"{name}: an [[node.i2c]] device needs bus, addr and model")
@@ -265,8 +298,10 @@ class Topology:
             if (bus, addr) in taken:
                 raise TopologyError(f"{name}: {part} and {taken[bus, addr]} both at 0x{addr:02x}")
             taken[bus, addr] = part
-        if node.has_relays and any(b == 0 and a in (0x26, 0x27) for b, a in taken):
-            raise TopologyError(f"{name}: 0x26 and 0x27 on bus 0 are the relay expanders")
+        for bank in node.relay_banks:
+            for addr in devices.relay_addresses(bank):
+                if (min(bank, 1), addr) in taken:
+                    raise TopologyError(f"{name}: 0x{addr:02x} on bus {min(bank, 1)} is relay bank {bank}")
 
     def _name(self, entry):
         name = entry.get("name", "")

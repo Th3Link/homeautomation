@@ -8,7 +8,8 @@ bus = "vcan-test"
 https = 8543
 http = 8180
 
-# A light switch with the full sensor extension.
+# A light switch with the full sensor extension, and a relay module (bank
+# 1) and an SSR module (bank 2) without a µC on the same bus.
 [[node]]
 name = "taster"
 type = "button"
@@ -16,6 +17,7 @@ id = 10
 gateway = "gw"
 extension = "sensors"
 sensors = ["veml7700", "bme680", "scd30", "nightlight"]
+relay_boards = ["relais", "ssr"]
 console = ["sensor-interval 10"]
 
 # A relay board with two DS18B20s and four extension buttons.
@@ -28,7 +30,8 @@ extension = "button"
 ds18b20 = [21.0, 45.0]
 console = ["sensor-interval 10"]
 
-# A light switch driving two PCA9685 PWM boards.
+# A light switch driving two PCA9685 PWM boards, and a relay module with
+# the factory solder bridges (bank 4).
 [[node]]
 name = "pwm"
 type = "button"
@@ -36,3 +39,4 @@ id = 30
 gateway = "gw"
 extension = "pwm"
 pwm_boards = 2
+relay_boards = { 4 = "relais" }

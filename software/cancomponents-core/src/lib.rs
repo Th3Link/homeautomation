@@ -33,6 +33,7 @@ pub mod heating_manual;
 pub mod pca9685;
 pub mod presence;
 pub mod relais;
+pub mod relais_board;
 pub mod relais_manager;
 pub mod sensor_board;
 pub mod sensor_names;

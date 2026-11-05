@@ -21,7 +21,7 @@ $ ./sim up
   12 chips  from software/sim/sim.toml
   gw-eg          gateway  vcan0  https://127.0.0.1:8443
   taster-flur    button   vcan0  id 10  buttons 0,1,2,3  PIR  veml7700 bme680 scd30 nightlight
-  relais-keller  relay    vcan0  id 128  PIR  veml7700 bme680 nightlight ds18b20-0  relays (relais)
+  relais-keller  relay    vcan0  id 128  PIR  veml7700 bme680 nightlight ds18b20-0  relays own relais (relais)
   …
 15:45:32  gw-eg          network up 10.0.2.15  web UI https://127.0.0.1:8443
 15:45:32  taster-flur    discovered by the gateway
@@ -96,7 +96,30 @@ value can be set while it runs: `./sim set`, the TUI, or a script.
 | `nightlight` | I2C1 0x38 (PCF8574A) | — (shows the level, 0-3) | follows `Nightlight` |
 | `pwm-1` … `pwm-16` | I2C1 0x40… (PCA9685) | — (shows each channel's duty) | follows `LampGroup` with bank 1-16 |
 | `ds18b20-0` … | 1-wire, GPIO 4 | `temperature`, `plugged` (0/1) | `TemperatureSensor` per sensor; `DeviceError` when one is lost |
-| `relays-0`/`-1` | I2C0 0x26/0x27 (PCA9554) | — | the twelve relays (`./sim status`) |
+| relays, bank 0 | I2C0 0x26/0x27 (PCA9534) | — | the node's own board (`./sim status`) |
+| relays, banks 1-4 | I2C1 0x20/0x21 … 0x26/0x27 (PCA9534) | — | relay boards without a µC on the extension bus, see below |
+
+**Relay boards:** a `Relais` command's last byte, the bank, picks the
+board. Bank 0 is the node's own (relay, shutter and heating nodes); banks
+1-4 are boards without a µC on the extension bus, their JP5/JP6 bridged
+and their A1/A2 solder bridges set (bank 4 is the factory setting). They
+sit next to the sensors or the PWM boards, on any node with an I2C
+extension. A board is the relay module (`relais`, 12 relays) or the SSR
+module (`ssr`, 16 outputs):
+
+```toml
+[[node]]
+name = "taster-flur"
+type = "button"
+extension = "sensors"               # or pwm, or relais (only the boards)
+relay_boards = ["relais", "ssr"]    # banks 1 and 2; { 4 = "relais" } for one bank
+```
+
+`./sim status`, `get` and the TUI show each board (`bank 1 ○○○…`), relay
+events name the bank (`⚡ bank 2 relay 15 on`), and in a script
+`chip.bank(2)` is that board's relays. On the node's console,
+`relais 15 on 2` switches relay 15 of bank 2 and `show` lists the boards
+it found.
 
 The sensor frames carry the value as the gateway sees it. `./sim can`
 decodes them, for example `temperature 21.5 °C  bme680@77`. The BME680
@@ -115,7 +138,7 @@ $ ./sim i2c taster-flur                  # live, every transaction (Ctrl-C)
 19:02:11  taster-flur  i2c1 10 W 04 R 2e 03
 19:02:12  taster-flur  i2c1 77 W 71 10 72 01 74 25
 19:02:12  taster-flur  i2c1 77 W 1d R 80 01 49 b8 90 7d 90 60 5c 06 00 00 00 3a 37 00 00
-$ ./sim i2c taster-flur scan             # -b 0 for the relay expanders
+$ ./sim i2c taster-flur scan             # -b 0 for the node's own relay board
   0x10  veml7700
   0x38  nightlight
   0x61  scd30
@@ -124,7 +147,7 @@ $ ./sim i2c taster-flur read 0x77 0xd0   # register 0xd0 (the chip id), 1 byte
 61
 $ ./sim i2c taster-flur read 0x61 0xd1 3 # reads after writing 0xd1: SCD30 firmware version
 03 42 f3
-$ ./sim i2c relais-keller write 0x26 1 0x08 -b 0   # PCA9554 output register: relay 0 on
+$ ./sim i2c relais-keller write 0x26 1 0x08 -b 0   # PCA9534 output register: relay 0 on
 $ ./sim i2c taster-flur dump 0x77        # all 256 registers
 ```
 
@@ -162,8 +185,9 @@ print(flur.i2c(0x77, b"\xd0", 1))                        # raw I2C: b'a'
 - `sim[name]` is a chip; `chip.<part>` is a part (`ds18b20-0` as
   `ds18b20_0`). A part has `set(**values)`, `get()`, its values as
   attributes, and `ramp(key, to, secs)`.
-- `chip.press`, `motion`, `pin`, `restart`, `relays`, `console(command)`
-  and `i2c(addr, write, read)` act on the chip.
+- `chip.press`, `motion`, `pin`, `restart`, `relays` (the own board's),
+  `bank(n)` (relay bank `n`), `console(command)` and
+  `i2c(addr, write, read)` act on the chip.
 - `sim.expect(pattern, chip=, kind=, timeout=, where=)` waits for an
   event. `sim.expect_can(message, chip=, data=, value=, sensor=)` waits
   for a frame. `sim.no_event(...)` checks that none comes. All of them
@@ -254,8 +278,8 @@ set `SIM_TOPOLOGY`). The comment at its top lists every field.
 
 | Node type | Board | Buttons | Relays | Extension |
 |---|---|---|---|---|
-| `button` | light switch, hwrev 1 or 2 | 0-3, 4-7 with `extension = "button"` | — | `button`, `sensors` or `pwm` |
-| `relay` | relay board, hwrev 1 or 2 | 4-7 with a button extension | 12 (PCA9554 at 0x26/0x27) | as button; DS18B20s on the 1-wire header |
+| `button` | light switch, hwrev 1 or 2 | 0-3, 4-7 with `extension = "button"` | banks 1-4 with `relay_boards` | `button`, `sensors`, `pwm` or `relais` |
+| `relay` | relay board, hwrev 1 or 2 | 4-7 with a button extension | 12 (PCA9534 at 0x26/0x27), 16 with `relay_board = "ssr"`; plus banks 1-4 | as button; DS18B20s on the 1-wire header |
 | `shutter` | relay board in shutter mode, hwrev 1 | as relay | relay pairs | as button |
 | `heating` | relay board with the heating controller | as relay | 12 | as relay |
 
@@ -312,7 +336,7 @@ runs, like a real flash. `./sim up` builds what is missing:
 
 - **A new chip** gets the release build, a MAC address of its own (in its
   eFuse image), and its settings typed into its console: device type, id,
-  hwrev, extension, relay mode, and any `console` commands from the
+  hwrev, extension, relay mode and boards, and any `console` commands from the
   topology.
 - **A new release build** replaces the apps and keeps the data partitions
   (`nvs`, `storage`), as an update in the field would.

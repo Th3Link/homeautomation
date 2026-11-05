@@ -4,7 +4,7 @@
 
 use super::{write_device_segment, Topic};
 use crate::helper::mqtt_split;
-use crate::relais::MqttCommand;
+use crate::relais::{MqttCommand, RelaisMsg};
 use crate::DecodeError;
 use core::fmt::Write;
 
@@ -71,6 +71,32 @@ pub fn parse_command_body(data: &str) -> Result<MqttCommand, DecodeError> {
     })
 }
 
+/// The CAN frame for a `canbus/relais_command/#`/
+/// `canbus/rollershutter_command/#` body: `"<num>/<state>/<stop_time_ms>"`
+/// as the original gateway sent it ([`MqttCommand`]), or with a fourth
+/// field, `"<num>/<state>/<time_ms>/<bank>"`, for the relay boards of a
+/// node other than its own (bank 1-4 on the extension bus), in the
+/// [`RelaisMsg`] layout. With a bank the time is limited to 24 bits, as the
+/// bank takes the top byte.
+pub fn command_frame(data: &str) -> Result<[u8; 8], DecodeError> {
+    let cmd = parse_command_body(data)?;
+    let bank = mqtt_split(data, 3);
+    if bank.is_empty() {
+        return Ok(cmd.to_bytes());
+    }
+    let bank = bank.parse().map_err(|_| DecodeError)?;
+    if cmd.stop_time_ms > 0x00FF_FFFF {
+        return Err(DecodeError);
+    }
+    Ok(RelaisMsg {
+        number: cmd.num,
+        state: cmd.state,
+        time_ms: cmd.stop_time_ms,
+        bank,
+    }
+    .to_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +158,28 @@ mod tests {
         assert_eq!(cmd.num, 3);
         assert_eq!(cmd.state, 1);
         assert_eq!(cmd.stop_time_ms, 500);
+    }
+
+    #[test]
+    fn command_frame_without_bank_is_the_original_one() {
+        assert_eq!(
+            command_frame("3/1/500").unwrap(),
+            [3, 1, 0xF4, 0x01, 0, 0, 0, 0]
+        );
+        // The top byte of a long time lands where a node reads the bank.
+        assert_eq!(command_frame("3/3/16777216").unwrap()[5], 1);
+    }
+
+    #[test]
+    fn command_frame_carries_the_bank() {
+        assert_eq!(
+            command_frame("11/3/500/2").unwrap(),
+            [11, 3, 0xF4, 0x01, 0, 2, 0, 0]
+        );
+        assert_eq!(command_frame("0/0/0/4").unwrap(), [0, 0, 0, 0, 0, 4, 0, 0]);
+        assert!(command_frame("1/3/16777216/1").is_err());
+        assert!(command_frame("1/3/0/x").is_err());
+        assert!(command_frame("1/3/0/256").is_err());
     }
 
     #[test]

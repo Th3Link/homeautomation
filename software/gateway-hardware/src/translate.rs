@@ -334,7 +334,7 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
     if relais_topics::is_relais_command_topic(topic)
         || relais_topics::is_rollershutter_command_topic(topic)
     {
-        let Ok(cmd) = relais_topics::parse_command_body(body) else {
+        let Ok(frame) = relais_topics::command_frame(body) else {
             return;
         };
         let Some(target) = resolve_target(topic).await else {
@@ -345,7 +345,7 @@ pub async fn dispatch_mqtt(topic: &str, body: &str, retained: bool) {
         } else {
             CanMessageType::Relais
         };
-        send_command(target, msg_type, &cmd.to_bytes()).await;
+        send_command(target, msg_type, &frame).await;
         return;
     }
 
