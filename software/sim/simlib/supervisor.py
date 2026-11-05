@@ -9,7 +9,7 @@ Everything that happens is an event: a dict with `seq`, `t` (Unix time),
   action   what the simulation did to it: a press, motion, a new value
   can      a frame (`bus`, `id`, `message`, `data` hex, `value`, `sensor`,
            `shown`: whether `sim up` prints it)
-  relay    relays switched (`relays`: all twelve)
+  relay    relays switched (`bank`, `relays`: all of the board's)
   device   a part's output changed (`device`, `state`)
   serial   a line of the serial log
   i2c      a finished I2C transaction (`bus`)
@@ -35,9 +35,6 @@ from collections import deque
 from . import can, devices, i2c, qemu, ui
 from .topology import ONEWIRE_PIN
 
-# Logical relay -> (expander 0x26/0x27, bit), cancomponents-hardware relais.rs.
-RELAY_BITS = ((0, 3), (0, 2), (0, 1), (0, 7), (0, 6), (0, 5), (0, 4),
-              (1, 3), (1, 2), (1, 1), (1, 7), (1, 6))
 # Messages the gateway sends to a node.
 COMMANDS = {"Relais", "Rollershutter", "Nightlight", "LampGroup", "Restart",
             "HeatingCommand", "PwmFrequency", "SensorConfig"}
@@ -102,7 +99,8 @@ class Chip:
         self.gpio = None
         self.gpio_lock = threading.Lock()
         self.outputs = {}
-        self.expanders = [0, 0]
+        # Relay bank -> the outputs of its two expanders.
+        self.expanders = {} if chip.is_gateway else {bank: [0, 0] for bank in chip.relay_banks}
         self.buses = {}
         self.parts = {}
         self.frames = 0
@@ -115,9 +113,11 @@ class Chip:
         c = self.chip
         if c.is_gateway:
             return
-        if c.has_relays:
-            for i, addr in enumerate((0x26, 0x27)):
-                self.parts[f"relays-{i}"] = devices.Pca9554(addr, lambda v, i=i: self._expander(i, v))
+        for bank in c.relay_banks:
+            for i, addr in enumerate(devices.relay_addresses(bank)):
+                part = devices.Pca9554(addr, lambda v, bank=bank, i=i: self._expander(bank, i, v))
+                part.bus = min(bank, 1)
+                self.parts[f"relays-{bank}-{i}"] = part
         for bus, kind, addr, name, values in c.i2c_devices():
             cls = load_model(self.sup.topo, kind)
             part = cls(addr, name=name, **values)
@@ -139,10 +139,7 @@ class Chip:
         raise RuntimeError(f"{self.chip.name} has no {name!r} (parts: {known})")
 
     def bus_parts(self, number):
-        if number == 0:
-            out = [p for n, p in self.parts.items() if n.startswith("relays-")]
-            return out + [p for p in self.parts.values() if getattr(p, "bus", None) == 0]
-        return [p for p in self.parts.values() if getattr(p, "bus", None) == 1]
+        return [p for p in self.parts.values() if getattr(p, "bus", None) == number]
 
     # Lifecycle
 
@@ -331,22 +328,28 @@ class Chip:
 
     # Relays
 
-    def _expander(self, index, value):
-        before = self.relays()
-        self.expanders[index] = value
-        after = self.relays()
+    def _expander(self, bank, index, value):
+        before = self.relays(bank)
+        self.expanders[bank][index] = value
+        after = self.relays(bank)
         on = [n for n, (a, b) in enumerate(zip(before, after)) if b and not a]
         off = [n for n, (a, b) in enumerate(zip(before, after)) if a and not b]
+        where = f"bank {bank} " if bank else ""
         parts = []
         if on:
-            parts.append(ui.green(f"relay{'s' if len(on) > 1 else ''} {numbers(on)} on"))
+            parts.append(ui.green(f"{where}relay{'s' if len(on) > 1 else ''} {numbers(on)} on"))
+            where = ""
         if off:
-            parts.append(f"relay{'s' if len(off) > 1 else ''} {numbers(off)} off")
+            parts.append(f"{where}relay{'s' if len(off) > 1 else ''} {numbers(off)} off")
         if parts:
-            self.event("relay", "⚡ " + ", ".join(parts), relays=after, on=on, off=off)
+            self.event("relay", "⚡ " + ", ".join(parts), bank=bank, relays=after, on=on, off=off)
 
-    def relays(self):
-        return [bool(self.expanders[e] >> bit & 1) for e, bit in RELAY_BITS]
+    def relays(self, bank=0):
+        """The relays of a bank, on or off; None without that board."""
+        if bank not in self.expanders:
+            return None
+        bits = devices.RELAY_BOARDS[self.chip.relay_banks[bank]]
+        return [bool(self.expanders[bank][e] >> bit & 1) for e, bit in bits]
 
     def status(self):
         c = self.chip
@@ -365,6 +368,9 @@ class Chip:
                 info["motion"] = self.sup.motion_until.get(c.name, 0) > time.time()
             if c.has_relays:
                 info["relays"] = self.relays()
+            if c.relay_banks:
+                info["banks"] = {str(b): {"board": kind, "relays": self.relays(b)}
+                                 for b, kind in c.relay_banks.items()}
             info["parts"] = {n: {**p.state(), "summary": p.summary(),
                                  "values": {k: list(v) for k, v in p.VALUES.items()}}
                              for n, p in self.parts.items() if not n.startswith("relays-")}

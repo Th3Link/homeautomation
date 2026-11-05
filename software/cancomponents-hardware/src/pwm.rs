@@ -4,13 +4,13 @@
 //! value (0-255); bank 0 (the board's own outputs) isn't driven.
 
 use crate::console_log;
+use crate::extension::Device;
 use cancomponents_core::pca9685::{self, BOARDS, CHANNELS};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Timer;
-use esp_hal::i2c::master::I2c;
-use esp_hal::Async;
+use embedded_hal_async::i2c::I2c as _;
 
 /// A `LampGroup` command for [`pwm_task`].
 struct Command {
@@ -24,7 +24,7 @@ static COMMANDS: Channel<CriticalSectionRawMutex, Command, 8> = Channel::new();
 pub struct Pwm;
 
 impl Pwm {
-    pub fn init(i2c: I2c<'static, Async>, spawner: &Spawner) {
+    pub fn init(i2c: Device, spawner: &Spawner) {
         spawner.spawn(pwm_task(i2c).unwrap());
     }
 }
@@ -32,7 +32,7 @@ impl Pwm {
 /// Looks for boards at every bank's address, sets up those found, then
 /// carries out the `LampGroup` commands for them.
 #[embassy_executor::task]
-async fn pwm_task(mut i2c: I2c<'static, Async>) {
+async fn pwm_task(mut i2c: Device) {
     let mut present = 0u16;
     for bank in 1..=BOARDS {
         let Some(address) = pca9685::address(bank) else {
@@ -70,7 +70,7 @@ async fn pwm_task(mut i2c: I2c<'static, Async>) {
 }
 
 /// 1 kHz, open-drain outputs, all channels off.
-async fn setup(i2c: &mut I2c<'static, Async>, address: u8) -> Result<(), ()> {
+async fn setup(i2c: &mut Device, address: u8) -> Result<(), ()> {
     let prescale = pca9685::prescale(pca9685::FREQUENCY_HZ);
     let auto = pca9685::MODE1_AUTO_INCREMENT;
     let steps: [&[u8]; 4] = [
@@ -80,11 +80,11 @@ async fn setup(i2c: &mut I2c<'static, Async>, address: u8) -> Result<(), ()> {
         &[pca9685::REG_MODE1, auto],
     ];
     for step in steps {
-        i2c.write_async(address, step).await.map_err(|_| ())?;
+        i2c.write(address, step).await.map_err(|_| ())?;
     }
     // The oscillator needs 500 µs before the restart.
     Timer::after_millis(1).await;
-    i2c.write_async(
+    i2c.write(
         address,
         &[pca9685::REG_MODE1, pca9685::MODE1_RESTART | auto],
     )
@@ -96,15 +96,10 @@ async fn setup(i2c: &mut I2c<'static, Async>, address: u8) -> Result<(), ()> {
     Ok(())
 }
 
-async fn set_channel(
-    i2c: &mut I2c<'static, Async>,
-    address: u8,
-    channel: usize,
-    duty: u16,
-) -> Result<(), ()> {
+async fn set_channel(i2c: &mut Device, address: u8, channel: usize, duty: u16) -> Result<(), ()> {
     let r = pca9685::channel_registers(duty);
     let register = pca9685::REG_LED0 + 4 * channel as u8;
-    i2c.write_async(address, &[register, r[0], r[1], r[2], r[3]])
+    i2c.write(address, &[register, r[0], r[1], r[2], r[3]])
         .await
         .map_err(|_| ())
 }

@@ -177,8 +177,9 @@ def describe_node(c):
     names = [name for _, _, _, name, _ in c.i2c_devices()] + [s["name"] for s in c.ds18b20]
     if names:
         parts.append(" ".join(names))
-    if c.has_relays:
-        parts.append(f"relays ({c.relay_mode})")
+    if c.relay_banks:
+        boards = " ".join(("own " if b == 0 else f"{b}:") + kind for b, kind in c.relay_banks.items())
+        parts.append(f"relays {boards} ({c.relay_mode})")
     return "  ".join(parts)
 
 
@@ -248,6 +249,13 @@ def relay_bar(relays):
     return "".join(ui.green("●") if r else ui.dim("○") for r in relays)
 
 
+def relay_bars(s):
+    """(label, bar) per relay board: "relays" for the node's own, "bank n"
+    for the extension's."""
+    return [("relays" if b == "0" else f"bank {b}", relay_bar(board["relays"]))
+            for b, board in (s.get("banks") or {}).items()]
+
+
 def cmd_status(args):
     topo = load(args)
     answer = supervisor.request(topo, {"cmd": "status"}, 5)
@@ -267,8 +275,8 @@ def cmd_status(args):
             detail.append(s["ip"] or ui.dim("no network yet"))
             detail.append(ui.cyan(s["url"]))
         else:
-            if s.get("relays") is not None:
-                detail.append("relays " + relay_bar(s["relays"]))
+            for label, bar in relay_bars(s):
+                detail.append(f"{label} {bar}")
             for name, part in (s.get("parts") or {}).items():
                 detail.append(ui.dim(name + " ") + part["summary"])
             if not s["discovered"] and s["state"] == "running":
@@ -338,8 +346,8 @@ def cmd_get(args):
         return
     s = ask(topo, {"cmd": "get", "chip": chip.name})["state"]
     print(ui.bold(s["name"]) + ui.dim(f"  {s['kind']}  {s['state']}"))
-    if s.get("relays") is not None:
-        print(f"  {'relays'.ljust(12)} {relay_bar(s['relays'])}")
+    for label, bar in relay_bars(s):
+        print(f"  {label.ljust(12)} {bar}")
     rows = []
     for name, part in (s.get("parts") or {}).items():
         where = f"0x{part['addr']:02x}" if part.get("addr") is not None else part.get("rom", "")

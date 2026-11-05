@@ -12,6 +12,9 @@ const HAS_LAMPS = [3];
 // A light switch (type 4) drives lamps only through PCA9685 boards on its
 // extension (extension mode 3, PWM), banks 1-16.
 const EXTENSION_PWM = 3;
+// Extension modes with an I2C bus, where relay boards without a µC can sit
+// (banks 1-4): sensors, PWM, relais, legacy sensors.
+const EXTENSION_I2C = [2, 3, 4, 5];
 const IS_HEATING = [9];
 
 const RELAIS_MODES = ['OFF', 'RELAIS', 'SWROLLERSHUTTER', 'HWROLLERSHUTTER'];
@@ -23,7 +26,7 @@ export function Device({ device }) {
 
   return html`
     <${Overview} d=${data} reload=${reload} />
-    ${HAS_RELAYS.includes(data.device_type) && html`<${Relays} d=${data} kind="relay" />`}
+    ${(HAS_RELAYS.includes(data.device_type) || EXTENSION_I2C.includes(data.extension_mode)) && html`<${Relays} d=${data} kind="relay" />`}
     ${HAS_ROLLERSHUTTERS.includes(data.device_type) && html`<${Relays} d=${data} kind="rollershutter" />`}
     ${HAS_LAMPS.includes(data.device_type) && html`<${Lamps} d=${data} />`}
     ${data.device_type === 4 && data.extension_mode === EXTENSION_PWM && html`<${Lamps} d=${data} firstBank=${1} />`}
@@ -108,15 +111,17 @@ function Overview({ d, reload }) {
 function Relays({ d, kind }) {
   const id = d.name || d.key;
   const [number, setNumber] = useState(1);
+  const [bank, setBank] = useState(0);
   const [duration, setDuration] = useState(0);
   const shutter = kind === 'rollershutter';
   const send = (state) => () =>
-    run(() => api.devices[kind](id, number, state, Math.round(duration * 1000)), `${shutter ? 'Rollershutter' : 'Relay'} ${number}: ${state}`);
+    run(() => api.devices[kind](id, number, state, Math.round(duration * 1000), bank), `${shutter ? 'Rollershutter' : 'Relay'} ${bank}/${number}: ${state}`);
   return html`
     <${Section} title=${shutter ? 'Rollershutter' : 'Relays'}>
       ${d.device_type === 9 && html`<p class="muted">The heating controller drives relays 0-10 itself and ignores commands for them; only relay 11 can be switched here. For relays 6-10 see manual mode below.</p>`}
       <div class="row">
-        <${Field} label="Number"><input type="number" min="1" max="16" value=${number} onInput=${(e) => setNumber(+e.target.value)} /><//>
+        <${Field} label="Bank" hint="0 = own board, 1-4 = extension"><input type="number" min="0" max="4" value=${bank} onInput=${(e) => setBank(+e.target.value)} /><//>
+        <${Field} label="Number"><input type="number" min="0" max="15" value=${number} onInput=${(e) => setNumber(+e.target.value)} /><//>
         <${Field} label="Switch back after (s)" hint="0 = stay"><input type="number" min="0" step="0.1" value=${duration} onInput=${(e) => setDuration(+e.target.value)} /><//>
       </div>
       <div class="buttons">

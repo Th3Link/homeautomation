@@ -291,9 +291,9 @@ class Tui:
             self.put(line, x, "PIR      " + ("● motion" if on else "○ quiet"),
                      self.C["yellow"] if on else curses.A_DIM)
             line += 1
-        if s.get("relays") is not None:
-            col = self.put(line, x, "relays   ")
-            for i, r in enumerate(s["relays"]):
+        for bank, board in (s.get("banks") or {}).items():
+            col = self.put(line, x, "relays   " if bank == "0" else f"bank {bank}   ")
+            for i, r in enumerate(board["relays"]):
                 col += self.put(line, x + col, "●" if r else "○", self.C["green"] if r else curses.A_DIM)
                 if i % 4 == 3:
                     col += self.put(line, x + col, " ")

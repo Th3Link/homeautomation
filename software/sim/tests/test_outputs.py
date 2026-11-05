@@ -43,5 +43,5 @@ def test_relay_on_for_a_while(sim, relais):
 
 
 def test_console(relais):
-    assert "relais 2 -> On" in relais.console("relais 2 on")
+    assert "relais 0/2 -> On" in relais.console("relais 2 on")
     relais.console("relais 2 off")

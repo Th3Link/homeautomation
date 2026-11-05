@@ -19,7 +19,7 @@ use crate::device::device;
 use crate::echo_guard;
 use crate::heating;
 use crate::logging::CLI_ACTIVE;
-use crate::relais::send_relais_command;
+use crate::relais::{self, send_relais_command};
 use crate::temperature;
 use bareminal_cli::cli::{Bareminal, CommandWriter};
 use bareminal_macros::Command;
@@ -29,6 +29,7 @@ use cancomponents_core::heating_message::{
     millicelsius_to_raw, HeatingEmergency, HeatingEnergy, HeatingTarget,
 };
 use cancomponents_core::relais::{Message as RelaisMessage, Mode as RelaisMode, State};
+use cancomponents_core::relais_board;
 use core::fmt::Write as _;
 use core::str::FromStr;
 use core::sync::atomic::Ordering;
@@ -176,12 +177,25 @@ enum Commands<'a> {
     #[set(one_of = ["on", "off"])]
     HeatingManual(OnOffArg),
     /// Directly drive one relay/rollershutter channel, for bring-up testing
-    /// without a CAN bus master.
+    /// without a CAN bus master. `bank` picks the board: 0 (default) is
+    /// this node's own, 1-4 the boards on the extension bus.
     Relais {
         #[set(short)]
         num: usize,
         #[set(short, one_of = ["on", "off", "up", "down"])]
         state: RelaisStateArg,
+        #[set(short, default = Some(0))]
+        bank: Option<u8>,
+    },
+    /// Which board sits at a relay bank (0 = this node's own, 1-4 on the
+    /// extension bus): `relais`, the relay module with 12 relays (the
+    /// default), or `ssr`, the SSR module with 16 outputs. Takes effect
+    /// after restart.
+    RelaisBoard {
+        #[set(short, min = 0, max = 4)]
+        bank: u8,
+        #[set(short, one_of = ["relais", "ssr"])]
+        kind: &'a str,
     },
     /// Broadcast a CAN Ping, for bus-wiring sanity checks.
     Ping,
@@ -461,7 +475,12 @@ async fn handle_command(
             respond(writer, "lost sensors are dropped within 10 s").await
         }
         Commands::SensorInterval(secs) => respond(writer, &cmd_sensor_interval(secs).await).await,
-        Commands::Relais { num, state } => respond(writer, &cmd_relais(num, state).await).await,
+        Commands::Relais { num, state, bank } => {
+            respond(writer, &cmd_relais(bank.unwrap_or(0), num, state).await).await
+        }
+        Commands::RelaisBoard { bank, kind } => {
+            respond(writer, &cmd_relais_board(bank, kind == "ssr").await).await
+        }
         Commands::Ping => {
             send_can_message(CanMessageType::Ping, &[], false).await;
             respond(writer, "ping sent").await
@@ -507,6 +526,16 @@ async fn cmd_show(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         &fmt_msg(format_args!("extension_mode: {extension_mode:?}")),
     )
     .await?;
+    let (present, ssr) = relais::boards();
+    let mut banks: String<LINE_CAP> = String::new();
+    for bank in (0..relais_board::BANKS as u8).filter(|b| present & (1 << b) != 0) {
+        let kind = relais_board::Kind::from_mask(ssr, bank);
+        let _ = write!(banks, " {bank}={}", kind.name());
+    }
+    if banks.is_empty() {
+        let _ = banks.push_str(" none");
+    }
+    respond(writer, &fmt_msg(format_args!("relais_boards:{banks}"))).await?;
     match custom_string {
         Some(s) => respond(writer, &fmt_msg(format_args!("custom_string: {s}"))).await?,
         None => respond(writer, "custom_string: (unset)").await?,
@@ -963,8 +992,28 @@ async fn cmd_heating_manual(enabled: bool) -> String<LINE_CAP> {
     }
 }
 
-async fn cmd_relais(num: usize, state: RelaisStateArg) -> String<LINE_CAP> {
-    if cancomponents_core::heating::is_controlled_relay(num)
+async fn cmd_relais_board(bank: u8, ssr: bool) -> String<LINE_CAP> {
+    let mut cfg = config().await;
+    let mask = cfg.get_u8(config::Key::RelaisBoards).await.unwrap_or(0);
+    let mask = if ssr {
+        mask | (1 << bank)
+    } else {
+        mask & !(1 << bank)
+    };
+    if cfg.set_u8(config::Key::RelaisBoards, mask).await.is_err() {
+        return str_msg("failed to persist relais_board");
+    }
+    let kind = relais_board::Kind::from_mask(mask, bank);
+    fmt_msg(format_args!(
+        "relais bank {bank}: {} board with {} channels (takes effect after restart)",
+        kind.name(),
+        kind.channels()
+    ))
+}
+
+async fn cmd_relais(bank: u8, num: usize, state: RelaisStateArg) -> String<LINE_CAP> {
+    if bank == 0
+        && cancomponents_core::heating::is_controlled_relay(num)
         && heating::is_heating_controller().await
     {
         // Rod relays: only the controller, always. The others only in
@@ -994,8 +1043,8 @@ async fn cmd_relais(num: usize, state: RelaisStateArg) -> String<LINE_CAP> {
         num,
         state,
         duration: Duration::from_millis(0),
-        bank: 0,
+        bank,
     })
     .await;
-    fmt_msg(format_args!("relais {num} -> {state:?}"))
+    fmt_msg(format_args!("relais {bank}/{num} -> {state:?}"))
 }

@@ -124,6 +124,24 @@ def invert(f, target, lo, hi):
 
 # Relays
 
+# Relay boards (cancomponents-core relais_board.rs): logical relay ->
+# (expander, bit). The relay module has 12 relays, the SSR module 16
+# outputs in order.
+RELAY_BOARDS = {
+    "relais": ((0, 3), (0, 2), (0, 1), (0, 7), (0, 6), (0, 5), (0, 4),
+               (1, 3), (1, 2), (1, 1), (1, 7), (1, 6)),
+    "ssr": tuple((n // 8, n % 8) for n in range(16)),
+}
+
+
+def relay_addresses(bank):
+    """The two expanders of relay bank 0 (the node's own board, I2C0) or
+    1-4 (on the extension bus, by the A1/A2 solder bridges)."""
+    if bank == 0:
+        return (0x26, 0x27)
+    first = 0x20 + 2 * (bank - 1)
+    return (first, first + 1)
+
 
 class Pca9554(Device):
     """8-bit I/O expander: registers 0 input, 1 output, 2 polarity,

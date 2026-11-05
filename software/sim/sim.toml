@@ -7,7 +7,7 @@
 # Node:     name, type (button | relay | shutter | heating), id (1-255),
 #           gateway (whose bus it is on) or bus, hwrev (button 1/2,
 #           relay 1/2, shutter 1), extension (off | button | sensors |
-#           pwm), relay_mode (relay: off | relais, shutter:
+#           pwm | relais), relay_mode (relay: off | relais, shutter:
 #           software_rollershutter | hardware_rollershutter), console (more
 #           console commands)
 #   extension = "sensors":  sensors = ["veml7700", "bme680", "nightlight"]
@@ -15,7 +15,12 @@
 #           start values per part: [node.bme680] temperature = 22, or
 #           lux = 40 for the VEML7700
 #   extension = "pwm":      pwm_boards = 1-16 (PCA9685 at 0x40, 0x41, …)
-#   relay and heating boards: ds18b20 = [21.5, 48.0] on the 1-wire header
+#   relay and heating boards: ds18b20 = [21.5, 48.0] on the 1-wire header;
+#           relay_board = "ssr" for the SSR module (16 outputs) instead of
+#           the relay module (12 relays)
+#   relay boards without a µC on the extension bus (sensors, pwm or relais):
+#           relay_boards = ["relais", "ssr"] for banks 1 and 2, or
+#           { 4 = "relais" } (bank 4 = the factory solder bridges)
 #   your own I2C parts:     [[node.i2c]] bus, addr, model = "file.py:Class"
 #
 # The firmware is the release build in target/; another one with
@@ -99,6 +104,7 @@ type = "button"
 id = 22
 gateway = "gw-og"
 extension = "pwm"
+relay_boards = ["relais", "ssr"]
 
 [[node]]
 name = "relais-og"

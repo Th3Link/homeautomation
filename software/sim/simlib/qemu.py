@@ -96,11 +96,10 @@ def argv(qemu, chip, flash, efuse, *, run_dir=None, can=True, net="none", onewir
 
 def i2c_buses(chip):
     """Which I2C controllers have simulated devices: I2C0 the relay
-    expanders, I2C1 the extension (sensors or PWM boards), and either one
-    your own devices."""
+    expanders, I2C1 the extension (sensors, PWM or relay boards), and
+    either one your own devices."""
     if chip.is_gateway:
         return []
     used = {bus for bus, *_ in chip.i2c_devices()}
-    if chip.has_relays:
-        used.add(0)
+    used |= {min(bank, 1) for bank in chip.relay_banks}
     return sorted(used)

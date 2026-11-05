@@ -355,7 +355,8 @@ gateway entry point built it** — reproduced as-is (not unified), since
 real nodes only ever see whatever the deployed gateway actually sends:
 
 **MQTT-originated command** (`canbus/relais_command/#` /
-`canbus/rollershutter_command/#`) — 8 bytes, no bank field:
+`canbus/rollershutter_command/#`, body `<num>/<state>/<stop_time_ms>`) —
+8 bytes, no bank field:
 
 ```text
 byte:  0     1      2..5              6  7
@@ -364,6 +365,11 @@ byte:  0     1      2..5              6  7
       │ u8 │ u8   │ u32, LE         │  │  │
       └────┴──────┴─────────────────┴──┴──┘
 ```
+
+A node reads byte 5 as the bank all the same, so a stop time of 2²⁴ ms or
+more lands on another bank. With a fourth field, `<num>/<state>/<time_ms>/<bank>`,
+the gateway sends the layout below instead (the time then limited to 24
+bits).
 
 **`/control.json` RPC command**, and every **state report**
 (`RelaisState`/`RollershutterState`) — 8 bytes, matching
@@ -391,6 +397,21 @@ state as `0`/`1`, Rust nodes echo the commanded value (`3` = on). The
 original gateway published only byte 0, i.e. the channel number, as
 `canbus/relais_state/<device>`; that topic stays for compatibility, and
 `canbus/relais_state/<device>/<bank>/<number>` carries the state.
+
+**Banks** pick the relay board, as in the original firmware. Bank 0 is the
+node's own board (a relay, rollershutter or heating node; PCA9534s at
+0x26/0x27). Banks 1-4 are boards without a µC on the node's extension bus,
+their JP5/JP6 bridged onto the extension connector: bank `n` is the
+expander pair at `0x20 + 2·(n−1)`, set with the A1/A2 solder bridges (the
+factory setting is bank 4). Any node whose extension is in an I2C mode
+(`sensors`, `pwm`, `relais`, `legacy_sensors`) looks for them at start, so
+a light switch can drive four boards next to its sensors. A board is the
+relay module with 12 relays or the SSR module with 16 outputs; the console
+command `relais-board <bank> relais|ssr` says which (default `relais`), and
+`show` lists the boards found. The relay mode (`relais-mode`) applies to
+all banks. A command for a bank without a board, or a channel the board
+doesn't have, is answered with a `DeviceError` (`Relais`, `InvalidData`,
+`local_code` = bank, detail = channel).
 
 ## Lamps (`LampGroup` / `Nightlight`)
 

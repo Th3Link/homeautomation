@@ -275,7 +275,14 @@ class ChipHandle:
 
     @property
     def relays(self):
+        """The relays of the node's own board, on or off."""
         return self.status().get("relays")
+
+    def bank(self, bank):
+        """The relays of relay bank `bank` (0 = own board, 1-4 on the
+        extension bus), on or off; None without that board."""
+        board = (self.status().get("banks") or {}).get(str(bank))
+        return board and board["relays"]
 
     def part(self, name):
         return PartHandle(self, name)

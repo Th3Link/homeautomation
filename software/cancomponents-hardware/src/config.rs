@@ -50,6 +50,10 @@ pub enum Key {
     /// The air quality calculation's calibration of the BME680's gas sensor
     /// (`bme68x_iaq_co2::AirQuality::save`, 422 bytes).
     AirQualityState = 13,
+    /// Which relay banks are SSR boards with 16 outputs (`u8`, bit `n` =
+    /// bank `n`); the others, and all while unset, are relay modules with
+    /// 12. See `cancomponents_core::relais_board`.
+    RelaisBoards = 14,
 }
 
 /// Flash key of the tank sensor at position 0 (top); position `n` lives at

@@ -106,10 +106,10 @@ export const devices = {
   update: (device, changes) => patch(`/devices/${seg(device)}`, changes),
   action: (device, action) => post(`/devices/${seg(device)}/${action}`),
   silence: (device, on) => put(`/devices/${seg(device)}/silence`, { on }),
-  relay: (device, number, state, durationMs) =>
-    put(`/devices/${seg(device)}/relays/${number}`, { state, duration_ms: durationMs }),
-  rollershutter: (device, number, state, durationMs) =>
-    put(`/devices/${seg(device)}/rollershutters/${number}`, { state, duration_ms: durationMs }),
+  relay: (device, number, state, durationMs, bank = 0) =>
+    put(`/devices/${seg(device)}/relays/${number}`, { state, duration_ms: durationMs, bank }),
+  rollershutter: (device, number, state, durationMs, bank = 0) =>
+    put(`/devices/${seg(device)}/rollershutters/${number}`, { state, duration_ms: durationMs, bank }),
   lamps: (device, bank, value, bitmask) =>
     put(`/devices/${seg(device)}/lamps/${bank}`, { value, bitmask }),
   heating: (device, kind, body) => put(`/devices/${seg(device)}/heating/${kind}`, body),
