@@ -27,7 +27,8 @@ whole system, plus the documentation tying it together.
   back the gateway's MQTT log/debug topics.
 - **`software/sim/`** — `./sim up`: the unchanged gateway and node
   firmware in QEMU, several gateways with their nodes on virtual CAN buses;
-  press buttons, trigger the PIR, watch relays and frames.
+  press buttons, set what the sensors measure, watch relays and frames, in
+  a TUI, from Python scripts or in pytest.
 - **`software/legacy/`** — the original C++/ESP-IDF implementation
   (`mqtt_gateway`, `cancomponents`, and their shared `library`), kept for
   reference. No longer built by CI; superseded by the Rust crates above.

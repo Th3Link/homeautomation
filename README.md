@@ -29,7 +29,8 @@ workspace under `software/`:
   Python tool for reading back the gateway's MQTT log/debug topics.
 - [`sim/`](software/sim) — `./sim up`: the unchanged gateway and node
   firmware in QEMU, several gateways with their nodes on virtual CAN buses;
-  press buttons, trigger the PIR, watch relays and frames.
+  press buttons, set what the sensors measure, watch relays and frames, in
+  a TUI, from Python scripts or in pytest.
 - [`legacy/`](software/legacy) — the original C++/ESP-IDF implementation,
   kept for reference. No longer built by CI.
 

@@ -1,10 +1,12 @@
 """The simulated installation: gateways and nodes from a TOML file, and what
 the firmware does with each pin and I2C bus (cancomponents-hardware
-src/bin/main.rs, extension.rs, sensors.rs)."""
+src/bin/main.rs, extension.rs, sensors.rs, pwm.rs, temperature.rs)."""
 
 import hashlib
 import os
 import tomllib
+
+from . import devices
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,19 +18,22 @@ REPO = SIM_DIR.parent.parent
 NODE_TYPES = {
     "button": {"device_type": 4, "hwrevs": (1, 2), "hwrev": 1, "relays": False},
     "relay": {"device_type": 5, "hwrevs": (1, 2), "hwrev": 2, "relays": True,
-              "relay_mode": "relais"},
+              "relay_mode": "relais", "onewire": True},
     "shutter": {"device_type": 7, "hwrevs": (1,), "hwrev": 1, "relays": True,
                 "relay_mode": "software_rollershutter"},
     "heating": {"device_type": 9, "hwrevs": (1, 2), "hwrev": 2, "relays": True,
-                "relay_mode": "relais"},
+                "relay_mode": "relais", "onewire": True},
 }
 RELAY_MODES = ("off", "relais", "software_rollershutter", "hardware_rollershutter")
-EXTENSIONS = ("off", "button", "sensors")
+EXTENSIONS = ("off", "button", "sensors", "pwm")
+# The relay board's 1-wire header (DS18B20s).
+ONEWIRE_PIN = 4
 
 # Buttons 0-3 on the board, active low with pull-ups.
 BUTTON_PINS = {1: (33, 35, 12, 34), 2: (25, 26, 5, 15)}
 # The extension header: buttons 4-7 in "button" mode; in "sensors" mode
-# SDA, SCL (I2C1), 1-wire and the PIR (active high, pull-down).
+# SDA, SCL (I2C1), 1-wire and the PIR (active high, pull-down); in "pwm"
+# mode SDA and SCL of the PCA9685 boards.
 EXTENSION_PINS = {
     ("button", 1): (4, 16, 17, 18),
     ("button", 2): (4, 16, 17, 18),
@@ -85,7 +90,14 @@ class Node(Chip):
     hwrev: int = 1
     extension: str = "off"
     relay_mode: str = "off"
-    lux: float = 200.0
+    # The sensor extension's parts, and initial values per part.
+    sensors: tuple = devices.DEFAULT_SENSORS
+    values: dict = field(default_factory=dict)
+    pwm_boards: int = 1
+    # DS18B20s: {"name", "serial", "temperature"}.
+    ds18b20: list = field(default_factory=list)
+    # Your own I2C devices: {"bus", "addr", "model", values…}.
+    custom: list = field(default_factory=list)
 
     @property
     def device_type(self):
@@ -98,6 +110,30 @@ class Node(Chip):
     @property
     def has_sensors(self):
         return self.extension == "sensors"
+
+    @property
+    def has_onewire(self):
+        return NODE_TYPES[self.kind].get("onewire", False)
+
+    @property
+    def lux(self):
+        return self.values.get("veml7700", {}).get("lux", devices.Veml7700.DEFAULTS["lux"])
+
+    def i2c_devices(self):
+        """(bus, kind, address, name, initial values) of the parts on the
+        I2C buses besides the relay expanders."""
+        out = []
+        if self.has_sensors:
+            for kind in self.sensors:
+                out.append((1, kind, devices.SENSOR_ADDRESSES[kind], kind, self.values.get(kind, {})))
+        if self.extension == "pwm":
+            for bank in range(1, self.pwm_boards + 1):
+                out.append((1, "pca9685", 0x3F + bank, f"pwm-{bank}", {}))
+        for c in self.custom:
+            values = {k: v for k, v in c.items() if k not in ("bus", "addr", "model", "name")}
+            out.append((c["bus"], c["model"], c["addr"], c.get("name", c["model"].split(":")[-1].lower()),
+                        values))
+        return out
 
     @property
     def can_key(self):
@@ -175,7 +211,8 @@ class Topology:
                 hwrev=n.get("hwrev", spec["hwrev"]),
                 extension=n.get("extension", "off"),
                 relay_mode=n.get("relay_mode", spec.get("relay_mode", "off")),
-                lux=float(n.get("lux", 200)))
+                pwm_boards=n.get("pwm_boards", 1))
+            self._parts(node, n)
             if not 1 <= node.device_id <= 255:
                 raise TopologyError(f"{name}: id must be 1-255")
             if node.hwrev not in spec["hwrevs"]:
@@ -187,6 +224,49 @@ class Topology:
             self.nodes.append(node)
             index += 1
         self._check_unique()
+
+    def _parts(self, node, n):
+        name = node.name
+        sensors = n.get("sensors", list(devices.DEFAULT_SENSORS))
+        for kind in sensors:
+            if kind not in devices.SENSOR_ADDRESSES:
+                raise TopologyError(f"{name}: sensors are {', '.join(devices.SENSOR_ADDRESSES)}")
+        if "bme680" in sensors and "bme280" in sensors:
+            raise TopologyError(f"{name}: the BME680 and BME280 can't both be on the board")
+        node.sensors = tuple(sensors)
+        if "lux" in n:
+            node.values["veml7700"] = {"lux": float(n["lux"])}
+        for kind, cls in devices.KINDS.items():
+            if isinstance(n.get(kind), dict):
+                values = n[kind]
+                bad = [k for k in values if k not in cls.VALUES]
+                if bad:
+                    raise TopologyError(f"{name}: a {kind} has no {', '.join(bad)} "
+                                        f"(it has {', '.join(cls.VALUES) or 'nothing to set'})")
+                node.values[kind] = values
+        if not 1 <= node.pwm_boards <= 16:
+            raise TopologyError(f"{name}: pwm_boards must be 1-16")
+        sensors_1w = n.get("ds18b20", [])
+        if sensors_1w and not node.has_onewire:
+            raise TopologyError(f"{name}: only relay and heating boards have the 1-wire header")
+        for i, entry in enumerate(sensors_1w):
+            entry = entry if isinstance(entry, dict) else {"temperature": entry}
+            serial = entry.get("serial", node.index << 16 | (i + 1))
+            node.ds18b20.append({"name": entry.get("name", f"ds18b20-{i}"), "serial": serial,
+                                 "temperature": float(entry.get("temperature", 21.0))})
+        for c in n.get("i2c", []):
+            if not {"bus", "addr", "model"} <= set(c):
+                raise TopologyError(f"{name}: an [[node.i2c]] device needs bus, addr and model")
+            if c["bus"] not in (0, 1):
+                raise TopologyError(f"{name}: I2C bus 0 or 1")
+            node.custom.append(c)
+        taken = {}
+        for bus, _kind, addr, part, _ in node.i2c_devices():
+            if (bus, addr) in taken:
+                raise TopologyError(f"{name}: {part} and {taken[bus, addr]} both at 0x{addr:02x}")
+            taken[bus, addr] = part
+        if node.has_relays and any(b == 0 and a in (0x26, 0x27) for b, a in taken):
+            raise TopologyError(f"{name}: 0x26 and 0x27 on bus 0 are the relay expanders")
 
     def _name(self, entry):
         name = entry.get("name", "")

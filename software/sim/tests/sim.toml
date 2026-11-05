@@ -1,0 +1,38 @@
+# The installation the tests run against: one gateway on its own bus, so
+# the tests don't meet the chips of `./sim up` with sim.toml. Create the
+# bus once per boot with `./sim -f tests/sim.toml net`.
+
+[[gateway]]
+name = "gw"
+bus = "vcan-test"
+https = 8543
+http = 8180
+
+# A light switch with the full sensor extension.
+[[node]]
+name = "taster"
+type = "button"
+id = 10
+gateway = "gw"
+extension = "sensors"
+sensors = ["veml7700", "bme680", "scd30", "nightlight"]
+console = ["sensor-interval 10"]
+
+# A relay board with two DS18B20s and four extension buttons.
+[[node]]
+name = "relais"
+type = "relay"
+id = 128
+gateway = "gw"
+extension = "button"
+ds18b20 = [21.0, 45.0]
+console = ["sensor-interval 10"]
+
+# A light switch driving two PCA9685 PWM boards.
+[[node]]
+name = "pwm"
+type = "button"
+id = 30
+gateway = "gw"
+extension = "pwm"
+pwm_boards = 2

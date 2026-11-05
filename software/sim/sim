@@ -1,37 +1,44 @@
 #!/usr/bin/env python3
 """sim — the gateway and node firmware, unchanged, in QEMU on virtual CAN
-buses, with buttons, PIR, relays and light you can play.
+buses, with buttons, PIR, relays and sensors you can play.
 
-  sim up                      start everything in sim.toml, show what happens
-  sim status                  what runs, IPs, relays
-  sim press taster-flur 0     press a button (single, double, triple, hold)
-  sim motion taster-flur      the PIR sees someone
-  sim lux taster-flur 20      make it dark
-  sim console gw-eg           the chip's serial console (Ctrl-] leaves)
-  sim web gw-eg               open the gateway's web UI
-  sim can                     the CAN traffic, decoded
-  sim log taster-flur -f      the chip's serial log
-  sim build                   images from the release builds (up does this too)
-  sim reset relais-keller     a factory-fresh image for a chip
-  sim doctor                  check the setup
+  sim up                        start everything in sim.toml, show what happens
+  sim tui                       the same in one screen, keys for everything
+  sim status                    what runs, IPs, relays, sensor values
+  sim press taster-flur 0       press a button (single, double, triple, hold)
+  sim motion taster-flur        the PIR sees someone
+  sim set taster-flur bme680 temperature=25 humidity=60
+  sim get taster-flur           every part of a chip and its values
+  sim i2c taster-flur           the I2C traffic; also scan, read, write, dump
+  sim run scenario.py           a script with `sim` (simlib/client.py)
+  sim console gw-eg             the chip's serial console (Ctrl-] leaves)
+  sim web gw-eg                 open the gateway's web UI
+  sim can                       the CAN traffic, decoded
+  sim log taster-flur -f        the chip's serial log
+  sim net                       create the vcan interfaces (up does it too)
+  sim doctor                    check the setup
 
-Chips can be named by a unique prefix: `sim press taster-f 0`.
+Chips and parts can be named by a unique prefix:
+`sim set taster-f bme temperature=20`.
 """
 
 import argparse
 import concurrent.futures
+import json
 import os
+import runpy
 import select
+import shutil
+import socket
+import subprocess
 import sys
-import termios
 import time
-import tty
 import webbrowser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from simlib import can, images, qemu, supervisor, ui  # noqa: E402
+from simlib import can, console, images, qemu, supervisor, ui  # noqa: E402
 from simlib.topology import SIM_DIR, Topology, TopologyError  # noqa: E402
 
 
@@ -58,24 +65,62 @@ def ask(topo, req, timeout=None):
     return answer
 
 
-def missing_buses(topo, chips):
-    return [b for b in sorted({c.bus for c in chips}) if not can.interface_exists(b)]
+def running(topo):
+    return supervisor.request(topo, {"cmd": "status"}, 2) is not None
 
 
-def vcan_hint(buses):
-    lines = ["sudo modprobe vcan"]
+# CAN interfaces
+
+
+def missing_buses(buses):
+    return [b for b in sorted(set(buses)) if not can.interface_exists(b)]
+
+
+def net_commands(buses, down=False):
+    if down:
+        return [["ip", "link", "delete", b] for b in buses]
+    out = [["modprobe", "vcan"]]
     for b in buses:
-        lines.append(f"sudo ip link add {b} type vcan && sudo ip link set {b} up")
-    return "\n  ".join(lines)
+        out += [["ip", "link", "add", b, "type", "vcan"], ["ip", "link", "set", b, "up"]]
+    return out
 
 
-# Commands
+def ensure_buses(buses):
+    """Creates missing vcan interfaces with sudo (asks for the password in
+    a terminal)."""
+    missing = missing_buses(buses)
+    if not missing:
+        return
+    commands = net_commands(missing)
+    hint = "\n  ".join("sudo " + " ".join(c) for c in commands)
+    if not sys.stdin.isatty() and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode:
+        ui.die(f"no CAN interface {', '.join(missing)}", "create it (once per boot):\n  " + hint)
+    print(ui.dim(f"· creating {', '.join(missing)} (sudo)"))
+    for c in commands:
+        if subprocess.run(["sudo", *c]).returncode:
+            ui.die(f"couldn't run: sudo {' '.join(c)}", "create them by hand:\n  " + hint)
+
+
+def cmd_net(args):
+    topo = load(args)
+    buses = topo.buses
+    if args.action == "down":
+        present = [b for b in buses if can.interface_exists(b)]
+        for c in net_commands(present, down=True):
+            subprocess.run(["sudo", *c])
+        print(ui.green("✓ ") + (f"removed {', '.join(present)}" if present else "nothing to remove"))
+        return
+    ensure_buses(buses)
+    print(ui.green("✓ ") + ", ".join(buses) + " up")
+
+
+# Images and running
 
 
 def cmd_build(args, topo=None, chips=None):
     topo = topo or load(args)
     chips = chips if chips is not None else [chip_or_die(topo, n) for n in args.chips] or topo.chips
-    if supervisor.request(topo, {"cmd": "status"}, 2) is not None:
+    if running(topo):
         ui.die("the simulation is running", "stop it first: ./sim down")
     try:
         qemu_path = qemu.find()
@@ -123,14 +168,28 @@ def cmd_reset(args):
     cmd_build(args)
 
 
+def describe_node(c):
+    parts = [f"{c.bus}", f"id {c.device_id}"]
+    if c.buttons:
+        parts.append(f"buttons {','.join(map(str, c.buttons))}")
+    if c.pir_pin is not None:
+        parts.append("PIR")
+    names = [name for _, _, _, name, _ in c.i2c_devices()] + [s["name"] for s in c.ds18b20]
+    if names:
+        parts.append(" ".join(names))
+    if c.has_relays:
+        parts.append(f"relays ({c.relay_mode})")
+    return "  ".join(parts)
+
+
 def cmd_up(args):
     topo = load(args)
     chips = [chip_or_die(topo, n) for n in args.chips] or topo.chips
-    if supervisor.request(topo, {"cmd": "status"}, 2) is not None:
+    if running(topo):
         ui.die("the simulation is already running", "./sim status shows it, ./sim down stops it")
-    missing = missing_buses(topo, chips)
-    if missing:
-        ui.die(f"no CAN interface {', '.join(missing)}", "create it (once per boot):\n  " + vcan_hint(missing))
+    ensure_buses([c.bus for c in chips])
+    if args.detach:
+        return detach(args, topo)
     args.quiet_build = True
     imgs, qemu_path = cmd_build(args, topo, chips)
 
@@ -139,23 +198,38 @@ def cmd_up(args):
     print(ui.bold(f"  {len(chips)} chips") + ui.dim(f"  from {topo.path}"))
     for c in chips:
         name = ui.chip_name(c.name, c.is_gateway, width)
-        if c.is_gateway:
-            detail = f"{c.bus}  {ui.cyan(c.url)}"
-        else:
-            parts = [f"{c.bus}", f"id {c.device_id}"]
-            if c.buttons:
-                parts.append(f"buttons {','.join(map(str, c.buttons))}")
-            if c.pir_pin is not None:
-                parts.append("PIR")
-            if c.has_sensors:
-                parts.append(f"{c.lux:g} lx")
-            if c.has_relays:
-                parts.append(f"relays ({c.relay_mode})")
-            detail = "  ".join(parts)
+        detail = f"{c.bus}  {ui.cyan(c.url)}" if c.is_gateway else describe_node(c)
         print(f"  {name}  {ui.dim(c.kind.ljust(8))} {detail}")
-    print(ui.dim("\n  Ctrl-C stops everything. In another terminal: ./sim status, ./sim press …, ./sim console …\n"))
-    sup = supervisor.Supervisor(topo, imgs, qemu_path, chips, show_all=args.all, serial=args.serial)
+    print(ui.dim("\n  Ctrl-C stops everything. In another terminal: ./sim tui, ./sim status, "
+                 "./sim press …, ./sim set …\n"))
+    sup = supervisor.Supervisor(topo, imgs, qemu_path, chips, show_all=args.all,
+                                serial=args.serial, show_i2c=args.i2c)
     sup.run()
+
+
+def detach(args, topo):
+    """`up` in the background, its output in .sim/<topology>/up.log."""
+    log = topo.state_dir / "up.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    argv = [sys.executable, str(Path(__file__).resolve()), "-f", str(topo.path), "up", *args.chips]
+    for flag in ("node_elf", "gateway_elf"):
+        if getattr(args, flag):
+            argv += [f"--{flag.replace('_', '-')}", getattr(args, flag)]
+    env = dict(os.environ, NO_COLOR="1")
+    with open(log, "w") as out:
+        proc = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                start_new_session=True, env=env)
+    print(ui.dim(f"· starting in the background, log: {log}"))
+    deadline = time.time() + args.timeout
+    while time.time() < deadline:
+        if running(topo):
+            print(ui.green("✓ ") + f"running (pid {proc.pid}); ./sim tui, ./sim status, ./sim down")
+            return
+        if proc.poll() is not None:
+            sys.stdout.write(log.read_text()[-3000:])
+            ui.die("sim up stopped", f"see {log}")
+        time.sleep(0.3)
+    ui.die(f"not running after {args.timeout:g} s", f"see {log}")
 
 
 def cmd_down(args):
@@ -163,7 +237,7 @@ def cmd_down(args):
     if supervisor.request(topo, {"cmd": "down"}, 5) is None:
         ui.die("the simulation isn't running")
     for _ in range(150):
-        if supervisor.request(topo, {"cmd": "status"}, 1) is None:
+        if not running(topo):
             print(ui.green("✓ stopped"))
             return
         time.sleep(0.1)
@@ -195,8 +269,8 @@ def cmd_status(args):
         else:
             if s.get("relays") is not None:
                 detail.append("relays " + relay_bar(s["relays"]))
-            if s.get("lux") is not None:
-                detail.append(f"{s['lux']:g} lx")
+            for name, part in (s.get("parts") or {}).items():
+                detail.append(ui.dim(name + " ") + part["summary"])
             if not s["discovered"] and s["state"] == "running":
                 detail.append(ui.yellow("not discovered"))
         rows.append([
@@ -209,7 +283,11 @@ def cmd_status(args):
     if answer["events"]:
         print()
         for e in answer["events"][-6:]:
-            print(ui.dim("  " + e))
+            stamp = time.strftime("%H:%M:%S", time.localtime(e["t"]))
+            print(ui.dim(f"  {stamp} {e['chip']} {e['text']}"))
+
+
+# Playing
 
 
 def cmd_press(args):
@@ -235,6 +313,44 @@ def cmd_lux(args):
     print(ui.green("✓ ") + f"{chip.name}: {args.lux:g} lx" + ui.dim("  (the node reports changes over 10 %)"))
 
 
+def cmd_set(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    values = {}
+    for v in args.values:
+        key, eq, value = v.partition("=")
+        if not eq:
+            ui.die(f"{v!r}: key=value, for example temperature=21.5")
+        values[key] = value
+    answer = ask(topo, {"cmd": "set", "chip": chip.name, "device": args.part, "values": values})
+    state = answer["state"]
+    print(ui.green("✓ ") + f"{chip.name} {args.part}: " +
+          ", ".join(f"{k} {state[k]:g}" for k in values if k in state))
+
+
+def cmd_get(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    if args.part:
+        state = ask(topo, {"cmd": "get", "chip": chip.name, "device": args.part})["state"]
+        for k, v in state.items():
+            print(f"{ui.dim(k.ljust(12))} {v}")
+        return
+    s = ask(topo, {"cmd": "get", "chip": chip.name})["state"]
+    print(ui.bold(s["name"]) + ui.dim(f"  {s['kind']}  {s['state']}"))
+    if s.get("relays") is not None:
+        print(f"  {'relays'.ljust(12)} {relay_bar(s['relays'])}")
+    rows = []
+    for name, part in (s.get("parts") or {}).items():
+        where = f"0x{part['addr']:02x}" if part.get("addr") is not None else part.get("rom", "")
+        settable = ", ".join(part.get("values", {})) or ui.dim("(output only)")
+        rows.append(["  " + name, part["kind"], where, part["summary"], ui.dim(settable)])
+    if rows:
+        ui.table(["  PART", "KIND", "WHERE", "NOW", "SETTABLE"], rows)
+    elif s["kind"] != "gateway":
+        print(ui.dim("  no simulated parts (extension = \"sensors\" or \"pwm\", ds18b20 = […])"))
+
+
 def cmd_pin(args):
     topo = load(args)
     chip = chip_or_die(topo, args.chip)
@@ -249,37 +365,121 @@ def cmd_restart(args):
         print(ui.green("✓ ") + f"{chip.name} restarted")
 
 
+def number(text):
+    try:
+        return int(text, 0)
+    except ValueError:
+        ui.die(f"{text!r} isn't a number (0x77, 119, 0b1110111)")
+
+
+def cmd_i2c(args):
+    topo = load(args)
+    chip = chip_or_die(topo, args.chip)
+    op, rest = (args.op[0], args.op[1:]) if args.op else ("trace", [])
+    base = {"cmd": "i2c", "chip": chip.name, "bus": args.bus}
+    if op == "trace":
+        follow(topo, kinds=["i2c"], chips=[chip.name],
+               title=f"{chip.name} I2C, every transaction · Ctrl-C")
+    elif op == "scan":
+        for d in ask(topo, {**base, "scan": True})["devices"]:
+            print(f"  0x{d['addr']:02x}  {d['name']}" + ui.dim(f"  ({d['kind']})" if d["kind"] != d["name"] else ""))
+    elif op == "read":
+        if not rest:
+            ui.die("read <addr> [<register> [<count>]]")
+        addr = number(rest[0])
+        write = [number(rest[1])] if len(rest) > 1 else []
+        count = number(rest[2]) if len(rest) > 2 else 1
+        data = ask(topo, {**base, "addr": addr, "write": write, "read": count})["read"]
+        print(" ".join(f"{b:02x}" for b in data))
+    elif op == "write":
+        if len(rest) < 2:
+            ui.die("write <addr> <byte>…  (the first byte is the register for most parts)")
+        ask(topo, {**base, "addr": number(rest[0]), "write": [number(b) for b in rest[1:]]})
+        print(ui.green("✓ ") + "written")
+    elif op == "dump":
+        if not rest:
+            ui.die("dump <addr>")
+        addr = number(rest[0])
+        found = {d["addr"]: d for d in ask(topo, {**base, "scan": True})["devices"]}
+        if addr not in found:
+            ui.die(f"nothing answers at 0x{addr:02x} on bus {args.bus}")
+        if not found[addr]["registers"]:
+            ui.die(f"0x{addr:02x} ({found[addr]['name']}) has no register map to dump",
+                   f"read it instead: ./sim i2c {chip.name} read 0x{addr:02x}")
+        print(ui.dim("     " + " ".join(f"{i:2x}" for i in range(16))))
+        for row in range(16):
+            data = ask(topo, {**base, "addr": addr, "write": [row * 16], "read": 16})["read"]
+            print(ui.dim(f"{row * 16:02x}:  ") + " ".join(f"{b:02x}" for b in data))
+    else:
+        ui.die(f"unknown i2c operation {op!r}", "trace (default), scan, read, write, dump")
+
+
+def follow(topo, kinds=None, chips=None, title=None):
+    sock = supervisor.request(topo, {"cmd": "events", "kinds": kinds, "chips": chips})
+    if sock is None:
+        ui.die("the simulation isn't running", "start it with: ./sim up")
+    if title:
+        print(ui.dim(f"── {title} ──"))
+    width = max(len(c.name) for c in topo.chips)
+    try:
+        f = sock.makefile("rb")
+        f.readline()
+        for line in f:
+            e = json.loads(line)
+            stamp = time.strftime("%H:%M:%S", time.localtime(e["t"]))
+            print(f"{ui.dim(stamp)}  {ui.chip_name(e['chip'], width=width)}  {e['text']}", flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
+
+
+def cmd_events(args):
+    topo = load(args)
+    follow(topo, kinds=args.kind or None, chips=[chip_or_die(topo, c).name for c in args.chips] or None,
+           title="events · Ctrl-C")
+
+
+def cmd_run(args):
+    topo = load(args)
+    if not running(topo):
+        ui.die("the simulation isn't running", "start it first: ./sim up -d")
+    from simlib.client import Sim
+    sim = Sim(topo.path)
+    sys.argv = [args.script, *args.args]
+    try:
+        runpy.run_path(args.script, init_globals={"sim": sim}, run_name="__main__")
+    finally:
+        sim.close()
+
+
+def cmd_tui(args):
+    topo = load(args)
+    if not sys.stdout.isatty():
+        ui.die("the TUI needs a terminal")
+    started = False
+    if not running(topo):
+        print(ui.dim("· the simulation isn't running: starting it in the background"))
+        subprocess.run([sys.executable, str(Path(__file__).resolve()), "-f", str(topo.path), "up", "-d"],
+                       check=True)
+        started = True
+    from simlib import tui
+    tui.run(topo.path)
+    if started:
+        answer = input("stop the simulation? [Y/n] ").strip().lower()
+        if answer in ("", "y", "yes", "j", "ja"):
+            supervisor.request(topo, {"cmd": "down"}, 5)
+            print(ui.green("✓ ") + "stopping")
+
+
 def cmd_console(args):
     if not sys.stdin.isatty():
         ui.die("the console needs a terminal")
     topo = load(args)
     chip = chip_or_die(topo, args.chip)
-    sock = ask(topo, {"cmd": "console", "chip": chip.name})
-    f = sock.makefile("rb")
-    answer = f.readline()
-    if b"error" in answer:
-        ui.die(answer.decode().strip())
-    print(ui.dim(f"── {chip.name} console · Enter wakes it · Ctrl-] leaves ──"), flush=True)
-    fd = sys.stdin.fileno()
-    saved = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        while True:
-            r, _, _ = select.select([fd, sock], [], [])
-            if sock in r:
-                data = sock.recv(4096)
-                if not data:
-                    break
-                os.write(sys.stdout.fileno(), data.replace(b"\n", b"\r\n").replace(b"\r\r\n", b"\r\n"))
-            if fd in r:
-                data = os.read(fd, 1024)
-                if b"\x1d" in data:
-                    break
-                sock.sendall(data)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-        sock.close()
-    print(ui.dim(f"\n── left {chip.name} ──"))
+    error = console.attach(topo, chip.name)
+    if error:
+        ui.die(error)
 
 
 def cmd_log(args):
@@ -308,9 +508,9 @@ def cmd_log(args):
 def cmd_can(args):
     topo = load(args)
     buses = [args.bus] if args.bus else topo.buses
-    missing = [b for b in buses if not can.interface_exists(b)]
+    missing = missing_buses(buses)
     if missing:
-        ui.die(f"no CAN interface {', '.join(missing)}", vcan_hint(missing))
+        ui.die(f"no CAN interface {', '.join(missing)}", "./sim net creates them")
     socks = {can.open_bus(b): b for b in buses}
     width = max(len(c.name) for c in topo.chips)
     print(ui.dim(f"── {', '.join(buses)} · {'everything' if args.all else 'without housekeeping (--all shows it)'} · Ctrl-C ──"))
@@ -357,15 +557,13 @@ def cmd_doctor(args):
         check(True, f"QEMU with the esp32-sim models: {path}")
     except qemu.QemuError as e:
         check(False, "QEMU", str(e))
-    missing = missing_buses(topo, topo.chips)
-    check(not missing, f"CAN interfaces {', '.join(topo.buses)}", vcan_hint(missing) if missing else None)
-    import shutil
+    missing = missing_buses(topo.buses)
+    check(not missing, f"CAN interfaces {', '.join(topo.buses)}", "./sim net creates them (sudo)")
     check(bool(shutil.which("espflash")), "espflash", "cargo install espflash")
     for kind in ("node", "gateway"):
         elf = images.default_elf(kind)
         check(elf.is_file(), f"{kind} firmware {elf}",
               f"cd software/{images.FIRMWARE[kind]['crate']} && cargo build --release")
-    import socket
     for gw in topo.gateways:
         for port in (gw.https, gw.http):
             s = socket.socket()
@@ -373,10 +571,15 @@ def cmd_doctor(args):
                 s.bind(("127.0.0.1", port))
                 free = True
             except OSError:
-                free = supervisor.request(topo, {"cmd": "status"}, 1) is not None
+                free = running(topo)
             finally:
                 s.close()
             check(free, f"port {port} for {gw.name}", "used by something else: change https/http in the topology")
+    try:
+        import pytest  # noqa: F401
+        check(True, "pytest (for software/sim/tests)")
+    except ImportError:
+        print(f"{ui.dim('·')} pytest is not installed {ui.dim('(only for the tests: pip install pytest)')}")
     sys.exit(0 if ok else 1)
 
 
@@ -394,13 +597,17 @@ def main():
 
     sp = add("up", cmd_up, "build what's missing, start the chips and show what happens")
     sp.add_argument("chips", nargs="*", help="only these (default: all)")
+    sp.add_argument("-d", "--detach", action="store_true", help="run in the background (./sim down stops it)")
     sp.add_argument("-a", "--all", action="store_true", help="also show CAN housekeeping")
     sp.add_argument("-s", "--serial", action="store_true", help="also show every serial log line")
+    sp.add_argument("--i2c", action="store_true", help="also show every I2C transaction")
     sp.add_argument("--node-elf", help="node firmware (default: the release build)")
     sp.add_argument("--gateway-elf", help="gateway firmware (default: the release build)")
+    sp.add_argument("--timeout", type=float, default=300, help=argparse.SUPPRESS)
 
+    add("tui", cmd_tui, "the simulation in one screen (starts it if needed)")
     add("down", cmd_down, "stop a running simulation")
-    add("status", cmd_status, "what runs, network, relays, light", aliases=["st"])
+    add("status", cmd_status, "what runs, network, relays, sensor values", aliases=["st"])
 
     sp = add("build", cmd_build, "flash images from the release builds; keeps each chip's data")
     sp.add_argument("chips", nargs="*")
@@ -424,9 +631,33 @@ def main():
     sp.add_argument("chip")
     sp.add_argument("secs", type=float, nargs="?", default=10.0, help="how long (default 10 s)")
 
-    sp = add("lux", cmd_lux, "set the light the VEML7700 measures")
+    sp = add("lux", cmd_lux, "set the light the VEML7700 measures (= set <chip> veml7700 lux=…)")
     sp.add_argument("chip")
     sp.add_argument("lux", type=float)
+
+    sp = add("set", cmd_set, "set what a part measures: set <chip> <part> key=value…")
+    sp.add_argument("chip")
+    sp.add_argument("part", help="bme680, bme280, scd30, veml7700, ds18b20-0, … (./sim get <chip>)")
+    sp.add_argument("values", nargs="+", metavar="key=value")
+
+    sp = add("get", cmd_get, "a chip's parts and their values")
+    sp.add_argument("chip")
+    sp.add_argument("part", nargs="?")
+
+    sp = add("i2c", cmd_i2c, "raw I2C: trace (default), scan, read, write, dump")
+    sp.add_argument("chip")
+    sp.add_argument("op", nargs="*", metavar="op",
+                    help="trace | scan | read <addr> [<reg> [<n>]] | write <addr> <byte>… | dump <addr>")
+    sp.add_argument("-b", "--bus", type=int, default=1, help="0 (relay expanders) or 1 (extension, default)")
+
+    sp = add("events", cmd_events, "follow the events (what sim up prints, and more)")
+    sp.add_argument("chips", nargs="*")
+    sp.add_argument("-k", "--kind", action="append",
+                    choices=["info", "action", "can", "relay", "device", "serial", "i2c", "mqtt"])
+
+    sp = add("run", cmd_run, "run a Python script against the running simulation (`sim` is there)")
+    sp.add_argument("script")
+    sp.add_argument("args", nargs=argparse.REMAINDER)
 
     sp = add("console", cmd_console, "the chip's serial console (Ctrl-] leaves)", aliases=["con"])
     sp.add_argument("chip")
@@ -451,6 +682,9 @@ def main():
     sp.add_argument("chip")
     sp.add_argument("pin", type=int)
     sp.add_argument("level", type=int, choices=[0, 1])
+
+    sp = add("net", cmd_net, "create the topology's vcan interfaces (sudo), or remove them")
+    sp.add_argument("action", nargs="?", default="up", choices=["up", "down"])
 
     add("doctor", cmd_doctor, "check QEMU, CAN interfaces, firmware and ports")
 
