@@ -2,5 +2,13 @@
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
         "config:recommended"
+    ],
+    "packageRules": [
+        {
+            "description": "Crates the workspace takes from forks through [patch.crates-io]. The patch only applies while the requirement matches the fork's version: a bump past it builds the unpatched release next to the fork (smoltcp 0.14 next to embassy-net's 0.13). Update them by rebasing the forks instead, as software/patches/README.md describes.",
+            "matchManagers": ["cargo"],
+            "matchPackageNames": ["smoltcp", "esp-hal", "embassy-net", "embedded-tls"],
+            "enabled": false
+        }
     ]
 }
