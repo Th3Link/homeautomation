@@ -1,0 +1,42 @@
+name: ESP toolchain
+description: >-
+  The Xtensa Rust toolchain and GCC for the ESP32 from espup, as
+  esp-rs/xtensa-toolchain installs them, but cached: with the cache there
+  is nothing to download. Without it the install is tried three times,
+  20 s apart; espup's own retries come within half a second, which a few
+  seconds of 504s from GitHub's release downloads outlast.
+inputs:
+  version:
+    description: Xtensa Rust toolchain version
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.rustup/toolchains/esp
+          ~/exports
+        key: esp-toolchain-${{ runner.os }}-${{ inputs.version }}-esp32
+    - name: Install espup and the toolchain
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      # espup asks the GitHub API for the release: the caller passes
+      # GITHUB_TOKEN, or all runners share 60 requests an hour.
+      run: |
+        curl -fsSL --retry 5 --retry-all-errors -o /tmp/espup.zip "https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu.zip"
+        unzip -o /tmp/espup.zip -d "$HOME/.cargo/bin"
+        chmod +x "$HOME/.cargo/bin/espup"
+        for attempt in 1 2 3; do
+          "$HOME/.cargo/bin/espup" install --targets esp32 --toolchain-version "${{ inputs.version }}" --export-file "$HOME/exports" && break
+          if [ "$attempt" = 3 ]; then exit 1; fi
+          echo "espup failed, trying again in 20 s"
+          sleep 20
+        done
+    - name: Put the toolchain on the path
+      shell: bash
+      run: |
+        source "$HOME/exports"
+        echo "$PATH" >> "$GITHUB_PATH"
+        echo "LIBCLANG_PATH=$LIBCLANG_PATH" >> "$GITHUB_ENV"

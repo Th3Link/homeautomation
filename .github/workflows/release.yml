@@ -30,9 +30,8 @@ jobs:
         working-directory: software/${{ matrix.crate }}
     steps:
       - uses: actions/checkout@v7
-      - uses: esp-rs/xtensa-toolchain@v1.7
+      - uses: ./.github/actions/esp-toolchain
         with:
-          buildtargets: esp32
           version: "1.97.0"
         env:
           # espup asks the GitHub API for the toolchain release; without a
