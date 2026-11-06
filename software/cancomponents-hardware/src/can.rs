@@ -328,7 +328,13 @@ fn log_frame(frame: &EspTwaiFrame) {
     // Remote
     let _ = write!(out, ", is_remote: {}", frame.is_remote_frame());
 
-    console_log!("{}", out.as_str());
+    // The serial console only, not the log the gateway downloads (ADR
+    // 0026): the frames would crowd out the node's own lines, and its own
+    // frames would refill the log as fast as it is downloaded. The gateway
+    // sees the bus itself.
+    if !crate::logging::CLI_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
+        esp_println::println!("{}", out.as_str());
+    }
 }
 
 /// Receives frames off the bus and dispatches each one.
