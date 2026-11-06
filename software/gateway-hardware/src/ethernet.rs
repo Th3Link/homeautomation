@@ -3,12 +3,15 @@
 //! network path (it's installed hardwired next to the CAN bus wiring; see
 //! ADR 0013 for why WiFi was dropped).
 //!
-//! The network needs no setup: [`init_stack`] runs dual-stack — a DHCPv4
-//! client plus IPv6 SLAAC, and DHCPv6 where the routers ask for it
-//! ([`crate::dhcpv6`]) — so a freshly-flashed gateway just picks up
+//! The network needs no setup: by default [`init_stack`] runs dual-stack —
+//! a DHCPv4 client plus IPv6 SLAAC, and DHCPv6 where the routers ask for
+//! it ([`crate::dhcpv6`]) — so a freshly-flashed gateway just picks up
 //! addresses from the LAN (announcing its configured hostname over DHCP,
 //! so it's findable by name) and everything else — MQTT broker, credentials — is configured over the
-//! serial console. There's deliberately no link-up wait or timeout either:
+//! serial console. The network settings ([`gateway_core::network`]) can
+//! replace DHCP with a link-local or a fixed address, switch SLAAC and
+//! DHCPv6 off or DHCPv6 on for good, and add an IPv6 address by hand; they
+//! are read at boot. There's deliberately no link-up wait or timeout either:
 //! the EMAC driver reports link state to `embassy-net`, which starts DHCP
 //! when the cable comes up and redoes it if the link drops, so plugging
 //! the cable in late (or swapping it) just works.
@@ -34,8 +37,8 @@ use crate::console_log;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
 use embassy_net::{
-    Dhcpv6Lease, Ipv6Cidr, Ipv6RouterFlags, Runner, Stack, StackResources, StaticConfigV4,
-    StaticConfigV6,
+    Dhcpv6Lease, Ipv4Cidr, Ipv6Cidr, Ipv6RouterFlags, ManualConfigV6, Runner, Stack,
+    StackResources, StaticConfigV4, StaticConfigV6,
 };
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -47,6 +50,7 @@ use esp_hal::ethernet::{Ethernet, EthernetDmaStorage, RmiiPinBundle};
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::peripherals::ETH;
 use esp_hal::Async;
+use gateway_core::network::{link_local_v4, Ipv4Mode, NetworkConfig};
 use static_cell::{ConstStaticCell, StaticCell};
 
 /// `smi_mdc_gpio_num`/`smi_mdio_gpio_num` from `LAN.cpp`.
@@ -131,18 +135,50 @@ pub struct NetInfo {
     pub v6_addresses: heapless::Vec<Ipv6Cidr, 5>,
     pub router_flags: Ipv6RouterFlags,
     pub dhcpv6: Option<Dhcpv6Lease>,
+    /// The settings the network was started with.
+    pub settings: NetworkConfig,
 }
 
 impl NetInfo {
     /// Where an IPv6 address of [`Self::v6_addresses`] comes from:
-    /// `link-local`, `DHCPv6` or `SLAAC`.
+    /// `link-local`, `manual`, `DHCPv6` or `SLAAC`.
     pub fn v6_origin(&self, cidr: &Ipv6Cidr) -> &'static str {
         if cidr.address().is_unicast_link_local() {
             "link-local"
+        } else if self.settings.ipv6_address == Some(cidr.address()) {
+            "manual"
         } else if self.dhcpv6.as_ref().and_then(|lease| lease.address) == Some(*cidr) {
             "DHCPv6"
         } else {
             "SLAAC"
+        }
+    }
+
+    /// Where the IPv4 address comes from: `DHCP`, `link-local` or `manual`.
+    pub fn v4_origin(&self) -> &'static str {
+        match self.settings.ipv4_mode {
+            Ipv4Mode::Dhcp => "DHCP",
+            Ipv4Mode::LinkLocal => "link-local",
+            Ipv4Mode::Manual => "manual",
+        }
+    }
+
+    /// Where the IPv4 DNS servers come from: by hand, or the DHCP server.
+    pub fn v4_dns_origin(&self) -> &'static str {
+        if self.settings.dns_servers.is_empty() {
+            "DHCPv4"
+        } else {
+            "manual"
+        }
+    }
+
+    /// The IPv6 default gateway: the router SLAAC took, or without SLAAC
+    /// the one set by hand.
+    pub fn v6_gateway(&self) -> Option<embassy_net::Ipv6Address> {
+        if self.settings.slaac {
+            self.v6.as_ref().and_then(|v6| v6.gateway)
+        } else {
+            self.settings.ipv6_gateway
         }
     }
 }
@@ -166,7 +202,7 @@ pub async fn info() -> Option<NetInfo> {
 }
 
 #[embassy_executor::task]
-async fn info_task(stack: Stack<'static>) {
+async fn info_task(stack: Stack<'static>, settings: NetworkConfig) {
     loop {
         INFO_REQUEST.wait().await;
         let mac = match stack.hardware_address() {
@@ -180,6 +216,7 @@ async fn info_task(stack: Stack<'static>) {
             v6_addresses: stack.ipv6_addresses().into_iter().take(5).collect(),
             router_flags: stack.ipv6_router_flags(),
             dhcpv6: stack.dhcpv6_lease(),
+            settings: settings.clone(),
         });
     }
 }
@@ -264,29 +301,76 @@ async fn net_task(mut runner: Runner<'static, EthDriver>) {
     runner.run().await
 }
 
-/// Starts the `embassy-net` stack over `eth` — a DHCPv4 client, matching
-/// `LAN.cpp`'s (ESP-IDF default) behavior, announcing `hostname` (DHCP
-/// option 12; silently omitted if it doesn't fit the 32-byte limit), plus
-/// IPv6 SLAAC (DHCPv6 runs in its own task, [`crate::dhcpv6`]).
-pub async fn init_stack(eth: EthDriver, spawner: &Spawner, hostname: &str) -> Stack<'static> {
-    let mut dhcp = embassy_net::DhcpConfig::default();
-    dhcp.hostname = heapless::String::try_from(hostname).ok();
-    // The first DISCOVER often goes out while the switch port is still
-    // coming up and is lost; smoltcp's default is to try again only after
-    // 10 s, which held up everything that needs the network.
-    dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(2);
-    dhcp.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(2);
+/// Starts the `embassy-net` stack over `eth` with `settings`. By default
+/// a DHCPv4 client, matching `LAN.cpp`'s (ESP-IDF default) behavior,
+/// announcing `hostname` (DHCP option 12; silently omitted if it doesn't
+/// fit the 32-byte limit), plus IPv6 SLAAC (DHCPv6 runs in its own task,
+/// [`crate::dhcpv6`]).
+pub async fn init_stack(
+    eth: EthDriver,
+    spawner: &Spawner,
+    hostname: &str,
+    settings: NetworkConfig,
+) -> Stack<'static> {
+    let mac = match embassy_net_driver::Driver::hardware_address(&eth) {
+        embassy_net_driver::HardwareAddress::Ethernet(mac) => mac,
+        _ => [0; 6],
+    };
+    let dns_servers = settings.dns_servers.iter().copied().collect();
+    let ipv4 = match settings.ipv4_mode {
+        Ipv4Mode::Dhcp => {
+            let mut dhcp = embassy_net::DhcpConfig::default();
+            dhcp.hostname = heapless::String::try_from(hostname).ok();
+            // The first DISCOVER often goes out while the switch port is
+            // still coming up and is lost; smoltcp's default is to try
+            // again only after 10 s, which held up everything that needs
+            // the network.
+            dhcp.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(2);
+            dhcp.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(2);
+            dhcp.dns_servers = (!settings.dns_servers.is_empty()).then_some(dns_servers);
+            embassy_net::ConfigV4::Dhcp(dhcp)
+        }
+        Ipv4Mode::LinkLocal => embassy_net::ConfigV4::Static(StaticConfigV4 {
+            address: Ipv4Cidr::new(link_local_v4(mac), 16),
+            gateway: None,
+            dns_servers,
+        }),
+        Ipv4Mode::Manual => embassy_net::ConfigV4::Static(StaticConfigV4 {
+            address: Ipv4Cidr::new(
+                settings
+                    .ipv4_address
+                    .unwrap_or(core::net::Ipv4Addr::UNSPECIFIED),
+                settings.ipv4_prefix,
+            ),
+            gateway: settings.ipv4_gateway,
+            dns_servers,
+        }),
+    };
 
     let resources = NET_RESOURCES.init(StackResources::new());
     let seed = embassy_time::Instant::now().as_ticks();
-    // `Config` is #[non_exhaustive]: start from the DHCPv4 constructor and
-    // add SLAAC on top (dual-stack).
-    let mut config = embassy_net::Config::dhcpv4(dhcp);
-    config.ipv6 = embassy_net::ConfigV6::Slaac;
+    // `Config` is #[non_exhaustive]: start from the default and set both
+    // families (dual-stack). Without SLAAC smoltcp ignores the Router
+    // Advertisements; the link-local address is there all the same.
+    let mut config = embassy_net::Config::default();
+    config.ipv4 = ipv4;
+    config.ipv6 = if settings.slaac {
+        embassy_net::ConfigV6::Slaac
+    } else {
+        embassy_net::ConfigV6::None
+    };
     let (stack, runner) = embassy_net::new(eth, config, resources, seed);
+    if settings.ipv6_address.is_some() || settings.ipv6_gateway.is_some() {
+        stack.set_manual_v6(Some(ManualConfigV6 {
+            address: settings
+                .ipv6_address
+                .map(|address| Ipv6Cidr::new(address, settings.ipv6_prefix)),
+            gateway: settings.ipv6_gateway,
+        }));
+    }
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(address_log_task(stack).unwrap());
-    spawner.spawn(info_task(stack).unwrap());
+    spawner.spawn(info_task(stack, settings).unwrap());
     spawner.spawn(ready_task(stack).unwrap());
     STARTED.store(true, Ordering::Relaxed);
     stack

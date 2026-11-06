@@ -6,6 +6,7 @@ use core::fmt::Write;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
+use gateway_core::network::Dhcpv6Mode;
 use heapless::{String, Vec};
 use picoserve::response::{IntoResponse, StatusCode};
 use serde::Serialize;
@@ -52,11 +53,14 @@ struct Network {
     mac: String<17>,
     /// With prefix length, e.g. `192.168.1.20/24`.
     ipv4: Option<String<18>>,
+    /// `DHCP`, `link-local` or `manual` (the network settings).
+    ipv4_origin: &'static str,
     ipv4_gateway: Option<String<15>>,
-    /// Link-local first; origin `link-local`, `SLAAC` or `DHCPv6`.
+    /// Link-local first; origin `link-local`, `manual`, `SLAAC` or
+    /// `DHCPv6`.
     ipv6: Vec<Origin, 5>,
     ipv6_gateway: Option<String<39>>,
-    /// Origin `DHCPv4`, `RDNSS` or `DHCPv6`.
+    /// Origin `DHCPv4`, `manual`, `RDNSS` or `DHCPv6`.
     dns_servers: Vec<Origin, 9>,
     /// What the routers' Router Advertisements offer: `M` addresses,
     /// `O` other configuration over DHCPv6.
@@ -64,6 +68,10 @@ struct Network {
     ipv6_other: bool,
     /// `off`, `stateless` or `stateful`.
     dhcpv6_mode: &'static str,
+    /// The network settings: SLAAC on, and DHCPv6 `auto`, `enforce` or
+    /// `off`.
+    slaac: bool,
+    dhcpv6_setting: Dhcpv6Mode,
 }
 
 async fn network() -> Option<Network> {
@@ -74,7 +82,7 @@ async fn network() -> Option<Network> {
     for server in v4_dns {
         let _ = dns_servers.push(Origin {
             address: text(server),
-            origin: "DHCPv4",
+            origin: net.v4_dns_origin(),
         });
     }
     for server in net.v6.iter().flat_map(|v6| v6.dns_servers.iter()) {
@@ -96,6 +104,7 @@ async fn network() -> Option<Network> {
             m[0], m[1], m[2], m[3], m[4], m[5]
         )),
         ipv4: net.v4.as_ref().map(|v4| text(v4.address)),
+        ipv4_origin: net.v4_origin(),
         ipv4_gateway: net.v4.as_ref().and_then(|v4| v4.gateway).map(text),
         ipv6: net
             .v6_addresses
@@ -105,7 +114,7 @@ async fn network() -> Option<Network> {
                 origin: net.v6_origin(cidr),
             })
             .collect(),
-        ipv6_gateway: net.v6.as_ref().and_then(|v6| v6.gateway).map(text),
+        ipv6_gateway: net.v6_gateway().map(text),
         dns_servers,
         ipv6_managed: net.router_flags.managed,
         ipv6_other: net.router_flags.other,
@@ -114,6 +123,8 @@ async fn network() -> Option<Network> {
             dhcpeav6_client::Mode::Stateless => "stateless",
             dhcpeav6_client::Mode::Stateful => "stateful",
         }),
+        slaac: net.settings.slaac,
+        dhcpv6_setting: net.settings.dhcpv6,
     })
 }
 

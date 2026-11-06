@@ -56,6 +56,9 @@ pub enum Key {
     /// Publish Home Assistant discovery configurations
     /// ([`crate::ha_discovery`]) on the primary broker.
     HomeAssistant = 26,
+    /// The network settings ([`crate::network`]), postcard behind a format
+    /// version byte.
+    Network = 27,
 }
 
 /// How many MQTT brokers the gateway talks to at the same time.
@@ -252,6 +255,7 @@ mod tests {
         assert_eq!(u8::from(Key::Latitude), 23);
         assert_eq!(u8::from(Key::Longitude), 24);
         assert_eq!(u8::from(Key::TimeZone), 25);
+        assert_eq!(u8::from(Key::Network), 27);
     }
 
     #[test]

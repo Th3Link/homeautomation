@@ -195,8 +195,9 @@ python -m pytest tests --sim-keep      # leave it running; the next run reuses i
 ```
 
 The fixtures are `sim` (a `Sim` for the session) and the chips by name
-(`taster`, `relais`, `pwm`); `tests/test_web.py` has an `api` fixture for
-the gateway's REST API (it sets a web login of its own on the console).
+(`taster`, `relais`, `pwm`), and `api` for the gateway's REST API (it sets
+a web login of its own on the console; `tests/test_web.py`,
+`tests/test_network.py`).
 A test is a script with asserts:
 
 ```python

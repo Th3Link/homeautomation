@@ -89,6 +89,7 @@ async fn main(spawner: Spawner) -> ! {
     // nothing needs configuring before the gateway is reachable; the
     // cable can be plugged in at any time.
     let clock_gpio = config::eth_clock_gpio().await;
+    let network = config::network().await;
     let stack = match ethernet::bring_up(
         EthernetPins {
             eth: peripherals.ETH,
@@ -108,7 +109,9 @@ async fn main(spawner: Spawner) -> ! {
     )
     .await
     {
-        Some(eth) => Some(ethernet::init_stack(eth, &spawner, cfg.hostname.as_str()).await),
+        Some(eth) => {
+            Some(ethernet::init_stack(eth, &spawner, cfg.hostname.as_str(), network.clone()).await)
+        }
         None => {
             console_log!("ethernet: PHY init failed, running without network");
             None
@@ -120,7 +123,9 @@ async fn main(spawner: Spawner) -> ! {
         for slot in 0..gateway_core::config::MQTT_BROKERS {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
-        spawner.spawn(dhcpv6::dhcpv6_task(stack).unwrap());
+        if let Some(mode) = dhcpv6::mode(&network) {
+            spawner.spawn(dhcpv6::dhcpv6_task(stack, mode).unwrap());
+        }
         ha::init(&spawner).await;
         spawner.spawn(wall_clock::sntp_task(stack).unwrap());
         spawner.spawn(cert::manager_task(stack).unwrap());

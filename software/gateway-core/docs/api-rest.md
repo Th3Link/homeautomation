@@ -41,7 +41,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
 | Route | |
 |---|---|
-| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv6` (`address` with prefix length and `origin`: `link-local`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`) |
+| `GET /system` | `firmware_version`, `uptime_s`, `heap_used`, `heap_free`, `stack_size`, `stack_untouched` (main stack bytes never used since boot), `network` (`null` without Ethernet): `link_up`, `mac`, `ipv4` (with prefix length) and `ipv4_gateway` or `null`, `ipv4_origin` (`DHCP`/`link-local`/`manual`), `ipv6` (`address` with prefix length and `origin`: `link-local`/`manual`/`SLAAC`/`DHCPv6`; link-local first), `ipv6_gateway` or `null`, `dns_servers` (`address`, `origin`: `DHCPv4`/`manual`/`RDNSS`/`DHCPv6`), `ipv6_managed`/`ipv6_other` (the routers' M/O flags), `dhcpv6_mode` (`off`/`stateless`/`stateful`), `slaac` and `dhcpv6_setting` (the network settings the gateway started with) |
 | `GET /logs?from=n` | the latest console log lines (the gateway keeps the last 6 KiB): `from` (where `text` starts in the stream of everything logged since boot; later than asked if that was overwritten), `text` (whole lines, up to 1200 bytes), `next` (ask from there next time), `can_to_mqtt` |
 | `PATCH /logs` | `can_to_mqtt`: mirror every CAN frame to `canbus/log/0x<id>` (off at boot). Answers like `GET` |
 | `POST /system/restart` | restarts the gateway a moment after answering (`202`) |
@@ -61,6 +61,11 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 |---|---|
 | `GET /location` | `latitude`, `longitude` (degrees, north/east positive; `null` until set), `timezone` (a POSIX `TZ` string, default `CET-1CEST,M3.5.0,M10.5.0/3`), `local_time` (`YYYY-MM-DDTHH:MM:SS`) and `utc_offset_minutes` (`null` until the clock is set), `sun`: today's local `HH:MM` of `astronomical_dawn`, `nautical_dawn`, `civil_dawn`, `sunrise`, `noon`, `sunset`, `civil_dusk`, `nautical_dusk`, `astronomical_dusk` (each `null` on a day the sun doesn't reach it; the whole object `null` without a place or a clock) |
 | `PATCH /location` | `latitude` and `longitude` (only together), `timezone`. Answers like `GET` |
+
+| Route | |
+|---|---|
+| `GET /network` | `settings` (below), `link_local_ipv4` (the address link-local IPv4 takes, from the MAC), `restart_required` (the stored settings aren't the ones the network started with) |
+| `PUT /network` | all of `settings`: `ipv4_mode` (`dhcp`, `link_local`: 169.254.x.y from the MAC without conflict detection, `manual`), `ipv4_address`, `ipv4_prefix` and `ipv4_gateway` (for `manual`; the gateway in the address's network, or `null`), `dns_servers` (up to two IPv4 addresses: at least one with `manual`, with `dhcp`/`link_local` they take the place of the DHCP server's), `slaac` (`false`: the routers' advertisements are ignored, no prefixes, router or M/O flags), `dhcpv6` (`auto` as the M/O flags ask, so not without SLAAC; `enforce` stateful whatever the flags; `off`), `ipv6_address` and `ipv6_prefix` (an address next to the others, or `null`), `ipv6_gateway` (used without SLAAC, may be link-local). Checked as a whole (`400` names the field); takes effect after a restart. Answers like `GET`. The console has the same (`ipv4`, `ipv4-gateway`, `dns`, `slaac`, `dhcpv6`, `ipv6-address`, `ipv6-gateway`) and `network-reset`, the way back to DHCP and SLAAC |
 
 | Route | |
 |---|---|

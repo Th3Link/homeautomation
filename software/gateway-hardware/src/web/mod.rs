@@ -23,6 +23,7 @@ mod json;
 mod location;
 mod logs;
 mod mqtt;
+mod network;
 mod sensors;
 mod settings;
 mod system;
@@ -196,6 +197,7 @@ fn app() -> Router<impl PathRouter> {
     let api = sensors::routes(api);
     let api = tls::routes(api);
     let api = location::routes(api);
+    let api = network::routes(api);
     let api = automation::routes(api);
     let api = logs::routes(api);
     // The API outermost: every route a request passes on its way costs a

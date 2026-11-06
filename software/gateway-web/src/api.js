@@ -69,6 +69,12 @@ export const location = {
   update: (changes) => patch('/location', changes),
 };
 
+// The network settings; they take effect after a restart.
+export const network = {
+  get: () => get('/network'),
+  put: (settings) => put('/network', settings),
+};
+
 export const mqtt = {
   all: () => get('/mqtt'),
   updateAll: (changes) => patch('/mqtt', changes),
