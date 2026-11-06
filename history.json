@@ -573,5 +573,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "91af257664dd20fd185ed50bc041832a0db0ea6c",
+  "date": "2026-11-06T07:47:25+01:00",
+  "subject": "Merge pull request #70 from Th3Link/chore/renovate-forks",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 490606,
+    "iram": 18680,
+    "dram_static": 41320,
+    "stack_budget": 155288,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 509417,
+    "iram": 12116,
+    "dram_static": 41052,
+    "stack_budget": 155552,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
