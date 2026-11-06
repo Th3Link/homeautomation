@@ -24,3 +24,4 @@ globally-numbered list including cross-cutting decisions.
 | [0022](0022-home-assistant-discovery.md) | Home Assistant MQTT discovery from the gateway | Accepted |
 | [0023](0023-nts.md) | Authenticated time with NTS | Accepted |
 | [0024](0024-open-air-quality.md) | Air quality from the BME680 with our own open calculation | Accepted |
+| [0026](0026-node-logs.md) | The nodes' logs over CAN, and all log lines on MQTT | Accepted |

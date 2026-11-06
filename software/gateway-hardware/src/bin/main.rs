@@ -53,6 +53,7 @@ async fn main(spawner: Spawner) -> ! {
     flash::init(peripherals.FLASH);
     config::init().await;
     gateway_hardware::location::init().await;
+    gateway_hardware::node_log::init().await;
     let cfg = config::config().await.load_or_init().await;
 
     can::DEVICE_ID.store(cfg.can_id, Ordering::Relaxed);
@@ -127,6 +128,8 @@ async fn main(spawner: Spawner) -> ! {
             spawner.spawn(dhcpv6::dhcpv6_task(stack, mode).unwrap());
         }
         ha::init(&spawner).await;
+        spawner.spawn(gateway_hardware::node_log::node_log_task().unwrap());
+        spawner.spawn(gateway_hardware::node_log::gateway_log_task().unwrap());
         spawner.spawn(wall_clock::sntp_task(stack).unwrap());
         spawner.spawn(cert::manager_task(stack).unwrap());
         web::spawn(&spawner, stack, cert::https_enabled().await);

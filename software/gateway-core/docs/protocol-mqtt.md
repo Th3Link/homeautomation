@@ -149,6 +149,22 @@ original's `mqtt_logging` flag). `<hex>` is the 29-bit CAN id in lower-case
 hex without padding; the body is `0x` and the data bytes in hex, or `R`
 and the bytes for a request (remote) frame. Not retained.
 
+### `canbus/device_log/<device>`, `canbus/gateway/log`
+
+The log lines ([ADR 0026](adr/0026-node-logs.md)), one line a message
+(`[uptime] text`, cut at 200 bytes), not retained, on the primary broker:
+
+- `canbus/device_log/<device>`: a node's lines. Every 5 minutes (setting
+  `node-log-interval`) the gateway downloads the nodes' logs over CAN, one
+  after the other, and the device page's *Download* does it at once. A node
+  drops what was downloaded, so each line comes once. If the node had to
+  overwrite lines before the download, a line says how many bytes.
+- `canbus/gateway/log`: the gateway's own lines, every 10 s those since the
+  last time.
+
+Both while the broker is connected and `log-mqtt` is on (the default; the
+web UI's log page has both settings).
+
 ### Encryption (`mqtts://`)
 
 `mqtts://` connections use TLS 1.3 (one cipher suite,

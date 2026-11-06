@@ -165,6 +165,19 @@ pub async fn publish_secondary(topic: &str, body: &str) {
     publish_if_connected(SECONDARY, topic, body);
 }
 
+/// Like [`publish`], but waits for room in the queue rather than dropping
+/// the message: for runs of messages (the log lines). Gives up after a few
+/// seconds, when the connection is gone and nobody empties the queue.
+pub async fn publish_wait(topic: &str, body: &str) {
+    if CONNECTED[PRIMARY].load(Ordering::Relaxed) {
+        let _ = embassy_time::with_timeout(
+            embassy_time::Duration::from_secs(5),
+            PUBLISH_QUEUES[PRIMARY].send(publication(topic, body)),
+        )
+        .await;
+    }
+}
+
 fn publish_if_connected(slot: usize, topic: &str, body: &str) {
     if CONNECTED[slot].load(Ordering::Relaxed) {
         let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));

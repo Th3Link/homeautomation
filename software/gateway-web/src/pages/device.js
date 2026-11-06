@@ -32,8 +32,62 @@ export function Device({ device }) {
     ${IS_HEATING.includes(data.device_type) && html`<${HeatingManual} d=${data} />`}
     <${Section} title="Sensors"><${SensorTable} device=${data.name || data.key} /><//>
     <${Features} d=${data} />
+    <${NodeLog} d=${data} />
     <${Settings} d=${data} reload=${reload} />
     <${DeviceFirmware} d=${data} />`;
+}
+
+// The node's log, downloaded over CAN. The node drops what was downloaded,
+// so this shows what came since the last download (the gateway also
+// downloads every few minutes for MQTT).
+function NodeLog({ d }) {
+  const device = d.name || d.key;
+  const [log, setLog] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fetchAll = async () => {
+    let text = '';
+    for (let from = 0; ; ) {
+      const r = await api.devices.readLog(device, from);
+      text += r.text;
+      if (!r.text || r.next === from) return { ...r, text };
+      from = r.next;
+    }
+  };
+  const download = async () => {
+    setBusy(true);
+    try {
+      if ((await run(() => api.devices.downloadLog(device))) === undefined) return;
+      let r;
+      do {
+        await new Promise((ok) => setTimeout(ok, 700));
+        r = await fetchAll();
+        setLog(r);
+      } while (r.state === 'running');
+      if (r.state === 'no_answer') notify('The device did not answer: its firmware has no log download.', 'error');
+      else if (r.state === 'failed') notify('The download stopped in the middle.', 'error');
+    } catch (e) {
+      notify(e.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([log.text], { type: 'text/plain' }));
+    a.download = `${device}-log-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return html`
+    <${Section} title="Log" aside=${html`<div class="buttons">
+      <${Button} onClick=${download} disabled=${busy}>${busy ? 'Downloading…' : 'Download'}<//>
+      <button onClick=${save} disabled=${!log || !log.text}>Save as file</button>
+    </div>`}>
+      <p class="muted">The device's console lines since the last download (times are seconds since its start). A downloaded line leaves the device; the gateway also downloads every few minutes and publishes the lines on MQTT.</p>
+      ${log && html`
+        ${log.lost_bytes > 0 && html`<p class="muted">${log.lost_bytes} bytes were overwritten on the device before they were downloaded.</p>`}
+        <pre class="log console">${log.text || 'Nothing new.'}</pre>`}
+    <//>`;
 }
 
 // What the device has on board, kept on the gateway: the automation offers

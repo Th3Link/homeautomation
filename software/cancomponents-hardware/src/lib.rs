@@ -20,6 +20,7 @@ pub mod environment;
 pub mod error;
 pub mod extension;
 pub mod heating;
+pub mod node_log;
 pub mod pwm;
 pub mod relais;
 pub mod sensor_config;

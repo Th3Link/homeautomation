@@ -216,6 +216,9 @@ pub async fn dispatch(frame: &EspTwaiFrame) {
         CanMessageType::OtaData => {
             crate::update::ota_data(frame.data(), frame.is_remote_frame()).await
         }
+        CanMessageType::LogDownload => {
+            crate::node_log::handler(frame.data(), frame.is_remote_frame())
+        }
         CanMessageType::UpdateSilence => silence(frame).await,
         // The gateway asks everybody (or this node) to announce itself.
         CanMessageType::Discovery if frame.is_remote_frame() => crate::discovery::announce(),
