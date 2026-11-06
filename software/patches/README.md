@@ -24,6 +24,10 @@ tests (`cargo test --lib`, about 670).
 
 ## Updating
 
+Renovate leaves these crates alone (`renovate.json`): `[patch.crates-io]`
+only applies while the requirement matches the fork's version, so a bump
+past it would quietly build the unpatched release next to the fork.
+
 When a new release comes out: compare its changelog with the fixes above.
 If it has all of them, delete the fork's `[patch.crates-io]` line. If not,
 rebase the remaining fixes onto the new release's tag in a new gateway
