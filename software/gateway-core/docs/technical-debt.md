@@ -109,6 +109,22 @@ a substantial net-new capability, not a refactor, and is not designed in
 detail yet (discovery mechanism, inter-gateway message envelope,
 automation rule format, and conflict handling are all still open).
 
+## IPv4 link-local without conflict detection
+
+The network settings offer IPv4 link-local (169.254.x.y, RFC 3927), but
+only half of it: the address is derived from the MAC
+(`gateway_core::network::link_local_v4`) and taken without probing. RFC
+3927 § 2.2 wants ARP probes first (is the address in use?), announcements,
+defending it, and a new address on a conflict; smoltcp has none of that
+(no ARP probe, no conflict event), and embassy-net no raw Ethernet socket
+to do it beside the stack. With 65024 addresses and a handful of
+link-local devices a clash is unlikely, but it would go unnoticed.
+
+**Fix:** IPv4 link-local in smoltcp (an `Interface` option that probes,
+announces and defends, and picks a new address on a conflict), offered
+upstream as a contribution if its maintainers want it; then the gateway
+switches to it.
+
 ## Not yet ported from the legacy design
 
 These aren't "bad", just genuinely unfinished relative to the original's

@@ -16,7 +16,10 @@ the gateway was unreachable or could not reach its broker.
 ## Decision
 
 **IPv6 is the first choice, IPv4 stays.** Both are configured without
-setup; neither depends on the other.
+setup; neither depends on the other. The network settings
+(`gateway_core::network`, `/api/v1/network`) can change that: IPv4
+link-local or by hand, DNS servers by hand, SLAAC off, DHCPv6 enforced or
+off, and an IPv6 address and gateway by hand next to the others.
 
 - **Addresses.** The link-local address, one SLAAC address per prefix the
   routers announce (with their lifetimes), and a DHCPv6 address when the
@@ -40,8 +43,8 @@ setup; neither depends on the other.
 **Forks** (by git revision, `software/patches/README.md`) of esp-hal (no TX checksum
 insertion on the ESP32), smoltcp (every prefix of an RA, the routers' M/O
 flags and RDNSS, the SLAAC default route next to IPv4's) and embassy-net
-(every address kept, RDNSS as DNS, `set_dhcpv6_lease`), until upstream has
-the fixes.
+(every address kept, RDNSS as DNS, `set_dhcpv6_lease`, `set_manual_v6`, DNS
+servers in place of DHCPv4's), until upstream has the fixes.
 
 **What it shows.** The console's `network`, `GET /system` (`network`) and
 the UI list every address with its origin, the gateways, the DNS servers

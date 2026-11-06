@@ -2,7 +2,9 @@
 //!
 //! The routers' Router Advertisements decide what it does: with `M` set it
 //! leases an address (stateful), with only `O` it fetches the other
-//! configuration (stateless), with neither it stays quiet. The address and
+//! configuration (stateless), with neither it stays quiet. The network
+//! settings can make it always lease an address, whatever the flags, or
+//! switch it off ([`mode`]). The address and
 //! the DNS servers go to `embassy-net` next to SLAAC's
 //! ([`Stack::set_dhcpv6_lease`]); the NTP server is what SNTP uses unless
 //! one is configured ([`crate::cert::ntp_server`]). Before a restart the
@@ -18,11 +20,12 @@ use dhcpeav6_client::{
 };
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
-use embassy_net::{Dhcpv6Lease, IpEndpoint, Ipv6Cidr, Stack};
+use embassy_net::{Dhcpv6Lease, IpEndpoint, Ipv6Cidr, Ipv6RouterFlags, Stack};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
+use gateway_core::network::{Dhcpv6Mode, NetworkConfig};
 
 /// `embassy-net` takes one DHCPv6 address.
 const ADDRESSES: usize = 1;
@@ -86,14 +89,34 @@ fn now() -> dhcpeav6_client::Instant {
     dhcpeav6_client::Instant::from_millis(Instant::now().as_millis())
 }
 
-#[embassy_executor::task]
-pub async fn dhcpv6_task(stack: Stack<'static>) {
-    // On the heap, like the web server's tasks: the client and its buffers
-    // (~2.5 KB) would otherwise be static and take the stack's room.
-    crate::heap::boxed(|| run(stack)).await
+/// How the client runs with the network settings `settings`: `None` if
+/// it doesn't (switched off, or as the routers ask but without SLAAC,
+/// which reads their flags).
+pub fn mode(settings: &NetworkConfig) -> Option<Dhcpv6Mode> {
+    match settings.dhcpv6 {
+        Dhcpv6Mode::Enforce => Some(Dhcpv6Mode::Enforce),
+        Dhcpv6Mode::Auto if settings.slaac => Some(Dhcpv6Mode::Auto),
+        _ => None,
+    }
 }
 
-async fn run(stack: Stack<'static>) {
+#[embassy_executor::task]
+pub async fn dhcpv6_task(stack: Stack<'static>, mode: Dhcpv6Mode) {
+    // On the heap, like the web server's tasks: the client and its buffers
+    // (~2.5 KB) would otherwise be static and take the stack's room.
+    crate::heap::boxed(|| run(stack, mode == Dhcpv6Mode::Enforce)).await
+}
+
+/// The client's mode for the routers' `flags`, or stateful if `enforce`.
+fn client_mode(flags: Ipv6RouterFlags, enforce: bool) -> Mode {
+    if enforce {
+        Mode::Stateful
+    } else {
+        Mode::from_router_flags(flags.managed, flags.other)
+    }
+}
+
+async fn run(stack: Stack<'static>, enforce: bool) {
     let embassy_net::HardwareAddress::Ethernet(mac) = stack.hardware_address();
     let mac = mac.0;
     let rng = esp_hal::rng::Rng::new();
@@ -121,7 +144,7 @@ async fn run(stack: Stack<'static>) {
     let mut releasing = false;
     let mut message = [0u8; 384];
     let mut published = None;
-    client.set_mode(Mode::from_router_flags(flags.managed, flags.other), now());
+    client.set_mode(client_mode(flags, enforce), now());
     loop {
         while let Ok(Some(len)) = client.poll(now(), &mut message) {
             // Without a link the message is lost; the retransmissions go on.
@@ -168,7 +191,7 @@ async fn run(stack: Stack<'static>) {
             Either4::Third(()) => {
                 flags = stack.ipv6_router_flags();
                 if !releasing {
-                    client.set_mode(Mode::from_router_flags(flags.managed, flags.other), now());
+                    client.set_mode(client_mode(flags, enforce), now());
                 }
             }
             Either4::Fourth(Either::First(())) => {

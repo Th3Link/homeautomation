@@ -1196,7 +1196,7 @@ dependencies = [
 [[package]]
 name = "embassy-net"
 version = "0.9.1"
-source = "git+https://github.com/Th3Link/embassy?rev=8b544c3c4d8b5952073420d17396e30700c46190#8b544c3c4d8b5952073420d17396e30700c46190"
+source = "git+https://github.com/Th3Link/embassy?rev=e93a35c52bc0a1f18c00591e200fcf360f832260#e93a35c52bc0a1f18c00591e200fcf360f832260"
 dependencies = [
  "document-features",
  "embassy-net-driver",
