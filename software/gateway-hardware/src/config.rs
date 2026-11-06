@@ -12,6 +12,7 @@ use common_hardware::config_store::{ConfigCell, ConfigStore};
 use core::ops::Range;
 pub use gateway_core::config::Key;
 use gateway_core::config::{Bitrate, BrokerConfig, GatewayConfig};
+use gateway_core::network::{self, NetworkConfig};
 
 /// Matches the `nvs` entry in `partitions.csv`.
 pub const CONFIG_PARTITION: Range<u32> = 0x9000..0x4C000;
@@ -72,6 +73,24 @@ pub async fn set_eth_clock_gpio(gpio: u8) -> Result<(), ()> {
         return Err(());
     }
     config().await.set_u8(ETH_CLOCK_KEY, gpio).await
+}
+
+/// The network settings ([`gateway_core::network`]); the defaults (DHCP
+/// and SLAAC) if none are stored or they don't decode.
+pub async fn network() -> NetworkConfig {
+    let mut buffer = [0u8; network::STORED_MAX];
+    let stored = config().await.read_bytes(Key::Network, &mut buffer).await;
+    stored
+        .and_then(|len| network::decode(&buffer[..len]))
+        .unwrap_or_default()
+}
+
+/// Stores the network settings (checked by the caller); they take effect
+/// after a restart.
+pub async fn set_network(settings: &NetworkConfig) -> Result<(), ()> {
+    let mut buffer = [0u8; network::STORED_MAX];
+    let bytes = network::encode(settings, &mut buffer).ok_or(())?;
+    config().await.set_bytes(Key::Network, bytes).await
 }
 
 /// The user name and password the web server asks for.

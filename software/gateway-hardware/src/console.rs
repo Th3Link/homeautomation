@@ -32,6 +32,7 @@ use esp_hal::Async;
 use gateway_core::can_message_type::CanMessageType;
 use gateway_core::config::Bitrate;
 use gateway_core::device_type::DeviceType;
+use gateway_core::network::{Dhcpv6Mode, Ipv4Mode, NetworkConfig};
 use heapless::String;
 
 const LINE_CAP: usize = 160;
@@ -141,6 +142,33 @@ enum Commands<'a> {
     /// Show the network: link, MAC, IPv4 and IPv6 addresses, gateways, DNS
     /// servers and the time.
     Network,
+    /// How the gateway gets its IPv4 address: `dhcp`, `link-local`
+    /// (169.254.x.y from the MAC) or an address by hand, e.g.
+    /// `192.168.1.20/24` (needs a DNS server first, `dns`). The network
+    /// settings take effect after a restart.
+    Ipv4(&'a str),
+    /// Set the IPv4 gateway for an address by hand, or `none`.
+    Ipv4Gateway(&'a str),
+    /// Set up to two IPv4 DNS servers, comma-separated, or `none`: needed
+    /// with an address by hand; with DHCP they take the place of the DHCP
+    /// server's.
+    Dns(&'a str),
+    /// IPv6 SLAAC on (the default) or off: off ignores the routers'
+    /// advertisements altogether (no prefixes, router or M/O flags).
+    #[set(one_of = ["on", "off"])]
+    Slaac(OnOff),
+    /// DHCPv6: `auto` as the routers' M/O flags ask (the default; needs
+    /// SLAAC), `enforce` always stateful, or `off`.
+    #[set(one_of = ["auto", "enforce", "off"])]
+    Dhcpv6(Dhcpv6Arg),
+    /// Add an IPv6 address by hand, e.g. `2001:db8::20/64`, or `none`.
+    Ipv6Address(&'a str),
+    /// Set the IPv6 gateway (used without SLAAC), e.g. `fe80::1`, or
+    /// `none`.
+    Ipv6Gateway(&'a str),
+    /// Back to DHCP and SLAAC, with DHCPv6 as the routers ask (after a
+    /// restart).
+    NetworkReset,
     /// Show the HTTPS certificate: mode, FQDN, validity, status, and the
     /// device key's pin-sha256 (to register it with an EST server).
     TlsStatus,
@@ -183,6 +211,21 @@ impl FromStr for DeviceTypeArg {
             "rollershutter" => DeviceType::Rollershutter,
             "ssr" => DeviceType::SSR,
             "heatingcontrol" => DeviceType::HeatingControl,
+            _ => return Err(()),
+        }))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Dhcpv6Arg(Dhcpv6Mode);
+
+impl FromStr for Dhcpv6Arg {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(match s {
+            "auto" => Dhcpv6Mode::Auto,
+            "enforce" => Dhcpv6Mode::Enforce,
+            "off" => Dhcpv6Mode::Off,
             _ => return Err(()),
         }))
     }
@@ -376,6 +419,46 @@ async fn handle_command(
         }
         Commands::WebHttps(v) => respond(writer, cmd_web_https(matches!(v, OnOff::On)).await).await,
         Commands::Network => cmd_network(writer).await,
+        Commands::Ipv4(s) => respond(writer, change_network(|n| set_ipv4(n, s)).await).await,
+        Commands::Ipv4Gateway(s) => {
+            let change = |n: &mut NetworkConfig| {
+                n.ipv4_gateway = parse_or_none(s).ok_or("ipv4-gateway: an address or none")?;
+                Ok(())
+            };
+            respond(writer, change_network(change).await).await
+        }
+        Commands::Dns(s) => respond(writer, change_network(|n| set_dns(n, s)).await).await,
+        Commands::Slaac(v) => {
+            let change = |n: &mut NetworkConfig| {
+                n.slaac = matches!(v, OnOff::On);
+                Ok(())
+            };
+            respond(writer, change_network(change).await).await
+        }
+        Commands::Dhcpv6(mode) => {
+            let change = |n: &mut NetworkConfig| {
+                n.dhcpv6 = mode.0;
+                Ok(())
+            };
+            respond(writer, change_network(change).await).await
+        }
+        Commands::Ipv6Address(s) => {
+            respond(writer, change_network(|n| set_ipv6_address(n, s)).await).await
+        }
+        Commands::Ipv6Gateway(s) => {
+            let change = |n: &mut NetworkConfig| {
+                n.ipv6_gateway = parse_or_none(s).ok_or("ipv6-gateway: an address or none")?;
+                Ok(())
+            };
+            respond(writer, change_network(change).await).await
+        }
+        Commands::NetworkReset => {
+            let change = |n: &mut NetworkConfig| {
+                *n = NetworkConfig::default();
+                Ok(())
+            };
+            respond(writer, change_network(change).await).await
+        }
         // ~15 KB of state (the certificate status): on the heap while it
         // runs, rather than in this task's static memory, which comes out
         // of the main stack's room.
@@ -893,6 +976,76 @@ fn dhcpv6_lines() -> heapless::Vec<String<LINE_CAP>, 3> {
     })
 }
 
+/// Changes the stored network settings with `change`, checks and stores
+/// them.
+async fn change_network(
+    change: impl FnOnce(&mut NetworkConfig) -> Result<(), &'static str>,
+) -> String<LINE_CAP> {
+    let mut settings = config::network().await;
+    if let Err(message) = change(&mut settings).and_then(|()| settings.validate()) {
+        return str_msg(message);
+    }
+    match config::set_network(&settings).await {
+        Ok(()) => str_msg("network settings stored (take effect after restart)"),
+        Err(()) => str_msg("storing the network settings failed"),
+    }
+}
+
+/// `none` or an address.
+fn parse_or_none<T: FromStr>(s: &str) -> Option<Option<T>> {
+    if s == "none" {
+        Some(None)
+    } else {
+        s.parse().ok().map(Some)
+    }
+}
+
+/// `address/prefix`.
+fn parse_cidr<T: FromStr>(s: &str) -> Option<(T, u8)> {
+    let (address, prefix) = s.split_once('/')?;
+    Some((address.parse().ok()?, prefix.parse().ok()?))
+}
+
+fn set_ipv4(settings: &mut NetworkConfig, s: &str) -> Result<(), &'static str> {
+    settings.ipv4_mode = match s {
+        "dhcp" => Ipv4Mode::Dhcp,
+        "link-local" => Ipv4Mode::LinkLocal,
+        _ => {
+            let (address, prefix) =
+                parse_cidr(s).ok_or("ipv4: dhcp, link-local or an address/prefix")?;
+            settings.ipv4_address = Some(address);
+            settings.ipv4_prefix = prefix;
+            Ipv4Mode::Manual
+        }
+    };
+    Ok(())
+}
+
+fn set_dns(settings: &mut NetworkConfig, s: &str) -> Result<(), &'static str> {
+    settings.dns_servers.clear();
+    if s != "none" {
+        for server in s.split(',') {
+            let address = server.parse().map_err(|_| "dns: addresses or none")?;
+            settings
+                .dns_servers
+                .push(address)
+                .map_err(|_| "dns: two servers at most")?;
+        }
+    }
+    Ok(())
+}
+
+fn set_ipv6_address(settings: &mut NetworkConfig, s: &str) -> Result<(), &'static str> {
+    if s == "none" {
+        settings.ipv6_address = None;
+    } else {
+        let (address, prefix) = parse_cidr(s).ok_or("ipv6-address: an address/prefix or none")?;
+        settings.ipv6_address = Some(address);
+        settings.ipv6_prefix = prefix;
+    }
+    Ok(())
+}
+
 async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     let Some(net) = crate::ethernet::info().await else {
         return respond(writer, "network: not started (no Ethernet PHY)").await;
@@ -915,25 +1068,35 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
 
     match &net.v4 {
         Some(v4) => {
-            respond(writer, fmt_msg(format_args!("ipv4: {} (DHCP)", v4.address))).await?;
+            let origin = net.v4_origin();
+            respond(
+                writer,
+                fmt_msg(format_args!("ipv4: {} ({origin})", v4.address)),
+            )
+            .await?;
             match v4.gateway {
                 Some(gateway) => {
                     respond(writer, fmt_msg(format_args!("ipv4 gateway: {gateway}"))).await?
                 }
                 None => respond(writer, "ipv4 gateway: none").await?,
             }
+            let origin = net.v4_dns_origin();
             for server in &v4.dns_servers {
-                respond(writer, fmt_msg(format_args!("ipv4 dns: {server}"))).await?;
+                respond(
+                    writer,
+                    fmt_msg(format_args!("ipv4 dns: {server} ({origin})")),
+                )
+                .await?;
             }
         }
-        None => respond(writer, "ipv4: no DHCP lease").await?,
+        None => respond(writer, "ipv4: none (no DHCP lease yet)").await?,
     }
 
     for cidr in &net.v6_addresses {
         let origin = net.v6_origin(cidr);
         respond(writer, fmt_msg(format_args!("ipv6: {cidr} ({origin})"))).await?;
     }
-    match net.v6.as_ref().and_then(|v6| v6.gateway) {
+    match net.v6_gateway() {
         Some(gateway) => respond(writer, fmt_msg(format_args!("ipv6 gateway: {gateway}"))).await?,
         None => respond(writer, "ipv6 gateway: none").await?,
     }
@@ -967,6 +1130,20 @@ async fn cmd_network(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     for line in dhcpv6_lines() {
         respond(writer, &line).await?;
     }
+    let settings = &net.settings;
+    respond(
+        writer,
+        fmt_msg(format_args!(
+            "ipv6 settings: SLAAC {}, DHCPv6 {}",
+            if settings.slaac { "on" } else { "off" },
+            match settings.dhcpv6 {
+                Dhcpv6Mode::Auto => "as the routers ask",
+                Dhcpv6Mode::Enforce => "enforced",
+                Dhcpv6Mode::Off => "off",
+            }
+        )),
+    )
+    .await?;
 
     let ntp = crate::cert::ntp_server().await;
     if let Some(gateway_core::nts::Server::Nts { .. }) = gateway_core::nts::parse_server(&ntp) {

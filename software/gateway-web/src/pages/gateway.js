@@ -7,7 +7,7 @@ export function Gateway() {
   // One request for both sections: the gateway serves one HTTPS session
   // at a time.
   const system = useLoad(api.system.get, 5000);
-  return html`<${Info} ...${system} /><${Network} ...${system} /><${Settings} /><${Location} /><${Firmware} />`;
+  return html`<${Info} ...${system} /><${Network} ...${system} /><${NetworkSettings} /><${Settings} /><${Location} /><${Firmware} />`;
 }
 
 function Info({ data, error }) {
@@ -33,18 +33,111 @@ function Network({ data, error }) {
   const n = data.network;
   if (!n) return html`<${Section} title="Network"><p>No Ethernet.</p><//>`;
   const list = (items) => items.map((i) => html`<div>${i.address} <span class="muted">(${i.origin})</span></div>`);
-  const dhcpv6 = { off: 'not offered by the routers', stateless: 'configuration only (O)', stateful: 'addresses and configuration (M)' }[n.dhcpv6_mode];
+  const dhcpv6 =
+    n.dhcpv6_setting === 'off' ? 'switched off'
+    : n.dhcpv6_setting === 'auto' && !n.slaac ? 'off (follows the routers, which SLAAC reads)'
+    : n.dhcpv6_setting === 'enforce' ? 'enforced: addresses and configuration'
+    : { off: 'not offered by the routers', stateless: 'configuration only (O)', stateful: 'addresses and configuration (M)' }[n.dhcpv6_mode];
   return html`
     <${Section} title="Network" aside=${html`<span class=${'badge ' + (n.link_up ? 'ok' : 'warn')}>${n.link_up ? 'link up' : 'link down'}</span>`}>
       <dl class="facts">
         <div><dt>IPv6</dt><dd>${n.ipv6.length ? list(n.ipv6) : 'none'}</dd></div>
         <div><dt>IPv6 gateway</dt><dd>${n.ipv6_gateway || 'none'}</dd></div>
         <div><dt>DHCPv6</dt><dd>${dhcpv6}</dd></div>
-        <div><dt>IPv4</dt><dd>${n.ipv4 ? html`${n.ipv4} <span class="muted">(DHCP)</span>` : 'no DHCP lease'}</dd></div>
+        <div><dt>IPv4</dt><dd>${n.ipv4 ? html`${n.ipv4} <span class="muted">(${n.ipv4_origin})</span>` : n.ipv4_origin === 'DHCP' ? 'no DHCP lease' : 'none'}</dd></div>
         <div><dt>IPv4 gateway</dt><dd>${n.ipv4_gateway || 'none'}</dd></div>
         <div><dt>DNS servers</dt><dd>${n.dns_servers.length ? list(n.dns_servers) : 'none'}</dd></div>
         <div><dt>MAC</dt><dd>${n.mac}</dd></div>
       </dl>
+    <//>`;
+}
+
+// `address/prefix` in a field, or empty.
+const cidr = (address, prefix) => (address ? `${address}/${prefix}` : '');
+function parseCidr(text, defaultPrefix) {
+  const [address, prefix] = text.trim().split('/');
+  return { address: address || null, prefix: prefix ? +prefix : defaultPrefix };
+}
+
+const toForm = (s) => ({
+  ipv4_mode: s.ipv4_mode,
+  ipv4: cidr(s.ipv4_address, s.ipv4_prefix),
+  ipv4_gateway: s.ipv4_gateway || '',
+  dns1: s.dns_servers[0] || '',
+  dns2: s.dns_servers[1] || '',
+  slaac: s.slaac,
+  dhcpv6: s.dhcpv6,
+  ipv6: cidr(s.ipv6_address, s.ipv6_prefix),
+  ipv6_gateway: s.ipv6_gateway || '',
+});
+
+function fromForm(f) {
+  const v4 = parseCidr(f.ipv4, 24);
+  const v6 = parseCidr(f.ipv6, 64);
+  return {
+    ipv4_mode: f.ipv4_mode,
+    ipv4_address: f.ipv4_mode === 'manual' ? v4.address : null,
+    ipv4_prefix: v4.prefix,
+    ipv4_gateway: f.ipv4_mode === 'manual' ? f.ipv4_gateway.trim() || null : null,
+    dns_servers: [f.dns1, f.dns2].map((d) => d.trim()).filter(Boolean),
+    slaac: f.slaac,
+    dhcpv6: f.dhcpv6,
+    ipv6_address: v6.address,
+    ipv6_prefix: v6.prefix,
+    ipv6_gateway: f.ipv6_gateway.trim() || null,
+  };
+}
+
+function NetworkSettings() {
+  const { data, error, reload } = useLoad(api.network.get);
+  const [form, setForm] = useState(null);
+  const title = 'Network settings';
+  if (!data) return html`<${Section} title=${title}><${Loading} error=${error} /><//>`;
+  const f = form || toForm(data.settings);
+  const set = (key) => (e) => setForm({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const manual = f.ipv4_mode === 'manual';
+
+  const save = async () => {
+    if (!form) return notify('Nothing changed');
+    if (!confirm('Store the network settings? They take effect after a restart. If the gateway is unreachable then, the serial console\'s network-reset brings back DHCP and SLAAC.')) return;
+    if (await run(() => api.network.put(fromForm(form)), 'Saved')) {
+      setForm(null);
+      reload();
+    }
+  };
+
+  return html`
+    <${Section} title=${title} aside=${data.restart_required ? html`<span class="badge warn">restart to apply</span>` : null}>
+      <h3>IPv4</h3>
+      <div class="row">
+        <${Field} label="Address"><select value=${f.ipv4_mode} onChange=${set('ipv4_mode')}>
+          <option value="dhcp">DHCP</option>
+          <option value="link_local">Link-local (${data.link_local_ipv4})</option>
+          <option value="manual">Manual</option>
+        </select><//>
+        ${manual && html`
+          <${Field} label="Address/prefix" hint="e.g. 192.168.1.20/24"><input value=${f.ipv4} onInput=${set('ipv4')} /><//>
+          <${Field} label="Gateway" hint="empty: the local network only"><input value=${f.ipv4_gateway} onInput=${set('ipv4_gateway')} /><//>`}
+      </div>
+      <div class="row">
+        <${Field} label="DNS server 1" hint=${manual ? 'at least one' : 'optional: replaces the DHCP server\'s'}><input value=${f.dns1} onInput=${set('dns1')} /><//>
+        <${Field} label="DNS server 2"><input value=${f.dns2} onInput=${set('dns2')} /><//>
+      </div>
+      <h3>IPv6</h3>
+      <div class="row">
+        <label class="check"><input type="checkbox" checked=${f.slaac} onChange=${set('slaac')} /> SLAAC (addresses and router from the routers' advertisements)</label>
+        <${Field} label="DHCPv6"><select value=${f.dhcpv6} onChange=${set('dhcpv6')}>
+          <option value="auto">As the routers ask (M/O flags)</option>
+          <option value="enforce">Always (address and configuration)</option>
+          <option value="off">Off</option>
+        </select><//>
+      </div>
+      ${!f.slaac && f.dhcpv6 === 'auto' && html`<p class="muted">Without SLAAC the routers' flags aren't read, so DHCPv6 only runs when enforced.</p>`}
+      <div class="row">
+        <${Field} label="Address/prefix" hint="optional, next to the others, e.g. 2001:db8::20/64"><input value=${f.ipv6} onInput=${set('ipv6')} /><//>
+        <${Field} label="Gateway" hint=${f.slaac ? 'only used without SLAAC' : 'e.g. fe80::1'}><input value=${f.ipv6_gateway} onInput=${set('ipv6_gateway')} /><//>
+      </div>
+      <div class="buttons"><${Button} kind="primary" onClick=${save}>Save<//>${form && html`<button onClick=${() => setForm(null)}>Discard</button>`}</div>
     <//>`;
 }
 
