@@ -34,6 +34,9 @@ next to the component they constrain — e.g.
 | [0019](../../software/gateway-core/docs/adr/0019-ipv6-first.md) | IPv6 first, with SLAAC and DHCPv6 | gateway | Accepted |
 | [0021](0021-can-discovery.md) | Nodes announce themselves until the gateway acks (Discovery) | workspace | Accepted |
 | [0022](../../software/gateway-core/docs/adr/0022-home-assistant-discovery.md) | Home Assistant MQTT discovery from the gateway | gateway | Accepted |
+| [0025](../../software/gateway-core/docs/adr/0025-on-gateway-automation.md) | Automation on the gateway, from fixed building blocks | gateway | Accepted |
+| [0026](../../software/gateway-core/docs/adr/0026-node-logs.md) | The nodes' logs over CAN, and all log lines on MQTT | gateway, nodes | Accepted |
+||||||| Stash base
 
 ADRs 0010 and 0011 are **proposed**, not yet implemented — see
 [`gateway-core`'s technical-debt.md`](../../software/gateway-core/docs/technical-debt.md)

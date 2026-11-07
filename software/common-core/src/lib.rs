@@ -64,6 +64,7 @@ pub mod device_message;
 pub mod device_type;
 pub mod discovery;
 pub mod heating_message;
+pub mod log_download;
 pub mod ota;
 #[cfg(test)]
 mod ota_loopback;

@@ -59,6 +59,11 @@ pub enum Key {
     /// The network settings ([`crate::network`]), postcard behind a format
     /// version byte.
     Network = 27,
+    /// Publish the log lines on the primary broker: the gateway's own and
+    /// those it downloads from the nodes (ADR 0026). On unless switched off.
+    LogsToMqtt = 28,
+    /// Seconds between two rounds of node log downloads (`u32`, 0: none).
+    NodeLogInterval = 29,
 }
 
 /// How many MQTT brokers the gateway talks to at the same time.
@@ -256,6 +261,8 @@ mod tests {
         assert_eq!(u8::from(Key::Longitude), 24);
         assert_eq!(u8::from(Key::TimeZone), 25);
         assert_eq!(u8::from(Key::Network), 27);
+        assert_eq!(u8::from(Key::LogsToMqtt), 28);
+        assert_eq!(u8::from(Key::NodeLogInterval), 29);
     }
 
     #[test]

@@ -81,9 +81,33 @@ pub fn available_topic(device_key: u32) -> Topic {
 /// Body published to [`available_topic`] — always this literal string.
 pub const AVAILABLE_BODY: &str = "0x01";
 
+/// `canbus/device_log/0x<device>` or `canbus/device_log/<custom_string>`:
+/// a node's log lines, downloaded over CAN (ADR 0026), one line a message.
+pub fn device_log_topic(device_key: u32, custom_string: &str) -> Topic {
+    let mut t = Topic::new();
+    let _ = t.push_str("canbus/device_log/");
+    write_device_segment(&mut t, device_key, custom_string);
+    t
+}
+
+/// The gateway's own log lines, one a message.
+pub const GATEWAY_LOG_TOPIC: &str = "canbus/gateway/log";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_log_topic_names_the_device() {
+        assert_eq!(
+            device_log_topic(0x1005_0100, "").as_str(),
+            "canbus/device_log/0x10050100"
+        );
+        assert_eq!(
+            device_log_topic(0x1005_0100, "kitchen").as_str(),
+            "canbus/device_log/kitchen"
+        );
+    }
 
     #[test]
     fn sensor_name_mapping() {

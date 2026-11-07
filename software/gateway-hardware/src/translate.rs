@@ -122,6 +122,12 @@ pub async fn dispatch(id: CanId, data: &[u8], request: bool) {
                 gateway_core::can_ota::target_id(id.device_key(), CanMessageType::DiscoveryAck);
             crate::can::send_raw(ack, &[], false).await;
         }
+        // A node's log, being downloaded (ADR 0026).
+        CanMessageType::LogDownload if !request => {
+            if let Ok(frame) = gateway_core::log_download::LogFrame::from_bytes(data) {
+                crate::node_log::frame(id.device_key(), frame);
+            }
+        }
         // The answers of a node to a firmware update.
         CanMessageType::OtaControl if !request => {
             if let Ok(control) = gateway_core::ota::OtaControl::from_bytes(data) {

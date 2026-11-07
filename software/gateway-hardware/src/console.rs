@@ -169,6 +169,13 @@ enum Commands<'a> {
     /// Back to DHCP and SLAAC, with DHCPv6 as the routers ask (after a
     /// restart).
     NetworkReset,
+    /// Publish the log lines on the first broker: the gateway's own on
+    /// `canbus/gateway/log`, the nodes' (downloaded over CAN) on
+    /// `canbus/device_log/<device>` (on by default).
+    #[set(one_of = ["on", "off"])]
+    LogMqtt(OnOff),
+    /// Seconds between two rounds of node log downloads (60-86400; 0: none).
+    NodeLogInterval(u32),
     /// Show the HTTPS certificate: mode, FQDN, validity, status, and the
     /// device key's pin-sha256 (to register it with an EST server).
     TlsStatus,
@@ -458,6 +465,26 @@ async fn handle_command(
                 Ok(())
             };
             respond(writer, change_network(change).await).await
+        }
+        Commands::LogMqtt(v) => {
+            let on = matches!(v, OnOff::On);
+            let text = match crate::node_log::set_to_mqtt(on).await {
+                Ok(()) if on => "log lines to MQTT on",
+                Ok(()) => "log lines to MQTT off",
+                Err(()) => "storing the setting failed",
+            };
+            respond(writer, text).await
+        }
+        Commands::NodeLogInterval(seconds) => {
+            let text = if seconds != 0 && !(60..=86_400).contains(&seconds) {
+                str_msg("node-log-interval: 0 (none) or 60-86400 seconds")
+            } else {
+                match crate::node_log::set_interval_s(seconds).await {
+                    Ok(()) => fmt_msg(format_args!("node logs every {seconds} s")),
+                    Err(()) => str_msg("storing the setting failed"),
+                }
+            };
+            respond(writer, text).await
         }
         // ~15 KB of state (the certificate status): on the heap while it
         // runs, rather than in this task's static memory, which comes out

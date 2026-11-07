@@ -31,6 +31,7 @@ pub mod lamps;
 pub mod location;
 pub mod log_buffer;
 pub mod mqtt;
+pub mod node_log;
 pub mod nts;
 pub mod resolve;
 pub mod sensor_list;

@@ -109,6 +109,9 @@ export const devices = {
     }
   },
   get: (device) => get(`/devices/${seg(device)}`),
+  // The node's log, downloaded over CAN: start, then read in pieces.
+  downloadLog: (device) => post(`/devices/${seg(device)}/log`),
+  readLog: (device, from) => get(`/devices/${seg(device)}/log?from=${from}`),
   update: (device, changes) => patch(`/devices/${seg(device)}`, changes),
   action: (device, action) => post(`/devices/${seg(device)}/${action}`),
   silence: (device, on) => put(`/devices/${seg(device)}/silence`, { on }),
@@ -181,6 +184,7 @@ export const firmware = {
 export const logs = {
   read: (from) => get(`/logs?from=${from}`),
   setCanToMqtt: (on) => patch('/logs', { can_to_mqtt: on }),
+  update: (changes) => patch('/logs', changes),
 };
 
 // The gateway's own automation (ADR 0025): outputs, switch configurations,

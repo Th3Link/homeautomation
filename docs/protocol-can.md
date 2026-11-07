@@ -540,6 +540,33 @@ byte:  0..3
       └──────────┘
 ```
 
+## Node logs (`LogDownload`)
+
+How the gateway reads a `cancomponents` node's log
+([ADR 0026](../software/gateway-core/docs/adr/0026-node-logs.md),
+`common-core/src/log_download.rs`). The node keeps its latest console lines
+(4 KiB, `[uptime] text\n`) and sends them in **blocks** of whole lines, up to
+224 bytes; it drops a block only once the gateway acknowledged it, so every
+line is downloaded once. All frames are `LogDownload` (155) with the node's
+id; the top two bits of byte 0 say what a data frame is:
+
+| Frame | Direction | Layout |
+|---|---|---|
+| R frame | to the node | send the log: the block not yet acknowledged again, else the next |
+| Data (op 0) | from the node | byte 0: frame index in the block (0-31); bytes 1-7: log bytes (the last frame shorter) |
+| Block end (op 1) | from the node | byte 0 low 6 bits: data frames; byte 1: block number; bytes 2-3: length; bytes 4-5: CRC-16/CCITT-FALSE; bytes 6-7: bytes still waiting |
+| Ack (op 2) | to the node | byte 1: the block number |
+| End (op 3) | from the node | byte 1: the next block number; bytes 2-3: bytes overwritten before they were downloaded |
+
+Numbers are little-endian. The node sends the data frames back to back,
+then the block end, and waits for the ack: 500 ms, then the block again, five
+times; then it stops and keeps the block for the next request. The gateway
+acknowledges a block that arrived whole (all frames, length and CRC right)
+and takes its lines; a block with the number it took last (its ack was lost)
+is acknowledged again and not taken; a damaged block is not answered. With
+nothing (more) to send, the node answers `End`. A node that doesn't know the
+message (the STM32 ones) doesn't answer the R frame.
+
 ## Firmware update in blocks (`OtaControl` / `OtaData`)
 
 The way the `cancomponents` nodes are updated; the nodes know no other. Design

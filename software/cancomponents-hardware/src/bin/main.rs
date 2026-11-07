@@ -13,6 +13,7 @@ use cancomponents::echo_guard;
 use cancomponents::extension::Extension;
 use cancomponents::flash;
 use cancomponents::heating;
+use cancomponents::node_log;
 use cancomponents::relais::Relais;
 use cancomponents::temperature;
 use cancomponents::update;
@@ -38,6 +39,8 @@ fn custom_halt() -> ! {
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
+    // Keep the log lines for the gateway to download, from the first one.
+    node_log::install();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
@@ -196,6 +199,7 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     // Announced until the gateway acks, see `discovery`.
+    node_log::init(&spawner);
     discovery::init(&spawner);
 
     echo_guard::init(&spawner).await;
