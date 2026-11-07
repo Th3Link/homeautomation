@@ -619,5 +619,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "4c65a45d2046d795aaef5b79e3c311ae1f0a1847",
+  "date": "2026-11-07T11:01:23+01:00",
+  "subject": "Merge pull request #73 from Th3Link/feat/node-logs",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 496290,
+    "iram": 18680,
+    "dram_static": 45888,
+    "stack_budget": 150720,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519729,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
