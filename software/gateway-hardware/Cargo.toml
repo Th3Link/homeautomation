@@ -60,7 +60,7 @@ sha2 = { version = "0.11", default-features = false }
 # RSA-PSS signatures (most brokers' certificates are RSA) need a heap.
 rsa = { version = "0.9", default-features = false, features = ["sha2"] }
 esp-alloc = { version = "0.11.0", features = ["esp32"] }
-picoserve = { version = "0.20.1", features = ["embassy", "json"] }
+picoserve = { version = "0.21.0", features = ["embassy", "json"] }
 # TLS for the web server (HTTPS) and the EST client, ADR 0018. embedded-tls
 # above has no server side. Built from source with the Xtensa GCC
 # (`use-gcc`; the prebuilt libraries don't fit the record sizes and the
