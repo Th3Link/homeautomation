@@ -688,5 +688,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "7c3014c3fbf83e3baa3374fd0cb7c4396e74fc1f",
+  "date": "2026-11-16T22:43:25+01:00",
+  "subject": "Merge pull request #79 from Th3Link/renovate/renovatebot-github-action-46.x",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 496290,
+    "iram": 18680,
+    "dram_static": 45888,
+    "stack_budget": 150720,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519729,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
