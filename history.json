@@ -734,5 +734,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "0d0486e3dd3bc52d5e79811a4dfe4cfb6c3918be",
+  "date": "2026-11-20T21:00:15+01:00",
+  "subject": "Merge pull request #96 from Th3Link/renovate/vergen-git2-10.x-lockfile",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 498614,
+    "iram": 18680,
+    "dram_static": 45896,
+    "stack_budget": 150708,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519409,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
