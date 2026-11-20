@@ -2,7 +2,7 @@
 //! and schedules run here, on the CAN bus, without MQTT or a hub.
 //!
 //! [`gateway_core::automation`] has the logic; this module feeds it. The
-//! configuration lives in [`store`] on flash; what every event needs is in
+//! configuration lives in [`mod@store`] on flash; what every event needs is in
 //! RAM ([`Runtime`]: the engine, which switch configurations each switch
 //! is in, which flash slot each output came from). One task ([`automation_task`]) takes the events
 //! from the CAN dispatch, MQTT and the web UI ([`post`]) one after the

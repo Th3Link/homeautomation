@@ -14,7 +14,7 @@
 //!
 //! The key exchange is repeated when the cookies are used up, when the
 //! server says it can't read them any more (NTS NAK), after
-//! [`MAX_UNANSWERED`] requests in a row went unanswered, and when the
+//! `MAX_UNANSWERED` requests in a row went unanswered, and when the
 //! setting changes. It isn't kept across restarts. A server that can't be
 //! reached over NTS is not asked without it.
 

@@ -83,7 +83,7 @@ pub const SECONDARY: usize = 1;
 static PUBLISH_QUEUES: [Channel<CriticalSectionRawMutex, Publication, 16>; MQTT_BROKERS] =
     [Channel::new(), Channel::new()];
 
-/// A retained message too long for [`PUBLISH_QUEUES`]: Home Assistant's
+/// A retained message too long for the normal publish queue: Home Assistant's
 /// discovery configurations ([`crate::ha`]). One at a time, primary broker
 /// only; the sender waits until it was taken.
 pub struct RetainedPublication {

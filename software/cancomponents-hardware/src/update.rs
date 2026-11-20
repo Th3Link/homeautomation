@@ -75,7 +75,7 @@ pub async fn init(spawner: &Spawner) {
 /// `Echo` it gets answered ([`crate::echo_guard`]) — and not merely at the
 /// start of the boot, so that an image that starts but cannot talk is not
 /// kept. A node whose echo guard may not restart it (a device on the bench
-/// without a gateway) confirms after [`CONFIRM_GRACE`] instead; one whose
+/// without a gateway) confirms after `CONFIRM_GRACE` instead; one whose
 /// guard may restart it and hears nothing resets itself and the old image
 /// comes back.
 pub async fn confirm() {

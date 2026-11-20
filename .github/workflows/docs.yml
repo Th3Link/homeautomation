@@ -108,59 +108,6 @@ jobs:
         with:
           name: docs-cancomponents-hardware
           path: site/cancomponents-hardware
-      - name: Write landing page
-        run: |
-          cat > site/index.html <<'HTML'
-          <!doctype html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <title>homeautomation docs</title>
-          </head>
-          <body>
-            <h1>homeautomation</h1>
-            <p>A CAN-bus home-automation system — see each crate below for
-            its own documentation, or start with
-            <a href="gateway-core/gateway_core/index.html">gateway-core</a>,
-            which embeds the requirements/ADR/protocol docs (via its
-            <code>docs</code> module) alongside its API reference.</p>
-            <h2>The gateway (CAN&lt;-&gt;MQTT bridge)</h2>
-            <ul>
-              <li>
-                <a href="gateway-core/gateway_core/index.html">gateway-core</a>
-                &mdash; requirements, ADRs, CAN/MQTT protocol specs, technical
-                debt, and the crate's own API reference
-              </li>
-              <li>
-                <a href="gateway-hardware/gateway_hardware/index.html">gateway-hardware</a>
-                &mdash; firmware API reference
-              </li>
-            </ul>
-            <h2>CAN nodes (relays, rollershutters, buttons, lights)</h2>
-            <ul>
-              <li>
-                <a href="cancomponents-core/cancomponents_core/index.html">cancomponents-core</a>
-                &mdash; the crate's own API reference
-              </li>
-              <li>
-                <a href="cancomponents-hardware/cancomponents/index.html">cancomponents-hardware</a>
-                &mdash; firmware API reference
-              </li>
-            </ul>
-            <h2>Shared crates</h2>
-            <ul>
-              <li>
-                <a href="common-core/common_core/index.html">common-core</a>
-                &mdash; the CAN wire-format types shared by both firmware lines
-              </li>
-              <li>
-                <a href="common-hardware/common_hardware/index.html">common-hardware</a>
-                &mdash; shared ESP32 hardware-support helpers
-              </li>
-            </ul>
-          </body>
-          </html>
-          HTML
       # Firmware memory history, one point per main commit — written by
       # ci.yml's firmware-history job onto the `metrics` branch. Absent until
       # the first main push after that landed; the page is just skipped then.
@@ -171,20 +118,15 @@ jobs:
           ref: metrics
           path: metrics-branch
       - name: Render firmware memory history
-        if: steps.metrics.outcome == 'success'
+        if: steps.metrics.outcome == 'success' && hashFiles('metrics-branch/history.json') != ''
         run: |
           python3 .github/scripts/memory_report.py chart \
             --history metrics-branch/history.json \
             --out site/firmware-memory/index.html
-          python3 - <<'PY'
-          p = "site/index.html"
-          s = open(p).read()
-          s = s.replace("</body>", """<h2>Firmware memory</h2>
-            <ul><li><a href="firmware-memory/index.html">History</a>
-            &mdash; flash image, static DRAM and stack budget per commit on main</li></ul>
-          </body>""")
-          open(p, "w").write(s)
-          PY
+      - name: Install Pandoc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pandoc
+      - name: Build handbook
+        run: bash docs/site/build.sh site
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

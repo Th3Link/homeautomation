@@ -28,7 +28,7 @@
 //! A sensor that was just found, or that came back after being lost, answers
 //! with its power-on value of +85 °C until its first real conversion. Such a
 //! sensor is therefore on *probation*: it is sampled every
-//! [`SETTLE_INTERVAL`] until a few readings in a row agree, and only then
+//! `SETTLE_INTERVAL` until a few readings in a row agree, and only then
 //! are its values stored, sent and used.
 //!
 //! Assumptions about the wiring: the sensors are externally powered (3-wire,

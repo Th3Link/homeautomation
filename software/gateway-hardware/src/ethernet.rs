@@ -384,7 +384,7 @@ const READY_GRACE: Duration = Duration::from_secs(5);
 
 /// Waits until the network is ready: the link is up with a DHCPv4 lease
 /// and a global IPv6 address (SLAAC or DHCPv6), or with one of the two
-/// and [`READY_GRACE`] has passed without the other. What connects to
+/// and `READY_GRACE` has passed without the other. What connects to
 /// servers starts here, so that its first attempt doesn't go out before
 /// the addresses and routes are there (and then waits for its retry).
 pub async fn wait_ready() {

@@ -40,7 +40,7 @@ type StoreCache = Cache<
 /// Why an item couldn't be stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
-    /// It doesn't fit [`ITEM`] bytes.
+    /// The encoded item exceeds the storage limit.
     TooLarge,
     /// Its section is full.
     Full,

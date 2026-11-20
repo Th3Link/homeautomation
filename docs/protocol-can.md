@@ -5,7 +5,7 @@ The wire format implemented by `gateway_core::can_id`, `can_message_type`,
 and `can_ota`. Reproduced bit-for-bit from the original C++ gateway
 (`library/esp32-ha-lib/ICAN.hpp` and the `Bridge*.cpp`/`CANUpdate.cpp`
 classes that build/parse these payloads) — see
-[ADR 0005](adr/0005-reimplement-wire-protocol-independently.md) for why
+[ADR 0005](../software/gateway-core/docs/adr/0005-reimplement-wire-protocol-independently.md) for why
 this is an independent reimplementation rather than a shared dependency.
 
 ## Bus parameters
@@ -130,9 +130,9 @@ How nodes make themselves known to the gateway
 A node announces itself after it starts, after its name changed and when
 asked, and repeats until the ack comes: the first `Discovery` after a
 random 0-2 s, then it waits a random 300 ms-2 s for the ack (first five
-tries), then a random 2-5 s, for as long as it takes. The gateway acks
-every `Discovery` at once, takes the name from it, and sends a node it
-didn't know a `RequestParameter` R frame for its other settings.
+tries), then a random 2-5 s, for as long as it takes. The gateway records
+the name from each `Discovery`. For a newly seen node it queues a
+`RequestParameter` R frame for its other settings before sending the ack.
 
 ## `UpdateSilence` — bus quieting during OTA
 
@@ -271,7 +271,7 @@ the valves and the pump return to direct operation.
 
 The gateway sends them on behalf of MQTT topics
 `canbus/heating_{target,energy,emergency}_command/<device>`; see
-[`protocol-mqtt.md`](protocol-mqtt.md).
+[`protocol-mqtt.md`](../software/gateway-core/docs/protocol-mqtt.md).
 
 ## Sensor management (`SensorConfig`)
 
@@ -451,7 +451,7 @@ byte:  0          1      2..3
 decoded but never republished to MQTT. `PirSensor`'s rendering hardcodes
 button id `8` in its MQTT body regardless of the frame's actual
 `button_id` field (a faithfully-reproduced quirk — see
-[`protocol-mqtt.md`](protocol-mqtt.md#canbuspresence)), and collapses
+[`protocol-mqtt.md`](../software/gateway-core/docs/protocol-mqtt.md#canbuspresencedevice)), and collapses
 every event kind other than `Released` to a single "hold" state.
 
 How the node sends them (the original firmware's behaviour, kept by the
@@ -604,7 +604,7 @@ only kept once the node has been heard on the bus (its first `Echo` answered).
 The original streaming protocol, kept for the old STM32 nodes and as the
 gateway's fallback and for updates by type; the `cancomponents` nodes no longer
 implement it. **Known to be unreliable**, see
-[`technical-debt.md`](technical-debt.md#can-bus-ota-legacy-streaming-protocol).
+[`technical-debt.md`](../software/gateway-core/docs/technical-debt.md#can-bus-ota-legacy-streaming-protocol).
 Documented here as implemented in the gateway (`gateway_core::can_ota`): the
 sequence a bus master (this gateway, as `CANUpdate`) drives to push firmware to
 a target node or type-broadcast.

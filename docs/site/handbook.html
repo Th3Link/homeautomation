@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Set up the homeautomation CAN-to-MQTT gateway, explore its boards, and look up the CAN protocol.">
+  <meta name="color-scheme" content="light dark">
+  <title>homeautomation handbook</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="assets/handbook.css">
+</head>
+<body id="top">
+  <a class="skip" href="#handbook">Skip to contents</a>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="wordmark" href="#top">homeautomation</a>
+      <a class="source-link" href="https://github.com/Th3Link/homeautomation">GitHub ↗</a>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <details open>
+        <summary>Contents</summary>
+        <nav aria-label="Contents">
+          $toc$
+          $if(firmware-memory)$
+          <ul class="related">
+            <li><a href="firmware-memory/">Firmware memory ↗</a></li>
+          </ul>
+          $endif$
+        </nav>
+      </details>
+    </aside>
+    <main id="handbook" tabindex="-1">
+      <h1>homeautomation</h1>
+      $body$
+      <footer><a href="#top">Back to top ↑</a></footer>
+    </main>
+  </div>
+</body>
+</html>

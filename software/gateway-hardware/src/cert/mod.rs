@@ -2,14 +2,13 @@
 //! certificate in one place (ADR 0018). The web routes and the console only
 //! call the functions here.
 //!
-//! - One device key ([`key`]), from which the CSR and the self-signed
-//!   certificate are made.
+//! - One device key for both the CSR and the self-signed certificate.
 //! - Three modes for the configured FQDN: [`Mode::SelfSigned`],
 //!   [`Mode::Manual`] (CSR out, signed certificate in) and [`Mode::Est`]
-//!   (enrollment and renewal over EST, [`est`]).
+//!   (enrollment and renewal over EST).
 //! - A new certificate is checked completely (it parses, carries the device
 //!   key, names the FQDN, isn't expired) before it replaces the active one,
-//!   and the replacement is one flash write ([`store::Blob`]).
+//!   and the replacement is one flash write.
 //! - Whatever happens, there is a usable certificate: without one the
 //!   gateway makes a self-signed one ([`Origin::Fallback`]).
 

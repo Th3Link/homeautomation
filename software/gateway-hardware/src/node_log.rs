@@ -8,7 +8,7 @@
 //!   doesn't answer (an old one without the protocol) is left out for a
 //!   day. The web UI can download one node's log at once ([`request`]);
 //!   its lines are kept for the page ([`with_web`]) and go to MQTT too.
-//! - **The gateway:** every [`GATEWAY_EVERY`] the lines logged since the
+//! - **The gateway:** every `GATEWAY_EVERY` the lines logged since the
 //!   last time go to `canbus/gateway/log`.
 //!
 //! Both only while the primary broker is connected and [`to_mqtt`] is on
@@ -345,7 +345,7 @@ async fn run() {
     }
 }
 
-/// The gateway's own lines to MQTT, every [`GATEWAY_EVERY`]: those logged
+/// The gateway's own lines to MQTT, every `GATEWAY_EVERY`: those logged
 /// since the last time (from boot on: the oldest the log still has).
 #[embassy_executor::task]
 pub async fn gateway_log_task() {
