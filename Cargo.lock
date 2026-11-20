@@ -196,7 +196,7 @@ checksum = "fb5c05bc4eb4da6745c97a655abbd0287cb9aaa4f28bfbb1f9660bc595f1c01e"
 dependencies = [
  "embassy-futures",
  "embedded-io-async 0.7.0",
- "heapless 0.9.3",
+ "heapless 0.9.4",
 ]
 
 [[package]]
@@ -206,7 +206,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2771c71a91a8528e1b2008140518a6302493b5321933b14a9ce9ec7dbb263d9"
 dependencies = [
  "bareminal_cli",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
@@ -430,7 +430,7 @@ dependencies = [
  "esp-println",
  "esp-rtos",
  "esp-storage",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "libscd",
  "nb 1.1.0",
  "num_enum",
@@ -450,7 +450,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-can",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "num_enum",
 ]
 
@@ -612,7 +612,7 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "esp-storage",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "sequential-storage",
 ]
 
@@ -1013,7 +1013,7 @@ name = "dhcpeav6-client"
 version = "0.1.0"
 source = "git+https://github.com/Th3Link/dhcpea?rev=b8fdde858d0025871f1b92d7a1c17acfb173b8e7#b8fdde858d0025871f1b92d7a1c17acfb173b8e7"
 dependencies = [
- "heapless 0.9.3",
+ "heapless 0.9.4",
 ]
 
 [[package]]
@@ -1204,7 +1204,7 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "managed",
  "smoltcp",
 ]
@@ -1254,7 +1254,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "futures-core",
  "futures-sink",
- "heapless 0.9.3",
+ "heapless 0.9.4",
 ]
 
 [[package]]
@@ -1289,7 +1289,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "168297bf80aaf114b3c9ad589bf38b01b3009b9af7f97cd18086c5bbf96f5693"
 dependencies = [
  "embassy-executor-timer-queue",
- "heapless 0.9.3",
+ "heapless 0.9.4",
 ]
 
 [[package]]
@@ -1401,7 +1401,7 @@ dependencies = [
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "generic-array",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "hkdf",
  "hmac 0.12.1",
  "p256 0.13.2",
@@ -1532,7 +1532,7 @@ dependencies = [
  "esp-config",
  "esp-metadata-generated",
  "esp-println",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "riscv",
  "semihosting",
  "xtensa-lx",
@@ -2002,7 +2002,7 @@ dependencies = [
  "common-core",
  "embassy-time",
  "embedded-can",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "libm",
  "num_enum",
  "p256 0.14.0",
@@ -2041,7 +2041,7 @@ dependencies = [
  "esp-rtos",
  "esp-storage",
  "gateway-core",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "mbedtls-rs",
  "nb 1.1.0",
  "num_enum",
@@ -2206,9 +2206,9 @@ dependencies = [
 
 [[package]]
 name = "heapless"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
+checksum = "411fdef4df93751117bd9ef8caa0e7f99c65dafec5bd84313eb8e2fdd75e32f2"
 dependencies = [
  "hash32",
  "serde_core",
@@ -2912,7 +2912,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "futures-util",
  "heapless 0.8.0",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "picoserve_derive",
  "pin-project",
  "ryu",
@@ -3325,7 +3325,7 @@ checksum = "9345427199453b4961a0a275edbca86d0472942d731c6d79a23517c1db8f7ca3"
 dependencies = [
  "const_fn",
  "embedded-io-async 0.7.0",
- "heapless 0.9.3",
+ "heapless 0.9.4",
 ]
 
 [[package]]
@@ -3640,7 +3640,7 @@ dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "cfg-if",
- "heapless 0.9.3",
+ "heapless 0.9.4",
  "managed",
 ]
 
