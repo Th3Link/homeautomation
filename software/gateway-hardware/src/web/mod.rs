@@ -1,7 +1,7 @@
 //! The web server: a REST API under `/api/v1` and the browser UI that uses
 //! it. See `gateway-core/docs/api-rest.md` for the routes.
 //!
-//! Every route sits behind [`BasicAuth`] (ADR 0008: no bypass, not even for
+//! Every route sits behind `BasicAuth` (ADR 0008: no bypass, not even for
 //! read-only ones). One task serves one connection at a time, so several of
 //! them are started; each builds the (zero-sized) router itself.
 //!

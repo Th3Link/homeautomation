@@ -6,9 +6,10 @@ there to openHAB or Home Assistant) by a gateway. This repository holds
 the hardware (KiCad), mechanics (3D-printable enclosures), and firmware
 for the whole system.
 
-**Start here:** [`docs/index.md`](docs/index.md) — the full documentation
-index (requirements, architecture decisions, protocol specs), also built
-into every crate's `cargo doc` output and published to GitHub Pages.
+Start with the [online handbook](https://th3link.github.io/homeautomation/)
+for gateway setup, PCB layouts, and CAN discovery. The
+[documentation index](docs/index.md) links to requirements, architecture
+decisions, and protocol references.
 
 ## Software
 
@@ -106,7 +107,9 @@ format itself.)
 
 - **CI** — `cargo fmt` / `cargo clippy` for every crate, `cargo nextest`
   with coverage and an MSRV check for the `*-core` crates.
-- **Docs** — `cargo doc` for every crate, published to GitHub Pages.
+- **Docs** — the handbook and `cargo doc` for every crate, published to GitHub Pages.
+  To preview the handbook from the repository root, install Pandoc and run
+  `bash docs/site/build.sh /tmp/homeautomation-docs`.
 - **Security audit** — [`cargo-audit`](https://github.com/rustsec/rustsec)
   against the RustSec advisory database, on every dependency change and
   once daily.
