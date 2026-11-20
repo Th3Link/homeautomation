@@ -711,5 +711,28 @@
     "dram_total": 196608
    }
   }
+ },
+ {
+  "sha": "c966d455546d9fb7f79ed75298d2d5cc814073fa",
+  "date": "2026-11-20T10:23:08+01:00",
+  "subject": "Merge pull request #82 from Th3Link/renovate/heapless-0.x-lockfile",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 498510,
+    "iram": 18680,
+    "dram_static": 45892,
+    "stack_budget": 150716,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519405,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608
+   }
+  }
  }
 ]
