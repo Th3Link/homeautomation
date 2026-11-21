@@ -48,7 +48,12 @@ class FirmwareApi:
 
     def upload(self, path, data, *, wrong_crc=False):
         crc = binascii.crc32(data) ^ int(wrong_crc)
-        return self.request("PUT", f"{path}?crc32={crc}", data=data, timeout=900)
+        start = time.monotonic()
+        result = self.request("PUT", f"{path}?crc32={crc}", data=data, timeout=900)
+        if result[0] == 200:
+            elapsed = time.monotonic() - start
+            print(f"{path}: {len(data)} bytes accepted in {elapsed:.2f} s ({len(data) / elapsed / 1024:.1f} KiB/s)")
+        return result
 
     def wait_gateway_version(self, version, *, timeout=90):
         deadline = time.monotonic() + timeout

@@ -152,26 +152,69 @@ async fn serve_session(
 }
 
 fn app() -> Router<impl PathRouter> {
-    // Specific device resources take precedence over the command subtree.
-    let api = commands::routes(Router::new());
-    let api = devices::routes(api);
-    let api = mqtt::routes(api);
-    let api = sensors::routes(api);
-    let api = location::routes(api);
-    let api = network::routes(api);
-    let api = logs::routes(api);
-    let api = settings::routes(api)
-        .route("/system", get(system::get_system))
-        .route("/system/restart", post(system::restart));
-    let api = tls::routes(api);
-    let api = firmware::routes(api);
-    let api = automation::routes(api);
-    // The API outermost: every route a request passes on its way costs a
-    // stack frame (see `automation::routes`), and the pages are asked for
-    // only when one loads.
     assets::routes(Router::new())
-        .nest("/api/v1", api)
+        .nest_service("/api/v1", Api)
         .layer(BasicAuth)
+}
+
+/// Select a small router before polling handlers. Chaining every endpoint
+/// makes its poll frame stay on the ESP32 stack while unrelated handlers run.
+struct Api;
+
+impl picoserve::routing::PathRouterService for Api {
+    async fn call_path_router_service<
+        R: Read,
+        W: picoserve::response::ResponseWriter<Error = R::Error>,
+    >(
+        &self,
+        _: &(),
+        _: (),
+        path: picoserve::request::Path<'_>,
+        request: picoserve::request::Request<'_, R>,
+        writer: W,
+    ) -> Result<ResponseSent, W::Error> {
+        let group = path.split_first_segment();
+        let resource = group
+            .and_then(|(_, rest)| rest.split_first_segment())
+            .and_then(|(_, tail)| tail.split_first_segment())
+            .map(|(segment, _)| segment);
+        let group = group.map(|(segment, _)| segment).unwrap_or_default();
+        let device = group == "devices" || group == "device-types";
+        let routes = Router::new();
+        if group == "automation" {
+            dispatch(automation::routes(routes), request, writer).await
+        } else if group == "firmware" || (device && resource.is_some_and(|s| s == "firmware")) {
+            dispatch(firmware::routes(routes), request, writer).await
+        } else if group == "logs" || (device && resource.is_some_and(|s| s == "log")) {
+            dispatch(logs::routes(routes), request, writer).await
+        } else if group == "sensors" || (device && resource.is_some_and(|s| s == "sensors")) {
+            dispatch(sensors::routes(routes), request, writer).await
+        } else if group == "bus" || device {
+            dispatch(devices::routes(commands::routes(routes)), request, writer).await
+        } else if group == "tls" {
+            dispatch(tls::routes(routes), request, writer).await
+        } else if group == "mqtt" {
+            dispatch(mqtt::routes(routes), request, writer).await
+        } else {
+            let routes = settings::routes(location::routes(network::routes(routes)))
+                .route("/system", get(system::get_system))
+                .route("/system/restart", post(system::restart));
+            dispatch(routes, request, writer).await
+        }
+    }
+}
+
+/// Router::handle_request starts at the original request URI. Each group
+/// retains picoserve's normal path parsing, method dispatch and rejection.
+async fn dispatch<R: Read, W: picoserve::response::ResponseWriter<Error = R::Error>>(
+    routes: Router<impl PathRouter>,
+    request: picoserve::request::Request<'_, R>,
+    writer: W,
+) -> Result<ResponseSent, W::Error> {
+    Router::new()
+        .nest("/api/v1", routes)
+        .handle_request(request, writer)
+        .await
 }
 
 /// Lets only requests through that carry the configured web credentials in

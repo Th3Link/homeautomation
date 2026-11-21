@@ -45,24 +45,24 @@ const PAGE: usize = 8;
 /// the main stack, and overwrote the statics below it.
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let name = || parse_path_segment::<ItemName>();
-    let items = Router::new()
-        .route(OUTPUTS, get(outputs))
+    let switches = Router::new()
         .route(
-            (OUTPUTS, name()),
-            get(get_output).put(put_output).delete(delete_output),
-        )
-        .route((OUTPUTS, name(), "/command"), post_route(command))
-        .route(SWITCHES, get(switch_configs))
-        .route(
-            (SWITCHES, name()),
+            name(),
             get(get_switch_config)
                 .put(put_switch_config)
                 .delete(delete_switch_config),
         )
         .route(
-            (SWITCHES, name(), parse_path_segment::<u8>()),
+            (name(), parse_path_segment::<u8>()),
             get(get_button).put(put_button).delete(delete_button),
-        )
+        );
+    let output_items = Router::new()
+        .route((name(), "/command"), post_route(command))
+        .route(
+            name(),
+            get(get_output).put(put_output).delete(delete_output),
+        );
+    let items = Router::new()
         .route(DEVICES, get(device_notes))
         .route(
             (DEVICES, parse_path_segment::<DeviceKey>()),
@@ -85,7 +85,11 @@ pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
                 .put(put_schedule)
                 .patch(switch_schedule)
                 .delete(delete_schedule),
-        );
+        )
+        .route(OUTPUTS, get(outputs))
+        .nest(OUTPUTS, output_items)
+        .route(SWITCHES, get(switch_configs))
+        .nest(SWITCHES, switches);
     router
         .nest("/automation", items)
         .route("/automation", get(status).patch(update))

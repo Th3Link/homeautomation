@@ -579,10 +579,12 @@ class Supervisor:
             r.pin(pin, 1)
         else:
             for i in range(clicks[kind]):
+                # The node debounces for 50 ms and counts releases within
+                # 250 ms. Leave room for host scheduling between GPIO edges.
                 if i:
-                    time.sleep(0.12)
+                    time.sleep(0.06)
                 r.pin(pin, 0)
-                time.sleep(0.12)
+                time.sleep(0.10)
                 r.pin(pin, 1)
         return {"ok": True}
 
