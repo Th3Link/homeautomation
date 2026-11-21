@@ -25,6 +25,7 @@ pub mod echo;
 pub mod ethernet;
 pub mod ha;
 pub mod heap;
+pub mod memory;
 pub mod heating_state;
 pub mod https;
 pub mod lamps;

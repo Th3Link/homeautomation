@@ -4,9 +4,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: [Simulation]
+    branches: [main]
+    types: [completed]
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -26,6 +31,7 @@ jobs:
   # src/docs.rs) alongside their own API docs, and build on plain stable
   # Rust.
   docs-core:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event != 'pull_request'
     name: docs / ${{ matrix.crate }}
     runs-on: ubuntu-latest
     strategy:
@@ -48,6 +54,7 @@ jobs:
   # crates' for completeness — they need the pinned "esp" toolchain
   # channel, same as building them.
   docs-hardware:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event != 'pull_request'
     name: docs / ${{ matrix.crate }}
     runs-on: ubuntu-latest
     strategy:
@@ -117,11 +124,26 @@ jobs:
         with:
           ref: metrics
           path: metrics-branch
-      - name: Render firmware memory history
-        if: steps.metrics.outcome == 'success' && hashFiles('metrics-branch/history.json') != ''
+      - name: Fetch results from the latest completed main simulation run
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          results="$RUNNER_TEMP/gateway-results"
+          mkdir -p "$results"
+          if gh run list --workflow simulation.yml --branch main --status completed --limit 30 \
+              --json databaseId,event,conclusion,headSha,updatedAt \
+              --jq '[.[] | select(.event == "schedule" or .event == "workflow_dispatch")] | .[0] // empty' \
+              > "$results/run.json" && [[ -s "$results/run.json" ]]; then
+            run_id=$(jq -r '.databaseId' "$results/run.json")
+            gh run download "$run_id" --name gateway-memory-profiles --dir "$results/artifact" \
+              || echo "No simulation artifact is available for run $run_id"
+          fi
+      - name: Render firmware memory
+        run: |
+          results="$RUNNER_TEMP/gateway-results"
           python3 .github/scripts/memory_report.py chart \
             --history metrics-branch/history.json \
+            --runtime "$results/artifact/runtime.json" --runtime-run "$results/run.json" \
             --out site/firmware-memory/index.html
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pandoc

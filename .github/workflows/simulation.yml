@@ -1,0 +1,109 @@
+name: Simulation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 5 * * 3'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/simulation.yml'
+      - '.github/actions/esp-toolchain/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'software/**'
+
+permissions:
+  contents: read
+
+env:
+  QEMU_REVISION: 99b56d7680a836d5c82a4504806e13368305b813
+
+jobs:
+  simulation:
+    name: ${{ github.event_name == 'pull_request' && 'MQTT smoke' || 'Gateway memory profiles' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/qemu-memory
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          version: '1.97.0'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Install dependencies and create the isolated CAN buses
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            libglib2.0-dev libpixman-1-dev libslirp-dev libgcrypt20-dev \
+            iproute2 mosquitto mosquitto-clients openssl python3-venv
+          if ! sudo modprobe vcan; then
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+            sudo modprobe vcan
+          fi
+          for bus in vcan-test vcan-ota vcan-mqtt-a vcan-mqtt-b; do
+            sudo ip link add "$bus" type vcan
+            sudo ip link set "$bus" up
+          done
+          python3 -m venv "$RUNNER_TEMP/sim-venv"
+          "$RUNNER_TEMP/sim-venv/bin/pip" install pytest
+          echo "$RUNNER_TEMP/sim-venv/bin" >> "$GITHUB_PATH"
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/espflash.zip" \
+            https://github.com/esp-rs/espflash/releases/latest/download/espflash-x86_64-unknown-linux-gnu.zip
+          unzip -oq "$RUNNER_TEMP/espflash.zip" -d "$RUNNER_TEMP/bin"
+          chmod +x "$RUNNER_TEMP/bin/espflash"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v6
+        id: qemu
+        with:
+          path: ~/.cache/homeautomation-qemu
+          key: esp32-qemu-ubuntu24-x64-${{ env.QEMU_REVISION }}
+      - name: Build the pinned ESP32 QEMU
+        if: steps.qemu.outputs.cache-hit != 'true'
+        run: |
+          git init -q "$RUNNER_TEMP/qemu"
+          cd "$RUNNER_TEMP/qemu"
+          git fetch --depth=1 https://github.com/Th3Link/qemu.git "$QEMU_REVISION"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$QEMU_REVISION"
+          ./configure --target-list=xtensa-softmmu --enable-gcrypt --enable-slirp \
+            --disable-werror --disable-user --disable-docs
+          ninja -C build qemu-system-xtensa
+          install -D build/qemu-system-xtensa "$HOME/.cache/homeautomation-qemu/qemu-system-xtensa"
+      - name: Select the simulator
+        run: echo "QEMU=$HOME/.cache/homeautomation-qemu/qemu-system-xtensa" >> "$GITHUB_ENV"
+      - name: Build firmware for the PR smoke test
+        if: github.event_name == 'pull_request'
+        run: |
+          (cd software/gateway-hardware && cargo build --release --locked --features memory-profile)
+          (cd software/cancomponents-hardware && cargo build --release --locked)
+      - name: Build firmware and OTA fixtures for the full profiles
+        if: github.event_name != 'pull_request'
+        run: GATEWAY_FEATURES=memory-profile bash software/sim/tests/build-ota-images.sh "$RUNNER_TEMP/ota-images"
+      - name: Run profiles
+        working-directory: software/sim
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          args=(--ota-images "$RUNNER_TEMP/ota-images" --runs 2)
+          if [[ "$EVENT" == pull_request ]]; then
+            args=(--scenario can-mqtt --runs 1)
+          fi
+          python memory_profile.py qemu --qemu-revision "$QEMU_REVISION" \
+            --output "$GITHUB_WORKSPACE/profile-results" "${args[@]}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gateway-memory-profiles
+          if-no-files-found: ignore
+          include-hidden-files: true
+          path: |
+            profile-results/runtime.json
+            profile-results/**/*.log
+            profile-results/**/pytest.xml
+            profile-results/**/rest.json
+            profile-results/**/final-samples.json
+            profile-results/**/can.jsonl
+            profile-results/**/*.toml

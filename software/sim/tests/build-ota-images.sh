@@ -15,13 +15,16 @@ release="$CARGO_TARGET_DIR/xtensa-esp32-none-elf/release"
 
 for crate in gateway-hardware cancomponents-hardware; do
     binary=$crate
+    features=()
     if [[ $crate == cancomponents-hardware ]]; then
         binary=cancomponents
+    elif [[ -n ${GATEWAY_FEATURES:-} ]]; then
+        features=(--features "$GATEWAY_FEATURES")
     fi
     # Each label fits in the CAN version reply (eight bytes).
     for version in qemu-v1 qemu-v2; do
         mkdir -p "$output/$version"
-        (cd "$repo/software/$crate" && VERGEN_GIT_DESCRIBE="$version" cargo build --release --locked)
+        (cd "$repo/software/$crate" && VERGEN_GIT_DESCRIBE="$version" cargo build --release --locked "${features[@]}")
         cp "$release/$binary" "$output/$version/"
         # Convert the ELF just built, since gateway build.rs runs before linking.
         espflash save-image --chip esp32 "$output/$version/$binary" "$output/$version/$binary.bin"

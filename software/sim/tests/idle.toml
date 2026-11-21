@@ -1,0 +1,7 @@
+# The memory runner copies this file so each boot has fresh flash.
+[[gateway]]
+name = "gw"
+bus = "vcan-test"
+http = 8380
+https = 8743
+console = ["web-https off", "web-username memory", "web-password profile-test-only"]

@@ -50,6 +50,13 @@ STT_OBJECT = 1
 # ESP32 address map (ESP32 TRM, "System and Memory").
 DRAM = (0x3FFB0000, 0x3FFE0000)  # data RAM region esp-hal links into
 IRAM = (0x40080000, 0x400A0000)
+SRAM1_SIZE = 128 * 1024  # instruction and data addresses alias these bytes
+SRAM1_ROM = (0x0440 + 0x0430)
+SRAM1_SLOTS = {
+    ".rom_boot_pro_uninit": (0x3FFE0440, 0x3FFE3F20),
+    ".rom_boot_app_uninit": (0x3FFE4350, 0x3FFE7E30),
+    ".dram2_uninit": (0x3FFE7E30, 0x40000000),
+}
 IROM = (0x400D0000, 0x40400000)  # flash-mapped code
 DROM = (0x3F400000, 0x3F800000)  # flash-mapped read-only data
 RTC_FAST = [(0x3FF80000, 0x3FF82000), (0x400C0000, 0x400C2000)]
@@ -229,6 +236,19 @@ def measure(args):
     m["app_partition"] = app_partition_bytes(args.partitions) if args.partitions \
         else DEFAULT_APP_PARTITION
     m["ram_sections"] = ram_sections
+    m["sram1_total"] = SRAM1_SIZE
+    m["sram1_rom"] = SRAM1_ROM
+    m["sram1_elf"] = sum(section["size"] for section in ram_sections["SRAM1"])
+    m["sram1_sections"] = {
+        section["name"]: section["size"] for section in ram_sections["SRAM1"]
+        if section["name"] in SRAM1_SLOTS
+    }
+    if args.name == "gateway-hardware":
+        m["heap_reserved"] = m["sram1_sections"].get(".dram2_uninit", 0)
+    if args.image:
+        m["flash_bin"] = os.path.getsize(args.image)
+        if m["flash_bin"] > m["app_partition"]:
+            sys.exit(f"{args.image}: {m['flash_bin']} bytes exceed the app partition ({m['app_partition']} bytes)")
 
     ram_names = {s["name"] for s in alloc
                  if inside(s["addr"], DRAM) and s["name"] != ".stack"}
@@ -272,7 +292,7 @@ def bar(n, total, width=12):
 
 
 def delta(cur, base, key):
-    if base is None:
+    if base is None or key not in cur or key not in base:
         return ""
     d = cur[key] - base[key]
     if d == 0:
@@ -292,19 +312,24 @@ def report(args):
     else:
         out += ["_No baseline from the base branch available — no Δ shown._", ""]
 
-    out += ["| firmware | profile | flash image | IRAM | static DRAM | "
+    out += ["| firmware | profile | application / slot | IRAM | SRAM1 ELF | heap reserved | SRAM2 statics | "
             "stack budget (DRAM left) |",
-            "|---|---|---|---|---|---|"]
+            "|---|---|---|---|---|---|---|---|"]
     for (name, profile), m in sorted(cur.items()):
         b = base.get((name, profile))
+        flash_key = "flash_bin" if "flash_bin" in m else "flash_image"
+        flash = m[flash_key]
+        sram1 = kib(m["sram1_elf"]) if "sram1_elf" in m else "—"
+        heap = kib(m["heap_reserved"]) if "heap_reserved" in m else "—"
         out.append(
             f"| `{name}` | {profile} "
-            f"| {kib(m['flash_image'])} / {kib(m['app_partition'])} "
-            f"({pct(m['flash_image'], m['app_partition'])}) "
-            f"`{bar(m['flash_image'], m['app_partition'])}`"
-            f"{delta(m, b, 'flash_image')} "
+            f"| {kib(flash)} / {kib(m['app_partition'])} "
+            f"({pct(flash, m['app_partition'])}) "
+            f"`{bar(flash, m['app_partition'])}`"
+            f"{delta(m, b, flash_key)} "
             f"| {kib(m['iram'])} ({pct(m['iram'], m['iram_total'])})"
             f"{delta(m, b, 'iram')} "
+            f"| {sram1}{delta(m, b, 'sram1_elf')} | {heap}{delta(m, b, 'heap_reserved')} "
             f"| {kib(m['dram_static'])} / {kib(m['dram_total'])} "
             f"({pct(m['dram_static'], m['dram_total'])}) "
             f"`{bar(m['dram_static'], m['dram_total'])}`"
@@ -353,7 +378,8 @@ def report(args):
 
 HISTORY_KEYS = ("flash_image", "iram", "dram_static", "stack_budget",
                 "app_partition", "dram_total")
-HISTORY_DETAILS = ("ram_sections", "top_ram")
+HISTORY_DETAILS = ("ram_sections", "top_ram", "flash_bin", "sram1_total", "sram1_rom",
+                   "sram1_elf", "sram1_sections", "heap_reserved", "iram_total")
 HISTORY_LIMIT = 500  # entries kept; a commit per entry
 
 
@@ -379,8 +405,11 @@ def history(args):
 
 
 CHARTS = [
-    ("flash_image", "Flash image", "app_partition",
+    ("flash_image", "Flash sections in ELF", "app_partition",
      "of the app partition"),
+    ("flash_bin", "Flash application binary", "app_partition", "of the app partition"),
+    ("sram1_elf", "SRAM1 ELF sections", "sram1_total", "of the 128 KiB bank"),
+    ("heap_reserved", "Heap reservation in SRAM1", "sram1_total", "of the 128 KiB bank"),
     ("dram_static", "SRAM2 statics", "dram_total", "of the SRAM2 linker range"),
     ("stack_budget", "SRAM2 stack reservation", "dram_total", "of the SRAM2 linker range"),
     ("iram", "SRAM0 IRAM", None, ""),
@@ -392,8 +421,8 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
     series = {}
     for i, e in enumerate(entries):
         for fw, m in e["firmware"].items():
-            if fw == f"{firmware}/release":
-                series.setdefault(firmware, []).append((i, m))
+            if fw.rsplit("/", 1)[0] == firmware and m.get(key) is not None:
+                series.setdefault(fw.rsplit("/", 1)[1], []).append((i, m))
     if not series:
         return ""
     W, H, L, R, T, B = 760, 220, 62, 20, 34, 34
@@ -405,7 +434,7 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
     x = lambda i: L + (W - L - R) * i / n
     y = lambda v: T + (H - T - B) * (1 - (v - lo) / (hi - lo))
     o = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{title}">',
-         f'<text x="{L}" y="20" class="t">{title} (KiB, release)</text>']
+         f'<text x="{L}" y="20" class="t">{title} (KiB)</text>']
     for k in range(5):
         v = lo + (hi - lo) * k / 4
         o.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" '
@@ -418,11 +447,18 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
                      f'text-anchor="middle">{escape(e["date"][5:10])}</text>')
     for ci, (name, pts) in enumerate(sorted(series.items())):
         col = PALETTE[ci % len(PALETTE)]
-        path = " ".join(f"{x(i):.1f},{y(m[key]):.1f}" for i, m in pts)
-        o.append(f'<polyline points="{path}" fill="none" stroke="{col}" '
-                 f'stroke-width="2"/>')
+        o.append(f'<text x="{W - R - 164 + ci * 90}" y="20" class="a" '
+                 f'style="fill:{col}">{escape(name)}</text>')
+        path = []
+        prev = -2
         for i, m in pts:
-            share = f" — {100 * m[key] / m[cap_key]:.1f} % {cap_note}" if cap_key else ""
+            command = "L" if i == prev + 1 else "M"
+            path.append(f"{command}{x(i):.1f},{y(m[key]):.1f}")
+            prev = i
+        o.append(f'<path d="{" ".join(path)}" fill="none" stroke="{col}" stroke-width="2"/>')
+        for i, m in pts:
+            cap = m.get(cap_key) if cap_key else None
+            share = f" — {100 * m[key] / cap:.1f} % {cap_note}" if cap else ""
             o.append(
                 f'<circle cx="{x(i):.1f}" cy="{y(m[key]):.1f}" r="3.5" fill="{col}">'
                 f'<title>{escape(name)}: {m[key]:,} B ({m[key] / 1024:.1f} KiB){share}\n'
@@ -461,6 +497,9 @@ def ram_layout(firmware, metrics):
             if name == ".dram2_uninit":
                 purpose = ("Gateway heap reservation" if firmware.startswith("gateway-hardware/")
                            else "Static data left uninitialized at boot")
+            if name in SRAM1_SLOTS:
+                slot_start, slot_end = SRAM1_SLOTS[name]
+                purpose += f" ({kib(slot_end - slot_start)} linker range)"
             group.append(f'<tr><th scope="row"><code>{escape(name)}</code></th>'
                          f'<td><code>0x{section["addr"]:08X}</code></td>'
                          f'<td>{kib(section["size"])}</td><td>{purpose}</td></tr>')
@@ -482,15 +521,83 @@ def ram_layout(firmware, metrics):
             f'</thead>{"".join(rows)}</table></div>{objects}</details>')
 
 
+def read_optional_json(path):
+    if not path:
+        return None
+    try:
+        with open(path) as file:
+            return json.load(file)
+    except (OSError, ValueError):
+        return None
+
+
+def runtime_report(runtime, run):
+    info = ""
+    if run and type(run.get("databaseId")) is int:
+        url = f"https://github.com/Th3Link/homeautomation/actions/runs/{run['databaseId']}"
+        conclusion = escape(str(run.get("conclusion") or "unknown"))
+        sha = escape(str(run.get("headSha", ""))[:12])
+        info = f'<p><a href="{url}">Latest CI run</a> · {conclusion} · <code>{sha}</code></p>'
+    if not runtime or runtime.get("schema") != 1:
+        return f'{info}<p>No runtime measurements are available for this run.</p>'
+
+    platform = escape(str(runtime.get("platform", "—")))
+    firmware = escape(str(runtime.get("firmware_sha", "—"))[:12])
+    revision = str(runtime.get("firmware_sha", ""))
+    dirty = " with local changes" if runtime.get("source_dirty") else ""
+    profile = escape(str(runtime.get("build_profile", "—")))
+    qemu = escape(str(runtime.get("qemu_revision", "—"))[:12])
+    broker = escape(str(runtime.get("broker_version") or "—"))
+    date = escape(str(runtime.get("date", "—")))
+    info += (f'<p>{platform} · firmware <code>{firmware}</code>{dirty} ({profile}) · QEMU <code>{qemu}</code>'
+             f'<br>{broker} · {date}</p>')
+    rows = []
+    measures = ("heap_size", "heap_peak_used", "heap_min_free", "stack_size",
+                "stack_peak_used", "stack_untouched")
+    for item in runtime.get("profiles", []):
+        state = str(item["status"]) + (" / partial" if item.get("partial") else "")
+        label = escape(f'{item["scenario"]} #{item["run"]}')
+        test = str(item.get("test", "")).split("::", 1)[0]
+        if re.fullmatch(r"[0-9a-f]{40}", revision) and re.fullmatch(r"tests/\w+\.py", test):
+            label = f'<a href="https://github.com/Th3Link/homeautomation/blob/{revision}/software/sim/{test}">{label}</a>'
+        cells = f'<th scope="row">{label}</th><td>{escape(state)}</td>'
+        gateways = [(g["name"], g["boots"]) for g in item.get("gateways", [])]
+        if item.get("rest"):
+            errors = len(item["rest"]["errors"])
+            gateways.append((f"REST ({errors} errors)", item["rest"]["boots"]))
+        for gateway, boots in gateways or [("—", [])]:
+            for n, boot in enumerate(boots or [{}], 1):
+                chip = f'{gateway} / boot {n}' if boot else gateway
+                if boot.get("panic"):
+                    chip += " (panic)"
+                samples = "—"
+                if boot.get("samples"):
+                    samples = (f'{boot["samples"]}, {boot["start_uptime_ms"] / 1000:.1f}–'
+                               f'{boot["end_uptime_ms"] / 1000:.1f} s')
+                values = "".join(f'<td>{boot[key]:,}</td>' if key in boot else '<td>—</td>'
+                                 for key in measures)
+                rows.append(f'<tr>{cells}<td>{escape(chip)}</td><td>{samples}</td>{values}</tr>')
+
+    return f"""{info}
+<p>Bytes per boot, including startup. Coverage gives the number of samples and their
+firmware uptime range. Partial rows can end before the last peak. Repeats are shown separately.</p>
+<div class="table-scroll"><table><thead><tr><th>Scenario</th><th>Result</th><th>Gateway</th>
+<th>Coverage</th><th>Heap size</th><th>Heap peak</th><th>Heap minimum free</th>
+<th>Stack budget</th><th>Observed stack peak</th><th>Stack untouched</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table></div>"""
+
+
 def chart(args):
-    with open(args.history) as f:
-        entries = json.load(f)
-    latest = entries[-1]
+    entries = read_optional_json(args.history) or []
+    latest = entries[-1] if entries else {"sha": "—", "firmware": {}}
+    def optional_kib(m, key):
+        return f"{m[key] / 1024:.1f}" if m.get(key) is not None else "—"
+
     rows = "".join(
         f"<tr><td><code>{escape(fw)}</code></td>"
+        + f"<td>{optional_kib(m, 'flash_bin')} / {m['app_partition'] / 1024:.0f}</td>"
         + f"<td>{m['flash_image'] / 1024:.1f}</td><td>{m['iram'] / 1024:.1f}</td>"
-        + (f"<td>{sum(s['size'] for s in m['ram_sections']['SRAM1']) / 1024:.1f}</td>"
-           if "ram_sections" in m else "<td>—</td>")
+        + f"<td>{optional_kib(m, 'sram1_elf')}</td><td>{optional_kib(m, 'heap_reserved')}</td>"
         + f"<td>{m['dram_static'] / 1024:.1f}</td><td>{m['stack_budget'] / 1024:.1f}</td>"
         + "</tr>" for fw, m in sorted(latest["firmware"].items()))
     names = sorted({fw.split("/")[0] for e in entries for fw in e["firmware"]})
@@ -499,6 +606,18 @@ def chart(args):
         + "\n".join(svg_chart(entries, n, *c) for c in CHARTS)
         for n in names)
     layouts = "\n".join(ram_layout(fw, metrics) for fw, metrics in sorted(latest["firmware"].items()))
+    static_data = f"""<h2>Latest ({escape(latest["sha"][:7])}, KiB)</h2>
+<div class="table-scroll"><table><tr><th>Firmware</th><th>Flash binary / slot</th><th>Flash ELF</th><th>SRAM0 IRAM</th>
+<th>SRAM1 ELF</th><th>SRAM1 heap</th><th>SRAM2 statics</th><th>SRAM2 stack budget</th></tr>{rows}</table></div>
+<p>The heap reservation is part of SRAM1 ELF usage. The ESP32 reserves another {SRAM1_ROM:,} B in SRAM1 for ROM data.
+Older builds may have missing measurements.</p>
+<h3>RAM sections by firmware and build profile</h3>
+<p>The bank totals cover the ELF sections below. Cache and ROM reservations
+are listed in the memory map above.</p>
+{layouts}
+<h2>Trends</h2>
+{charts}""" if entries else '<p>No static history is available yet.</p>'
+    runtime_data = runtime_report(read_optional_json(args.runtime), read_optional_json(args.runtime_run))
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -536,15 +655,9 @@ are mapped from flash. See the
 <a href="https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf">ESP32 technical reference manual</a>
 and the
 <a href="https://github.com/Th3Link/homeautomation/blob/main/software/gateway-core/docs/ram.md">gateway linker and RAM notes</a>.</p>
-<h2>Latest ({escape(latest["sha"][:7])}, KiB)</h2>
-<div class="table-scroll"><table><tr><th>Firmware</th><th>Flash</th><th>SRAM0 IRAM</th>
-<th>SRAM1 ELF</th><th>SRAM2 statics</th><th>SRAM2 stack budget</th></tr>{rows}</table></div>
-<h3>RAM sections by firmware and build profile</h3>
-<p>The bank totals cover the ELF sections below. Cache and ROM reservations
-are listed in the memory map above.</p>
-{layouts}
-<h2>Trends</h2>
-{charts}
+{static_data}
+<h2 id="runtime">Gateway runtime profiles</h2>
+{runtime_data}
 </body></html>"""
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as f:
@@ -560,6 +673,7 @@ def main():
     m.add_argument("--name", required=True)
     m.add_argument("--profile", required=True)
     m.add_argument("--partitions")
+    m.add_argument("--image", help="raw application binary produced from this ELF")
     m.add_argument("--out", required=True)
     m.set_defaults(fn=measure)
 
@@ -577,7 +691,9 @@ def main():
     h.set_defaults(fn=history)
 
     c = sub.add_parser("chart")
-    c.add_argument("--history", required=True)
+    c.add_argument("--history")
+    c.add_argument("--runtime")
+    c.add_argument("--runtime-run")
     c.add_argument("--out", required=True)
     c.set_defaults(fn=chart)
 

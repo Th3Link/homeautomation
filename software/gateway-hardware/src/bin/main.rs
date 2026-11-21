@@ -49,6 +49,9 @@ async fn main(spawner: Spawner) -> ! {
     // TLS needs unpredictable random numbers; without a radio the hardware
     // generator only gets entropy from the ADC noise source.
     gateway_hardware::tls::init_entropy(peripherals.RNG, peripherals.ADC1);
+    gateway_hardware::memory::init();
+    #[cfg(feature = "memory-profile")]
+    spawner.spawn(gateway_hardware::memory::sample_task().unwrap());
 
     flash::init(peripherals.FLASH);
     config::init().await;

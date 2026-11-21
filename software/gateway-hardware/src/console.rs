@@ -63,6 +63,8 @@ pub async fn init(
 enum Commands<'a> {
     /// Show all current configuration values.
     Show,
+    /// Exercise an 8 KiB heap allocation and free it immediately in profiling builds.
+    MemoryProbe,
     /// Set this gateway's own CAN device id (used when it addresses
     /// itself, e.g. `Available` broadcasts).
     DeviceId(u8),
@@ -366,6 +368,17 @@ async fn handle_command(
 ) -> Result<(), ()> {
     match command {
         Commands::Show => cmd_show(writer).await,
+        Commands::MemoryProbe => {
+            #[cfg(feature = "memory-profile")]
+            let message = if crate::memory::probe() {
+                "memory probe: allocated and freed 8192 bytes"
+            } else {
+                "memory probe: allocation failed"
+            };
+            #[cfg(not(feature = "memory-profile"))]
+            let message = "memory probe requires a profiling build";
+            respond(writer, message).await
+        }
         Commands::DeviceId(id) => respond(writer, cmd_device_id(id).await).await,
         Commands::DeviceType(t) => respond(writer, cmd_device_type(t.0).await).await,
         Commands::Hwrev(rev) => respond(writer, cmd_hwrev(rev).await).await,

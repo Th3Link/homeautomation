@@ -10,6 +10,7 @@ The bus has to exist: ./sim -f tests/sim.toml net
 
 import base64
 import json
+import os
 import secrets
 import ssl
 import subprocess
@@ -24,7 +25,7 @@ import pytest
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS.parent))
 
-from simlib import Sim, can, supervisor  # noqa: E402
+from simlib import Sim, Timeout, can, supervisor  # noqa: E402
 from simlib.topology import Topology  # noqa: E402
 
 SIM = TESTS.parent / "sim"
@@ -52,7 +53,20 @@ def running_simulation(path, *, keep=False):
             subprocess.run([sys.executable, str(SIM), "-f", path, "up", "-d"], check=True)
         with Sim(path) as sim:
             sim.wait_ready(timeout=180)
-            yield sim
+            try:
+                yield sim
+            finally:
+                if output := os.environ.get("SIM_MEMORY_PROFILE"):
+                    # Wait for a sample after the workload to capture its final peak.
+                    since = sim.mark()
+                    missing = []
+                    for gateway in topo.gateways:
+                        try:
+                            sim.expect(r"memory: \d+", chip=gateway.name, kind="serial",
+                                       since=since, timeout=6)
+                        except Timeout:
+                            missing.append(gateway.name)
+                    (Path(output) / "final-samples.json").write_text(json.dumps({"missing": missing}))
     finally:
         if started and not keep:
             supervisor.request(topo, {"cmd": "down"}, 10)

@@ -42,8 +42,11 @@ pub fn paint() {
 /// Bytes at the bottom of the stack no code has written to since [`paint`].
 pub fn untouched() -> usize {
     let mut word = bottom();
+    let top = (&raw const _stack_start_cpu0) as usize;
     // SAFETY: inside the stack, word-aligned; reading is harmless.
-    while unsafe { (word as *const u32).read_volatile() } == PATTERN {
+    while word + size_of::<u32>() <= top
+        && unsafe { (word as *const u32).read_volatile() } == PATTERN
+    {
         word += 4;
     }
     word - bottom()
