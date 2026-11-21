@@ -211,6 +211,10 @@ whole suite takes a few minutes: the sensors report every 10 s and a
 DS18B20 counts as lost after three missed cycles. Tests for another
 installation: `--sim-topology mine.toml`.
 
+The [firmware update tests](../../docs/handbook.md#test-firmware-updates-with-qemu)
+use two versioned builds and fresh flash on `vcan-ota`. Pass the images
+from `tests/build-ota-images.sh` with `--ota-images` to enable them.
+
 ## Setup
 
 1. **QEMU** with the models this needs, branch `esp32-sim` of

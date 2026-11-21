@@ -394,6 +394,138 @@ message to that specific config topic. See the
 [Home Assistant MQTT discovery reference](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
 and the [gateway design notes](../software/gateway-core/docs/adr/0022-home-assistant-discovery.md).
 
+## Firmware updates
+
+Use the application `.bin` for your device. The gateway and ESP32 CAN
+nodes use different images. For an older STM32 node, use the image for
+that board and bootloader.
+
+| Target | Rust [release](https://github.com/Th3Link/homeautomation/releases) asset name | Maximum upload |
+|---|---|---|
+| Rust gateway | `gateway-hardware-<tag>.bin` | 7.75 MiB |
+| ESP32 CAN node | `cancomponents-hardware-<tag>.bin` | 1 MiB |
+
+If you build the firmware yourself, export the application image from
+the newly linked [release ELF](../README.md#building). Run these commands
+from the repository root after building the respective crates.
+
+```sh
+release=target/xtensa-esp32-none-elf/release
+espflash save-image --chip esp32 "$release/gateway-hardware" gateway-hardware.bin
+espflash save-image --chip esp32 "$release/cancomponents" cancomponents.bin
+```
+
+Use the raw application output for OTA. Use the ELF or a merged flash
+image for serial flashing.
+
+### Update the gateway
+
+1. Sign in to the gateway and record the **Firmware** version on the
+   **Gateway** page.
+2. Under **Gateway firmware**, select the gateway `.bin` and click
+   **Install and restart**. Keep power connected until the gateway comes back.
+3. Reopen the page and check the version. Check that your settings and
+   devices are still present.
+
+The gateway writes the upload to its inactive OTA slot and checks its
+length and CRC-32 before marking it for the next boot. It confirms the
+running slot during startup. Settings and automations live in separate
+flash partitions and survive OTA. If the gateway rejects the upload,
+check the image and try again. If it no longer starts, reconnect over
+USB serial and flash the gateway ELF with the
+[gateway partition table](../software/gateway-hardware/partitions.csv).
+From `software/gateway-hardware`, use the release ELF or an ELF from a
+known working build.
+
+```sh
+espflash flash --chip esp32 --flash-size 16mb --partition-table ./partitions.csv \
+  --erase-parts otadata --monitor /path/to/gateway-hardware.elf
+```
+
+This clears the OTA boot selection and preserves settings when the
+existing data partitions match the table. Use this serial procedure for
+the first migration of a 16 MiB gateway from the original C++ firmware.
+OTA cannot install the new partition table.
+
+### Update one CAN node
+
+1. Open **Devices**, select the intended node, and note its name, ID, and
+   version. Under **Firmware**, select the matching `.bin` and click
+   **Send to this device**.
+2. Allow several minutes at 50 kbit/s. The gateway sends one block at a
+   time, waits for the node's acknowledgement, and retries a block if
+   frames or the acknowledgement are lost. The progress shows bytes the
+   node has acknowledged and the number of retries.
+3. After the transfer, wait for the node to restart and reappear. Use
+   **Refresh** on the device page if the displayed version is stale. The
+   ESP32 node reports the first eight bytes of its build version over CAN.
+
+The node checks the length and CRC-32 of the image read back from flash.
+It boots the new image as pending and confirms it after the gateway
+answers its CAN echo. If the echo watchdog restarts it before confirmation,
+the OTA bootloader can return to the previous slot. A bench node with
+watchdog restarts disabled confirms after a grace period instead. If
+the node remains unreachable, check the CAN connection and recover an
+ESP32 node using its [serial flashing setup](../README.md#building).
+
+For compatible older firmware that does not answer the block handshake,
+the gateway falls back to the legacy unacknowledged stream. Verify the
+version on each such node after the upload. The web UI sends updates to
+multiple nodes of the same type one at a time. The REST device-type
+broadcast uses the legacy stream. See the
+[block OTA wire format](#firmware-update-in-blocks-otacontrol--otadata) and the
+[OTA design notes](../software/gateway-core/docs/adr/0017-block-ota.md).
+
+### Upload over REST and read the result
+
+Send an authenticated `PUT` with the raw `.bin`, its `Content-Length`,
+and its CRC-32 as an unsigned decimal query parameter. Use the trusted
+certificate for your gateway. The following shell example uses the
+gateway's HTTPS address and prompts for the web password.
+
+```sh
+base=https://gateway.example.local/api/v1
+user=admin
+cert=./gateway-ca.pem
+
+gateway_api() {
+  curl --fail-with-body --silent --show-error --cacert "$cert" --user "$user" "$@"
+}
+
+upload() {
+  crc=$(python3 -c 'import binascii, pathlib, sys; print(binascii.crc32(pathlib.Path(sys.argv[1]).read_bytes()))' "$2") || return
+  gateway_api --request PUT --header 'Content-Type: application/octet-stream' \
+    --data-binary "@$2" "$base/$1?crc32=$crc"
+}
+
+# Gateway, then check the version once it has restarted.
+upload firmware/gateway ./gateway-hardware.bin
+gateway_api "$base/system"
+
+# One node by its hex CAN key (a unique URL-encoded name also works).
+upload devices/0x10040a00/firmware ./cancomponents.bin
+gateway_api "$base/devices/0x10040a00"
+```
+
+A successful response reports `bytes` and `restarting`. The latter is
+`true` for a gateway restart. For a node with block OTA, HTTP success means
+the node acknowledged the verified image. Check its running `version`
+separately after it rejoins. Only one upload runs at a time. While uploading
+to a node, poll `GET /api/v1/firmware/job` from another connection for
+`state`, `target`, `sent`, `total`, `protocol`, `retries`, and `error`.
+The gateway keeps this job status in RAM and clears it on restart.
+
+| Response | What to check |
+|---|---|
+| `404 not_found` | The addressed node must be in the device list. Run a scan and check its key. |
+| `409 busy` | Wait for the current upload to finish. |
+| `413 size` | Check that the file is a nonempty application image and fits the target. |
+| `422 verify` | The gateway rejected the image length or checksum. Recheck the file and CRC-32. |
+| `502 update_failed` | The node update failed. Read `message` in the response and `error` in the job to see whether it was a timeout, a transfer error, or verification. |
+
+See the [REST reference](../software/gateway-core/docs/api-rest.md#firmware)
+for the full route list, or [run the OTA tests in QEMU](#test-firmware-updates-with-qemu).
+
 ## QEMU simulation
 
 Run the gateway and CAN-node firmware on Linux with one QEMU process per
@@ -570,6 +702,39 @@ for both gateways. A Mosquitto restart with persistence disabled clears
 its retained store. The test verifies that both gateways recreate the
 configurations with the same IDs. On failure, the test output gives the
 directory containing broker, CAN, supervisor, and serial logs.
+
+### Test firmware updates with QEMU
+
+Use the [simulator prerequisites](#prepare-the-simulator), then run the
+following commands from `software/sim`. The build helper uses the current
+source and lockfile to produce two release builds labeled `qemu-v1` and
+`qemu-v2`. By default, the builds use `target/qemu-ota` and the script
+copies the ELFs and application images into the scratch directory. The
+labels fit in a CAN version reply.
+
+```sh
+ota_images=$(mktemp -d)
+bash tests/build-ota-images.sh "$ota_images"
+./sim -f tests/ota.toml net
+python -m pytest tests/test_firmware_update.py --ota-images "$ota_images" -q
+```
+
+Each test boots a gateway and two switches from `qemu-v1` on fresh
+virtual flash. The test gateway uses plain HTTP with a test login on a
+forwarded loopback port to exercise the upload handlers independently
+of TLS. The two tests submit an invalid CRC, inspect the API error and
+job state, and check that the rejected update leaves `qemu-v1` running.
+The valid uploads check the gateway's new version and saved settings
+after reboot, and the updated node's rediscovery. The test reads the
+nodes' versions from fresh CAN replies to confirm that the target runs
+`qemu-v2` and its peer still runs `qemu-v1`. The test output locates the
+flash and serial logs if an assertion fails.
+
+After a guest reset, QEMU can lose CAN communication with the target
+node. If this happens, pytest first checks the bootloader
+log for the new OTA slot, then restarts that QEMU process using the same
+flash. It checks discovery and the version replies once CAN is connected
+again.
 
 ### Run the MQTT demo
 

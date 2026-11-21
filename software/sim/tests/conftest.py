@@ -36,6 +36,8 @@ def pytest_addoption(parser):
                     help="the installation to test (default: tests/sim.toml)")
     group.addoption("--sim-keep", action="store_true",
                     help="leave the simulation running after the tests")
+    group.addoption("--ota-images", type=Path,
+                    help="run firmware update tests with images from tests/build-ota-images.sh")
 
 
 @contextmanager
