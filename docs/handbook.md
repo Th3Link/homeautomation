@@ -6,7 +6,7 @@ gateway connects the bus to your MQTT broker over Ethernet.
 <ol class="system-path" aria-label="System topology">
   <li><a href="#hardware">CAN nodes</a><span>Switches, sensors, relays</span></li>
   <li><a href="#gateway-quickstart">Gateway</a><span>CAN ↔ Ethernet</span></li>
-  <li><a href="#check-delivery-over-mqtt">MQTT broker</a><span>Feeds Home Assistant or openHAB</span></li>
+  <li><a href="#mqtt">MQTT broker</a><span>Feeds Home Assistant or openHAB</span></li>
 </ol>
 
 ## Gateway quickstart
@@ -301,7 +301,98 @@ CAN bus. Home Assistant discovery is a separate step in which the
 gateway publishes retained configurations over MQTT.
 
 [CAN discovery design](adr/0021-can-discovery.md) ·
-[Home Assistant discovery design](../software/gateway-core/docs/adr/0022-home-assistant-discovery.md)
+[Home Assistant MQTT discovery](#home-assistant-mqtt-discovery)
+
+## MQTT
+
+The gateway translates CAN events into MQTT messages and MQTT commands
+back into CAN frames. It uses MQTT 5 and publishes node events, sensor
+readings, and gateway announcements on the primary broker. An optional
+secondary broker can also send commands to the gateway.
+
+Set the primary broker in the gateway's **MQTT** page or with the serial
+commands `mqtt-uri` and `mqtt-enabled on`. Use `mqtt://host:1883` for
+a plain listener or `mqtts://host:8883` for TLS. The
+[MQTT reference](../software/gateway-core/docs/protocol-mqtt.md#connection)
+covers credentials and broker certificate verification.
+
+### Topics and device addresses
+
+Node topics use the node's configured name or, when it has none, its CAN
+device key in the form `0x10040a00`. On a broker shared by several
+gateways, give nodes distinct names and distinct CAN device keys across
+buses. Both gateways receive matching MQTT commands. With distinct
+names, only the gateway that knows the named node resolves the command
+and sends it on its bus. A command with a numeric CAN key is forwarded
+by every subscribed gateway. Home Assistant also uses the CAN device
+key to identify a device on the shared broker.
+
+| Direction | Example topic | Payload |
+|---|---|---|
+| Node → broker | `canbus/button/tastera` | `1/double/0` means button index 1, double press, count 0. |
+| Node → broker | `canbus/temperature/tastera/0x68000077` | A temperature such as `27.25`, in °C. |
+| Broker → node | `canbus/relais_command/relaya` | `0/3/0` switches channel 0 on. The fields are channel, state, and stop time in milliseconds. Stop time 0 leaves it on until another command. |
+| Node → broker | `canbus/relais_state/relaya/0/0` | The resulting state for bank 0, channel 0. The Rust node reports `3` for on and `0` for off. |
+
+With the [two-gateway demo](#run-the-mqtt-demo) running, subscribe in a
+second terminal and press button 1 twice on `tastera` to see the event.
+The second subscription also shows the response to a relay command.
+
+```sh
+mosquitto_sub -h 127.0.0.1 -p 18883 -v \
+  -t 'canbus/button/+' -t 'canbus/relais_state/+/+/+'
+```
+
+From the simulation shell, send the button input and switch the simulated
+relay on and off. Publish these commands without the retain flag so the
+broker does not replay them when a gateway reconnects.
+
+```sh
+./sim -f "$demo/mqtt.toml" press tastera 1 double
+mosquitto_pub -h 127.0.0.1 -p 18883 -t canbus/relais_command/relaya -m '0/3/0'
+mosquitto_pub -h 127.0.0.1 -p 18883 -t canbus/relais_command/relaya -m '0/0/0'
+```
+
+## Home Assistant MQTT discovery
+
+1. Add the **MQTT** integration in **Settings → Devices & services** and
+   connect it to the same broker as the gateway's primary connection.
+2. Keep the integration's discovery prefix at `homeassistant`. On the
+   gateway, enable discovery under **MQTT → Home Assistant** or run
+   `ha-discovery on` in its serial console.
+3. Wait for a sensor reading or press a node's button. Open the MQTT
+   integration's devices in Home Assistant. For a button, create an
+   automation with a **Device** trigger and select the node.
+
+For example, `tastera` has CAN device key `0x10040a00`. Its BME680
+temperature appears after the first reading. A double press of button
+index 1 also makes a **Button 2** double-press trigger available.
+
+| What Home Assistant sees | Discovery configuration topic | Live state or event |
+|---|---|---|
+| Temperature sensor | `homeassistant/sensor/canbus_10040a00/temperature_68000077/config` | `canbus/temperature/tastera/0x68000077` |
+| Double-press device trigger | `homeassistant/device_automation/canbus_10040a00/button1_double/config` | `canbus/button/tastera`, matching `1/double` after the value template removes the count |
+
+The gateway advertises sensors, motion binary sensors, and device
+triggers for single, double and triple presses, hold, and release after
+a hold. Use the MQTT command and state topics directly for relays,
+rollershutters, lamps, and heating.
+
+The configuration topics are retained. A new subscriber gets the
+stored configuration immediately and reads subsequent measurements
+from the state topic. Device IDs use the CAN key, for example
+`canbus_10040a00`. The temperature sensor's unique ID also includes the
+sensor kind and sub-ID, giving `canbus_10040a00_temperature_68000077`.
+Changing a node's display name updates its state topic and configuration
+while keeping these IDs. The gateway republishes configurations after
+reconnecting to the primary broker or receiving a live `online` message
+on `homeassistant/status`.
+
+Disabling gateway discovery stops updates. To remove a stored
+configuration, disable its publisher and publish an empty retained
+message to that specific config topic. See the
+[Home Assistant MQTT discovery reference](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
+and the [gateway design notes](../software/gateway-core/docs/adr/0022-home-assistant-discovery.md).
 
 ## QEMU simulation
 
@@ -457,6 +548,58 @@ QEMU can check firmware behavior, CAN messages, and the gateway API.
 For physical bus timing and electrical behavior, use hardware. See the
 [simulator reference](../software/sim/README.md#how-it-works) for the
 emulated peripherals and their limits.
+
+### Test MQTT with two gateways
+
+From `software/sim`, install Mosquitto and its command-line clients,
+create the two dedicated CAN interfaces, and run the MQTT tests.
+
+```sh
+sudo apt-get install mosquitto mosquitto-clients
+./sim -f tests/mqtt.toml net
+python -m pytest tests/test_mqtt.py -q
+```
+
+The [test topology](../software/sim/tests/mqtt.toml) runs a switch and
+a relay node on each of two separate CAN buses. Pytest copies the
+topology to a temporary directory, starts Mosquitto on a localhost port,
+and boots all six chips with fresh flash images. It checks traffic in
+both directions, verifies that a named relay command affects only the
+intended bus, and checks retained temperature and button configurations
+for both gateways. A Mosquitto restart with persistence disabled clears
+its retained store. The test verifies that both gateways recreate the
+configurations with the same IDs. On failure, the test output gives the
+directory containing broker, CAN, supervisor, and serial logs.
+
+### Run the MQTT demo
+
+Use the same topology to explore the live topics or connect Home
+Assistant. From `software/sim`, start a separate broker and a copy of
+the topology. Its anonymous listener is bound to the host loopback for
+the demo. A Home Assistant instance on the same network namespace can
+use `127.0.0.1:18883`. The emulated gateways reach it through
+`10.0.2.2:18883`. Stop the demo before running pytest in the same network
+namespace, since both use the dedicated MQTT CAN interfaces.
+
+```sh
+./sim -f tests/mqtt.toml net
+demo=$(mktemp -d)
+cp tests/mqtt.toml "$demo/mqtt.toml"
+printf 'listener 18883 127.0.0.1\nallow_anonymous true\npersistence false\n' > "$demo/mosquitto.conf"
+mosquitto -c "$demo/mosquitto.conf" -v > "$demo/mosquitto.log" 2>&1 &
+broker_pid=$!
+./sim -f "$demo/mqtt.toml" up -d
+./sim -f "$demo/mqtt.toml" status
+```
+
+Try the [MQTT examples](#topics-and-device-addresses) once the broker
+shows both gateways connected. When finished, stop the demo from
+the same shell.
+
+```sh
+./sim -f "$demo/mqtt.toml" down
+kill "$broker_pid"
+```
 
 ## Rust API reference
 
