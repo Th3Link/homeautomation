@@ -6,6 +6,7 @@ fn main() {
 }
 
 fn vergen() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-env-changed=VERGEN_GIT_DESCRIBE");
     let git2 = vergen_git2::Git2::all_git();
     vergen_git2::Emitter::default()
         .add_instructions(&git2)?

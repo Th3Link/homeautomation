@@ -1,0 +1,18 @@
+# Pytest adds the v1 ELFs and reserves loopback ports in a temporary copy.
+# Create the dedicated bus with ./sim -f tests/ota.toml net.
+[[gateway]]
+name = "gw"
+bus = "vcan-ota"
+console = ["web-https off", "hostname ota-gateway", "web-username ota-test", "web-password qemu-test-only"]
+
+[[node]]
+name = "taster"
+type = "button"
+id = 10
+gateway = "gw"
+
+[[node]]
+name = "spare"
+type = "button"
+id = 11
+gateway = "gw"
