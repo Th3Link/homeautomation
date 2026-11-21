@@ -211,10 +211,9 @@ async fn dispatch<R: Read, W: picoserve::response::ResponseWriter<Error = R::Err
     request: picoserve::request::Request<'_, R>,
     writer: W,
 ) -> Result<ResponseSent, W::Error> {
-    Router::new()
-        .nest("/api/v1", routes)
-        .handle_request(request, writer)
-        .await
+    let router = Router::new().nest("/api/v1", routes);
+    // Build only the selected module’s request future, outside the poll frame.
+    crate::heap::boxed(|| router.handle_request(request, writer)).await
 }
 
 /// Lets only requests through that carry the configured web credentials in
@@ -252,10 +251,7 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
         };
 
         if authorized {
-            // The route's handler on the heap: the router keeps room for
-            // its largest one, and every layer above builds this future on
-            // the stack (see `crate::heap`).
-            crate::heap::boxed(|| next.run(state, path_parameters, response_writer)).await
+            next.run(state, path_parameters, response_writer).await
         } else {
             (
                 StatusCode::UNAUTHORIZED,

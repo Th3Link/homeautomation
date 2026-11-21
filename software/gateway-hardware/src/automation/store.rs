@@ -208,10 +208,21 @@ impl Store {
     /// The slot of the named item `name` in `section` (outputs, motion
     /// lights, schedules).
     pub async fn find<T: DeserializeOwned>(&mut self, section: Section, name: &str) -> Option<u8> {
+        self.find_named::<T>(section, name)
+            .await
+            .map(|(slot, _)| slot)
+    }
+
+    /// Keep the enabled flag alongside the slot so updates need only one flash scan.
+    pub async fn find_named<T: DeserializeOwned>(
+        &mut self,
+        section: Section,
+        name: &str,
+    ) -> Option<(u8, bool)> {
         for slot in self.slots(section).iter() {
             if let Some(bytes) = self.bytes(section, slot).await {
-                if matches_name::<T>(bytes, name) {
-                    return Some(slot);
+                if let Some(enabled) = enabled_if_named::<T>(bytes, name) {
+                    return Some((slot, enabled));
                 }
             }
         }
@@ -222,6 +233,7 @@ impl Store {
 /// Keep the decoded item out of the flash-reading future. Some outputs are
 /// over 1 KiB and only the comparison needs to reach the calling route.
 #[inline(never)]
-fn matches_name<T: DeserializeOwned>(bytes: &[u8], name: &str) -> bool {
-    decode::<Named<T>>(bytes).is_some_and(|item| item.name == name)
+fn enabled_if_named<T: DeserializeOwned>(bytes: &[u8], name: &str) -> Option<bool> {
+    let item = decode::<Named<T>>(bytes)?;
+    (item.name == name).then_some(item.enabled)
 }

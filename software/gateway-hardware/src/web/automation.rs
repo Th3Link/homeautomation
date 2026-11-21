@@ -208,35 +208,23 @@ async fn get_named<T: DeserializeOwned + Serialize>(
 async fn put_named<T: DeserializeOwned + Serialize>(
     section: Section,
     name: Name,
-    item: T,
+    item: &T,
 ) -> Result<impl IntoResponse, ApiError> {
     crate::heap::boxed(|| async move {
         let created = {
             let mut st = store().await;
-            match st.find::<T>(section, &name).await {
-                Some(slot) => {
-                    let enabled = st
-                        .get::<Named<T>>(section, slot)
-                        .await
-                        .is_none_or(|old| old.enabled);
-                    let named = Named {
-                        name,
-                        enabled,
-                        item,
-                    };
-                    st.put(section, slot, &named).await.map_err(store_error)?;
-                    false
-                }
-                None => {
-                    let named = Named {
-                        name,
-                        enabled: true,
-                        item,
-                    };
-                    st.add(section, &named).await.map_err(store_error)?;
-                    true
-                }
+            let existing = st.find_named::<T>(section, &name).await;
+            let named = Named {
+                name,
+                enabled: existing.is_none_or(|(_, enabled)| enabled),
+                item,
+            };
+            if let Some((slot, _)) = existing {
+                st.put(section, slot, &named).await.map_err(store_error)?;
+            } else {
+                st.add(section, &named).await.map_err(store_error)?;
             }
+            existing.is_none()
         };
         post(Event::Reload);
         let status = if created {
@@ -363,7 +351,7 @@ async fn put_output(
                 }
             }
         }
-        put_named(Section::Output, name, output).await
+        put_named(Section::Output, name, &output).await
     })
     .await
 }
@@ -478,7 +466,7 @@ async fn put_switch_config(
                 }
             }
         }
-        put_named(Section::Switch, name, config).await
+        put_named(Section::Switch, name, &config).await
     })
     .await
 }
@@ -852,7 +840,7 @@ async fn put_motion(
         {
             return Err(ApiError::invalid_field("name", "already a schedule"));
         }
-        put_named(Section::Motion, name, motion).await
+        put_named(Section::Motion, name, &motion).await
     })
     .await
 }
@@ -891,7 +879,7 @@ async fn put_schedule(
         {
             return Err(ApiError::invalid_field("name", "already a motion light"));
         }
-        put_named(Section::Schedule, name, schedule).await
+        put_named(Section::Schedule, name, &schedule).await
     })
     .await
 }

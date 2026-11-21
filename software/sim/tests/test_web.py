@@ -45,6 +45,8 @@ def test_automation_routes_fit_on_the_stack(api):
     for method, path, body in steps:
         status, answer = api(method, path, body)
         assert status < 300, (method, path, status, answer)
+        if method == "GET" and path.endswith("/simflur/0"):
+            assert answer == BUTTON
         if method == "PUT" and path.endswith("/simflur/0"):
             _, saved = api("GET", "/system")
             assert saved["boot_id"] == before["boot_id"]
