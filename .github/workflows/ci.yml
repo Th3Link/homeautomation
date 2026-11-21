@@ -172,7 +172,8 @@ jobs:
         run: |
           mkdir -p dist
           cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}" dist/firmware.elf
-          cp "${{ github.workspace }}/target/xtensa-esp32-none-elf/${{ matrix.profile }}/${{ matrix.bin }}.bin" dist/firmware.bin
+          espflash save-image --chip esp32 --flash-size ${{ matrix.crate == 'gateway-hardware' && '16mb' || '4mb' }} \
+            --partition-table partitions.csv dist/firmware.elf dist/firmware.bin
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.crate }}-${{ matrix.profile }}
@@ -185,7 +186,7 @@ jobs:
           mkdir -p metrics
           python3 "${{ github.workspace }}/.github/scripts/memory_report.py" measure dist/firmware.elf \
             --name ${{ matrix.crate }} --profile ${{ matrix.profile }} \
-            --partitions partitions.csv \
+            --partitions partitions.csv --image dist/firmware.bin \
             --out metrics/${{ matrix.crate }}-${{ matrix.profile }}.json
       - uses: actions/upload-artifact@v7
         with:

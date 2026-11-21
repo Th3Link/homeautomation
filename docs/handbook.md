@@ -766,6 +766,92 @@ the same shell.
 kill "$broker_pid"
 ```
 
+## Firmware memory
+
+Open **Memory report** in the handbook sidebar for the ESP32 memory map,
+Debug and Release ELF history, and the latest gateway workload measurements.
+The application binary is compared with the smallest app slot in the board's
+partition table. The ELF breaks RAM down by physical bank.
+
+| Bank | ESP32 capacity | Gateway placement |
+|---|---:|---|
+| SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
+| SRAM1 | 128 KiB | Two MQTT buffer sections and a 94 KiB heap, alongside ROM data. The instruction address range mirrors the data range. |
+| SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The linker gives the main stack the space left after statics. |
+
+The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
+linker ranges and their contents. RTC memory is accounted for separately.
+
+### Read the runtime measurements
+
+`GET /api/v1/system` includes `boot_id` and uptime, heap size and usage,
+`heap_peak_used` and `heap_min_free`, and `stack_size`, `stack_peak_used`
+and `stack_untouched`. All memory values are in bytes. The allocator
+records peak usage as allocations happen, so a buffer that has already
+been freed can still affect the peak. The stack peak is the linker budget
+minus the remaining stack paint. This estimate includes the unpainted
+guard and startup area. Zero untouched bytes mean no reserve was observed.
+
+A profiling build emits UART samples every two seconds. This keeps the
+measurement available during MQTT or CAN activity even if a web request
+fails. The `idle-rest` scenario also samples over REST for ten seconds to
+include the cost of querying `/system`. The report keeps samples for each
+boot separate. A panic, missing samples, or an incomplete workload is
+visible in the result, and a failed workload can still have measurements
+from before the failure.
+
+### Reproduce the gateway profiles
+
+Use the [QEMU prerequisites](#prepare-the-simulator), Mosquitto with its
+command-line clients, and OpenSSL. From `software/sim`, use the QEMU build
+from the [revision pinned in CI](../.github/workflows/simulation.yml).
+Set `QEMU` to the executable in the QEMU checkout's `build/` directory.
+
+```sh
+export CARGO_TARGET_DIR="$PWD/../../target/qemu-memory"
+qemu_revision=$(git -C "$(dirname "$QEMU")/.." rev-parse HEAD)
+ota_images=$(mktemp -d)
+GATEWAY_FEATURES=memory-profile bash tests/build-ota-images.sh "$ota_images"
+./sim -f tests/sim.toml net
+./sim -f tests/mqtt.toml net
+./sim -f tests/ota.toml net
+python memory_profile.py qemu --qemu-revision "$qemu_revision" \
+  --ota-images "$ota_images" --output "$(mktemp -d)"
+```
+
+The runner uses a fresh virtual installation for each repeat and saves
+`runtime.json` with the firmware SHA, build profile, QEMU revision, broker
+version, topology hashes, and results per boot. The output directories also
+hold the generated topologies and logs. Use `--scenario` to select a case
+and `--runs 1` for a single measurement.
+
+| Scenario | Measured workload |
+|---|---|
+| `idle`, `idle-rest`, `heap-probe` | Gateway idle over UART, idle with REST requests, and an 8 KiB allocation freed before the next sample |
+| `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
+| `https-automation`, `combined` | The automation stack regression test, and an HTTPS request alongside active MQTT nodes |
+| `gateway-ota`, `can-ota` | The firmware update tests, including CRC rejection and the successful transfer |
+| `mqtt-tls` | Two gateways using TLS 1.3 with a local test broker and a generated certificate, with certificate verification disabled in the isolated test |
+
+For a physical gateway, use the same API sampler with the device's trusted
+certificate. The output is labeled `hardware` and includes the running
+firmware version and sample window.
+
+```sh
+read -rsp 'Gateway password: ' GATEWAY_PASSWORD
+export GATEWAY_PASSWORD
+python memory_profile.py hardware https://gateway.example.local --user admin \
+  --cafile gateway-ca.pem --seconds 30 --output hardware-memory.json
+unset GATEWAY_PASSWORD
+```
+
+The [Simulation workflow](../.github/workflows/simulation.yml) runs two
+repeats on schedule or on manual dispatch. Pull requests run the two-gateway
+MQTT smoke test. The memory page links to the latest scheduled or manually
+started run on `main`, including failures and runs that produced no artifact.
+Compare reserves across repeated runs of the same build and workload before
+using the measurements as thresholds.
+
 ## Rust API reference
 
 | Component | Core | ESP32 |

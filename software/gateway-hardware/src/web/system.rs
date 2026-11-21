@@ -20,6 +20,8 @@ pub async fn restart_task() {
     RESTART.wait().await;
     Timer::after(Duration::from_millis(500)).await;
     crate::dhcpv6::release().await;
+    #[cfg(feature = "memory-profile")]
+    crate::memory::log();
     esp_hal::system::software_reset();
 }
 
@@ -132,11 +134,17 @@ async fn network() -> Option<Network> {
 pub struct System {
     firmware_version: &'static str,
     uptime_s: u64,
+    boot_id: u32,
+    uptime_ms: u64,
+    heap_size: usize,
     heap_used: usize,
     heap_free: usize,
+    heap_peak_used: usize,
+    heap_min_free: usize,
     /// Main stack bytes never used since boot: the margin left.
     stack_untouched: usize,
     stack_size: usize,
+    stack_peak_used: usize,
     /// `null` without Ethernet.
     network: Option<Network>,
 }
@@ -144,13 +152,20 @@ pub struct System {
 pub async fn get_system() -> Result<impl IntoResponse, ApiError> {
     // On the heap: the network part makes it ~1 KB (see `crate::heap`).
     crate::heap::boxed(|| async {
+        let memory = crate::memory::Memory::capture();
         json(&System {
             firmware_version: env!("VERGEN_GIT_DESCRIBE"),
-            uptime_s: embassy_time::Instant::now().as_secs(),
-            heap_used: esp_alloc::HEAP.used(),
-            heap_free: esp_alloc::HEAP.free(),
-            stack_untouched: crate::stack::untouched(),
-            stack_size: crate::stack::size(),
+            uptime_s: memory.uptime_ms / 1000,
+            boot_id: memory.boot_id,
+            uptime_ms: memory.uptime_ms,
+            heap_size: memory.heap_size,
+            heap_used: memory.heap_used,
+            heap_free: memory.heap_free,
+            heap_peak_used: memory.heap_peak_used,
+            heap_min_free: memory.heap_min_free,
+            stack_untouched: memory.stack_untouched,
+            stack_size: memory.stack_size,
+            stack_peak_used: memory.stack_peak_used,
             network: network().await,
         })
         .await

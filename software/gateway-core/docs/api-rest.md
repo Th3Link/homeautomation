@@ -52,6 +52,14 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 | `PUT /bus/silence` `{"on": true}` | tells every device to be quiet / talk again |
 | `POST /device-types/:type/ping`, `/refresh`, `/restart` | to every device of one type (`:type` is the number, e.g. `9` for the heating controller) |
 
+`GET /system` also reports `boot_id` (changes on reboot) and `uptime_ms`.
+Memory counters are in bytes. `heap_size` is allocator capacity,
+`heap_peak_used` is the allocator's high-water mark since boot, and
+`heap_min_free` is capacity minus that peak. `stack_peak_used` is the
+linker stack budget minus `stack_untouched`. The estimate includes guard
+and startup space that was never painted. A value of zero for
+`stack_untouched` means no untouched reserve was observed.
+
 ## Configuration
 
 | Route | |

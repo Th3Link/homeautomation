@@ -1,12 +1,17 @@
 """Two QEMU gateways share a real Mosquitto broker, one CAN bus each."""
 
+import base64
 import json
+import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import time
+import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -20,11 +25,25 @@ HOST = "127.0.0.1"
 
 
 class Broker:
-    def __init__(self, directory, port):
+    def __init__(self, directory, port, tls_port=None):
         self.port = port
         self.log = directory / "mosquitto.log"
         self.config = directory / "mosquitto.conf"
-        self.config.write_text(f"listener {port} {HOST}\nallow_anonymous true\npersistence false\n")
+        self.env = None
+        config = f"listener {port} {HOST}\nallow_anonymous true\npersistence false\n"
+        if tls_port:
+            cert, key = directory / "broker.crt", directory / "broker.key"
+            subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                            "-nodes", "-days", "1", "-subj", "/CN=QEMU MQTT test broker",
+                            "-keyout", key, "-out", cert], check=True, capture_output=True)
+            config += (f"listener {tls_port} {HOST}\ncertfile {cert}\nkeyfile {key}\n"
+                       "tls_version tlsv1.3\nciphers_tls1.3 TLS_AES_128_GCM_SHA256\n")
+            # Keep the server parameters comparable across OpenSSL releases.
+            openssl = directory / "openssl.cnf"
+            openssl.write_text("openssl_conf = init\n[init]\nssl_conf = tls\n"
+                               "[tls]\nsystem_default = mqtt\n[mqtt]\nGroups = P-256\n")
+            self.env = dict(os.environ, OPENSSL_CONF=str(openssl))
+        self.config.write_text(config)
         self.process = None
         self.epoch = 0
 
@@ -33,6 +52,7 @@ class Broker:
             self.epoch = output.tell()
             self.process = subprocess.Popen(
                 ["mosquitto", "-c", self.config, "-v"], stdout=output, stderr=subprocess.STDOUT,
+                env=self.env,
             )
         self.wait_log(lambda line: "mosquitto version" in line and "running" in line, timeout=5)
 
@@ -108,15 +128,19 @@ def mqtt_setup(tmp_path_factory, start_sim):
 
     directory = tmp_path_factory.mktemp("mqtt")
     print(f"MQTT test logs and flash images: {directory}")
+    tls = os.environ.get("SIM_MQTT_TLS") == "1"
     with ExitStack() as reservations:
         ports = []
-        for _ in range(5):
+        for _ in range(6 if tls else 5):
             listener = reservations.enter_context(socket.socket())
             listener.bind((HOST, 0))
             ports.append(listener.getsockname()[1])
-    broker = Broker(directory, ports[0])
-    web_ports = iter(ports[1:])
-    text = TOPOLOGY.read_text().replace("10.0.2.2:18883", f"10.0.2.2:{broker.port}")
+    broker = Broker(directory, ports[0], ports[5] if tls else None)
+    web_ports = iter(ports[1:5])
+    endpoint = f"mqtts://10.0.2.2:{ports[5]}" if tls else f"mqtt://10.0.2.2:{broker.port}"
+    text = TOPOLOGY.read_text().replace("mqtt://10.0.2.2:18883", endpoint)
+    if tls:
+        text = text.replace('"mqtt-enabled on"', '"mqtt-insecure on", "mqtt-enabled on"')
     topology = directory / "mqtt.toml"
     topology.write_text(re.sub(r"(?m)^(https?) = \d+$",
                                lambda match: f"{match[1]} = {next(web_ports)}", text))
@@ -137,7 +161,10 @@ def mqtt_setup(tmp_path_factory, start_sim):
 
 
 def test_mqtt_commands_and_state_on_two_can_buses(mqtt_setup):
-    sim, broker = mqtt_setup
+    assert_mqtt_commands(*mqtt_setup)
+
+
+def assert_mqtt_commands(sim, broker):
     for name in ("tastera", "tasterb"):
         assert broker.receive(f"canbus/button/{name}",
                               action=lambda: sim[name].press(1, "double")) == (False, "1/double/0")
@@ -197,3 +224,23 @@ def test_home_assistant_discovery_survives_broker_restart(mqtt_setup):
         broker.wait_gateway(sim[gateway.name])
     for name, device_key in switches.items():
         assert_discovery(broker, name, device_key)
+
+
+@pytest.mark.skipif(not os.environ.get("SIM_MEMORY_PROFILE"), reason="run with memory_profile.py")
+def test_active_nodes_with_https_and_mqtt(mqtt_setup):
+    sim, broker = mqtt_setup
+
+    def read_automation():
+        auth = base64.b64encode(b"CAN2MQTTSETUP:Can2MqttPass").decode()
+        url = sim["gw-a"].topology.url + "/api/v1/automation"
+        request = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+        # Isolated localhost simulator with a generated self-signed certificate.
+        context = ssl._create_unverified_context()
+        with urllib.request.urlopen(request, context=context, timeout=15) as response:
+            assert response.status == 200
+            json.load(response)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        https = pool.submit(read_automation)
+        assert_mqtt_commands(sim, broker)
+        https.result()
