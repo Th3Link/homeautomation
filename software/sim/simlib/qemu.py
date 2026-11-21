@@ -89,7 +89,7 @@ def argv(qemu, chip, flash, efuse, *, run_dir=None, can=True, net="none", onewir
     if chip.is_gateway and net != "none":
         nic = "user,model=esp32.emac"
         if net == "forward":
-            nic += f",hostfwd=tcp:127.0.0.1:{chip.https}-:443,hostfwd=tcp:127.0.0.1:{chip.http}-:80"
+            nic += f",hostfwd=tcp:127.0.0.1:{chip.https}-:443"
         args += ["-nic", nic]
     return args
 

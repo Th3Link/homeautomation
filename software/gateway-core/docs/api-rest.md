@@ -2,10 +2,7 @@
 
 The gateway's web server offers this API under `/api/v1` and, at the other
 paths, the browser UI that uses it (`software/gateway-web`). It is served
-over HTTPS on port 443; port 80 answers `308 Permanent Redirect` to the
-same URL on `https://` (the method and body are kept). `web-https off` on
-the console serves everything over plain HTTP on port 80 instead
-([ADR 0018](adr/0018-https-certificate-management.md)). Why
+over HTTPS on port 443 ([ADR 0018](adr/0018-https-certificate-management.md)). Why
 it looks like this: [ADR 0014](adr/0014-rest-api-by-resource.md). It replaces
 the original's `/state.json`, `/control.json` and `/bridge_config.json`.
 
@@ -33,7 +30,7 @@ the original's `/state.json`, `/control.json` and `/bridge_config.json`.
   has not been seen on the bus is `404`.
 - **`:slot`** is `primary` or `secondary`, see
   [`protocol-mqtt.md`](protocol-mqtt.md).
-- **Capacity:** the server holds two HTTPS connections at a time and serves
+- **Capacity:** the server holds five HTTPS connections at a time and serves
   them one after the other (one TLS session at a time); more are refused,
   a client retries.
 
@@ -151,7 +148,7 @@ support:
 
 | Route | |
 |---|---|
-| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https`, `time_known`, `time_authenticated` (the time came from NTS), `ntp_server` (as set; empty: automatic), `ntp_server_in_use` (the set one, else the one DHCPv6 names, else `pool.ntp.org`), `nts` (with an `nts://` server: `cookies`, `last_key_exchange`, `last_answer`, `error`; else `null`), `key_pin_sha256` (base64 SHA-256 of the device key's `SubjectPublicKeyInfo`, the `pin-sha256` of RFC 7469; the same for every certificate and CSR), `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the installed CA certificates: the first one's facts, `count`) or `null`, `built_in_roots` (whether the built-in Let's Encrypt roots are trusted), `built_in_root_names`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
+| `GET /tls` | `fqdn` (as set; empty: the hostname is used), `effective_fqdn`, `mode` (`self_signed`, `manual`, `est`), `validity_years`, `https` (always true), `time_known`, `time_authenticated` (the time came from NTS), `ntp_server` (as set; empty: automatic), `ntp_server_in_use` (the set one, else the one DHCPv6 names, else `pool.ntp.org`), `nts` (with an `nts://` server: `cookies`, `last_key_exchange`, `last_answer`, `error`; else `null`), `key_pin_sha256` (base64 SHA-256 of the device key's `SubjectPublicKeyInfo`, the `pin-sha256` of RFC 7469; the same for every certificate and CSR), `certificate` (`subject`, `issuer`, `not_before`, `not_after`, `dns_names`, `fingerprint_sha256`, `status`: `valid`/`expires_soon`/`expired`/`not_yet_valid`/`fqdn_mismatch`/`time_unknown`, `origin`: `self_signed`/`self_signed_fallback`/`manual`/`est`, `count`: certificates in the chain), `trust_anchor` (the installed CA certificates: the first one's facts, `count`) or `null`, `built_in_roots` (whether the built-in Let's Encrypt roots are trusted), `built_in_root_names`, `est` (`url`, `auto_renew`, `identity`, `last_result`, `last_status`, `last_attempt`, `failures`, `next_attempt_in_s`) |
 | `PATCH /tls` | `fqdn`, `mode`, `validity_years` (1-30), `est_url` (`https://host[:port][/path]`), `est_auto_renew`, `ntp_server` (empty: automatic; `nts://host[:port]` for NTS, ADR 0023), `built_in_roots`. A new FQDN or mode `self_signed` makes a self-signed certificate right away (in that mode); mode `est` starts an enrollment. `204` |
 | `POST /tls/self-signed` | `{"validity_years"}` (optional): a new self-signed certificate. `204` |
 | `GET /tls/csr` | the PKCS#10 request for the device key and the FQDN, `application/pkcs10` PEM |

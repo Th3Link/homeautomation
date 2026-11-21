@@ -2,6 +2,7 @@
 
 import json
 import os
+import ssl
 import time
 from pathlib import Path
 
@@ -28,7 +29,8 @@ def test_idle_memory(sim):
 def test_rest_memory(sim):
     gateway = sim["gw"].topology
     time.sleep(5)
-    capture = sample_rest(f"http://127.0.0.1:{gateway.http}", "memory", "profile-test-only", IDLE_SECONDS)
+    capture = sample_rest(gateway.url, "memory", "profile-test-only", IDLE_SECONDS,
+                          tls=ssl._create_unverified_context())
     (Path(os.environ["SIM_MEMORY_PROFILE"]) / "rest.json").write_text(json.dumps(capture, indent=2))
     measured = rest_summary(capture)
     assert not measured["errors"], measured["errors"]

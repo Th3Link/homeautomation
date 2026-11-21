@@ -596,7 +596,7 @@ Run these commands from `software/sim`. The `net` command uses
 Open `https://127.0.0.1:8543/` for this gateway, or run
 `./sim -f tests/sim.toml tui` to see the chips and their events together.
 The first status output may show `booting` while the firmware starts.
-The `http` and `https` fields are host ports forwarded into that QEMU
+The `https` field selects the host port forwarded to port 443 on the QEMU
 gateway. Inside QEMU, the host network is reachable at `10.0.2.2`.
 
 To build your own installation, copy a topology and add a
@@ -720,9 +720,8 @@ python -m pytest tests/test_firmware_update.py --ota-images "$ota_images" -q
 ```
 
 Each test boots a gateway and two switches from `qemu-v1` on fresh
-virtual flash. The test gateway uses plain HTTP with a test login on a
-forwarded loopback port to exercise the upload handlers independently
-of TLS. The two tests submit an invalid CRC, inspect the API error and
+virtual flash. The test gateway uses HTTPS with a test login and its generated
+certificate on a forwarded loopback port. The two tests submit an invalid CRC, inspect the API error and
 job state, and check that the rejected update leaves `qemu-v1` running.
 The valid uploads check the gateway's new version and saved settings
 after reboot, and the updated node's rediscovery. The test reads the
@@ -778,6 +777,8 @@ partition table. The ELF breaks RAM down by physical bank.
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
 | SRAM1 | 128 KiB | Two MQTT buffer sections and a 94 KiB heap, alongside ROM data. The instruction address range mirrors the data range. |
 | SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The linker gives the main stack the space left after statics. |
+| RTC FAST | 8 KiB | CAN log frame queue, gateway log batch for MQTT and one shared 4 KiB firmware upload chunk |
+| RTC SLOW | 8 KiB | Node log text for the web API |
 
 The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
 linker ranges and their contents. RTC memory is accounted for separately.

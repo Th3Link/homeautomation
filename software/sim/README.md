@@ -347,7 +347,7 @@ The parts' values are not kept: each `./sim up` starts from the topology.
   little slow: a 3 s hold looks like 2.6 s on that node.
 - **Ethernet:** the gateway's Ethernet runs on QEMU's user network. DHCP
   gives it 10.0.2.15. The host is 10.0.2.2, for example for an MQTT broker.
-  The web UI is forwarded to the `https`/`http` ports.
+  The web UI is forwarded to the configured `https` port.
 - **Events and control:** everything that happens is an event
   (`simlib/supervisor.py`). The other commands, the TUI and scripts talk
   to `sim up` over a Unix socket in `$XDG_RUNTIME_DIR` and can follow the

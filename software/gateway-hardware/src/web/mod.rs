@@ -5,13 +5,8 @@
 //! read-only ones). One task serves one connection at a time, so several of
 //! them are started; each builds the (zero-sized) router itself.
 //!
-//! HTTPS (ADR 0018): the UI and the API are served over TLS on port 443
-//! with the certificate of [`crate::cert`]; port 80 only answers
-//! `308 Permanent Redirect` to the same URL on `https://` (308 keeps the
-//! method and body, so a script's `PUT` still arrives as a `PUT`). One TLS
-//! session runs at a time ([`crate::https::slot`]). `web-https off` on the
-//! console serves everything over plain HTTP on port 80 instead, the way
-//! back in if TLS ever doesn't work.
+//! The gateway serves the UI and API on port 443. Connections share one
+//! active TLS session through [`crate::https::slot`].
 
 mod assets;
 mod automation;
@@ -39,14 +34,11 @@ use picoserve::response::{IntoResponse, StatusCode};
 use picoserve::routing::{get, post, Layer, Next, PathRouter};
 use picoserve::{Config, ResponseSent, Router, Timeouts};
 
-/// Plain HTTP (`web-https off`): connections served at the same time.
-const HTTP_TASKS: usize = 3;
 /// HTTPS: connections that can be open at the same time. They are served
 /// one after the other (one TLS session at a time), but each needs its own
 /// listening socket, or a browser's parallel connections are refused; so
 /// these tasks are cheap and share the session's buffers.
 const HTTPS_TASKS: usize = 5;
-const HTTP_PORT: u16 = 80;
 const HTTPS_PORT: u16 = 443;
 /// How long a TLS handshake may take (the ECDH and the signature are done
 /// in software on a 160 MHz core).
@@ -63,61 +55,17 @@ static SERVER_CONFIG: Config = Config::new(Timeouts {
 })
 .keep_connection_alive();
 
-/// Starts the web server tasks on `stack`. `https`: see the module docs.
-pub fn spawn(spawner: &Spawner, stack: Stack<'static>, https: bool) {
+/// Starts the HTTPS listeners on port 443.
+pub fn spawn(spawner: &Spawner, stack: Stack<'static>) {
     spawner.spawn(system::restart_task().unwrap());
-    if https {
-        for _ in 0..HTTPS_TASKS {
-            spawner.spawn(https_task(stack).unwrap());
-        }
-        spawner.spawn(redirect_task(stack).unwrap());
-    } else {
-        for id in 0..HTTP_TASKS {
-            spawner.spawn(http_task(id, stack).unwrap());
-        }
+    for _ in 0..HTTPS_TASKS {
+        spawner.spawn(https_task(stack).unwrap());
     }
-}
-
-// The servers' futures, with the buffers they hold, live on the heap (the
-// otherwise unused RAM above the statics): there they don't take away the
-// stack's room the way the tasks' static storage would.
-
-#[embassy_executor::task(pool_size = HTTP_TASKS)]
-async fn http_task(id: usize, stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_plain(id, stack)).await
 }
 
 #[embassy_executor::task(pool_size = HTTPS_TASKS)]
 async fn https_task(stack: Stack<'static>) -> ! {
     crate::heap::boxed(|| serve_tls(stack)).await
-}
-
-#[embassy_executor::task]
-async fn redirect_task(stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_redirect(HTTPS_TASKS, stack)).await
-}
-
-async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
-    let app = app();
-    let mut http_buffer = [0u8; crate::https::HTTP_BUFFER];
-    let mut tcp_rx = [0u8; 4096];
-    let mut tcp_tx = [0u8; 1024];
-    picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
-        .listen_and_serve(id, stack, HTTP_PORT, &mut tcp_rx, &mut tcp_tx)
-        .await
-        .into_never()
-}
-
-/// Port 80 with HTTPS on: every request is sent to `https://`.
-async fn serve_redirect(id: usize, stack: Stack<'static>) -> ! {
-    let app = Router::new().layer(RedirectToHttps);
-    let mut http_buffer = [0u8; 1024];
-    let mut tcp_rx = [0u8; 1024];
-    let mut tcp_tx = [0u8; 512];
-    picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
-        .listen_and_serve(id, stack, HTTP_PORT, &mut tcp_rx, &mut tcp_tx)
-        .await
-        .into_never()
 }
 
 /// Port 443: accepts a connection, waits until the client sends something,
@@ -186,20 +134,20 @@ async fn serve_session(
 }
 
 fn app() -> Router<impl PathRouter> {
-    let api = Router::new()
-        .route("/system", get(system::get_system))
-        .route("/system/restart", post(system::restart));
+    // Specific device resources take precedence over the command subtree.
+    let api = commands::routes(Router::new());
     let api = devices::routes(api);
-    let api = commands::routes(api);
-    let api = settings::routes(api);
     let api = mqtt::routes(api);
-    let api = firmware::routes(api);
     let api = sensors::routes(api);
     let api = tls::routes(api);
     let api = location::routes(api);
     let api = network::routes(api);
-    let api = automation::routes(api);
     let api = logs::routes(api);
+    let api = settings::routes(api)
+        .route("/system", get(system::get_system))
+        .route("/system/restart", post(system::restart));
+    let api = firmware::routes(api);
+    let api = automation::routes(api);
     // The API outermost: every route a request passes on its way costs a
     // stack frame (see `automation::routes`), and the pages are asked for
     // only when one loads.
@@ -259,60 +207,5 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
                 .write_to(next.into_connection().await?, response_writer)
                 .await
         }
-    }
-}
-
-/// Answers every request with `308 Permanent Redirect` to the same path on
-/// `https://`, at the host the client asked for (or the configured FQDN).
-struct RedirectToHttps;
-
-impl<State, PathParameters> Layer<State, PathParameters> for RedirectToHttps {
-    type NextState = State;
-    type NextPathParameters = PathParameters;
-
-    async fn call_layer<
-        'a,
-        R: Read + 'a,
-        NextLayer: Next<'a, R, State, PathParameters>,
-        W: picoserve::response::ResponseWriter<Error = R::Error>,
-    >(
-        &self,
-        next: NextLayer,
-        _state: &State,
-        _path_parameters: PathParameters,
-        request_parts: picoserve::request::RequestParts<'_>,
-        response_writer: W,
-    ) -> Result<ResponseSent, W::Error> {
-        let host = request_parts
-            .headers()
-            .get("Host")
-            .and_then(|value| value.as_str().ok())
-            .and_then(gateway_core::web::host_without_port)
-            .map(heapless::String::<{ crate::cert::FQDN_CAP }>::try_from)
-            .and_then(Result::ok);
-        let host = match host {
-            Some(host) => host,
-            None => crate::cert::effective_fqdn().await,
-        };
-        let mut location = heapless::String::<512>::new();
-        let written = gateway_core::web::https_location(
-            &mut location,
-            &host,
-            request_parts.path().encoded(),
-            request_parts.query().map(|q| q.0),
-        );
-        let connection = next.into_connection().await?;
-        if written.is_err() {
-            return StatusCode::URI_TOO_LONG
-                .write_to(connection, response_writer)
-                .await;
-        }
-        (
-            StatusCode::PERMANENT_REDIRECT,
-            [("Location", location.as_str())],
-            "",
-        )
-            .write_to(connection, response_writer)
-            .await
     }
 }

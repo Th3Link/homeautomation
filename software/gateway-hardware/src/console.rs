@@ -131,11 +131,6 @@ enum Commands<'a> {
     WebUsername(&'a str),
     /// Set the web UI's Basic Auth password.
     WebPassword(&'a str),
-    /// Serve the web UI over HTTPS on port 443 with port 80 redirecting
-    /// (on, the default), or over plain HTTP on port 80 (off: the way back
-    /// in if HTTPS doesn't work). Takes effect after a restart.
-    #[set(one_of = ["on", "off"])]
-    WebHttps(OnOff),
     /// Publish Home Assistant discovery configurations on the first broker,
     /// so the CAN devices show up in Home Assistant by themselves (off by
     /// default).
@@ -437,7 +432,6 @@ async fn handle_command(
             };
             respond(writer, text).await
         }
-        Commands::WebHttps(v) => respond(writer, cmd_web_https(matches!(v, OnOff::On)).await).await,
         Commands::Network => cmd_network(writer).await,
         Commands::Ipv4(s) => respond(writer, change_network(|n| set_ipv4(n, s)).await).await,
         Commands::Ipv4Gateway(s) => {
@@ -805,22 +799,13 @@ async fn cmd_mqtt_insecure(slot: usize, insecure: bool) -> String<LINE_CAP> {
     fmt_msg(format_args!("{name} set to {insecure}"))
 }
 
-async fn cmd_web_https(on: bool) -> String<LINE_CAP> {
-    match crate::cert::set_https_enabled(on).await {
-        Ok(()) if on => str_msg("web: HTTPS on port 443, port 80 redirects (after restart)"),
-        Ok(()) => str_msg("web: plain HTTP on port 80 (after restart)"),
-        Err(_) => str_msg("failed to persist web-https"),
-    }
-}
-
 async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
     use gateway_core::x509::time::Rfc3339;
     let status = crate::cert::status().await;
     respond(
         writer,
         fmt_msg(format_args!(
-            "https: {}, mode {}, fqdn {}",
-            if status.https_enabled { "on" } else { "off" },
+            "https: on, mode {}, fqdn {}",
             status.settings.mode.code(),
             status.effective_fqdn
         )),

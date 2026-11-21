@@ -131,19 +131,19 @@ def mqtt_setup(tmp_path_factory, start_sim):
     tls = os.environ.get("SIM_MQTT_TLS") == "1"
     with ExitStack() as reservations:
         ports = []
-        for _ in range(6 if tls else 5):
+        for _ in range(4 if tls else 3):
             listener = reservations.enter_context(socket.socket())
             listener.bind((HOST, 0))
             ports.append(listener.getsockname()[1])
-    broker = Broker(directory, ports[0], ports[5] if tls else None)
-    web_ports = iter(ports[1:5])
-    endpoint = f"mqtts://10.0.2.2:{ports[5]}" if tls else f"mqtt://10.0.2.2:{broker.port}"
+    broker = Broker(directory, ports[0], ports[3] if tls else None)
+    web_ports = iter(ports[1:3])
+    endpoint = f"mqtts://10.0.2.2:{ports[3]}" if tls else f"mqtt://10.0.2.2:{broker.port}"
     text = TOPOLOGY.read_text().replace("mqtt://10.0.2.2:18883", endpoint)
     if tls:
         text = text.replace('"mqtt-enabled on"', '"mqtt-insecure on", "mqtt-enabled on"')
     topology = directory / "mqtt.toml"
-    topology.write_text(re.sub(r"(?m)^(https?) = \d+$",
-                               lambda match: f"{match[1]} = {next(web_ports)}", text))
+    topology.write_text(re.sub(r"(?m)^https = \d+$",
+                               lambda _: f"https = {next(web_ports)}", text))
 
     try:
         broker.start()
@@ -158,6 +158,14 @@ def mqtt_setup(tmp_path_factory, start_sim):
                 ))
     finally:
         broker.stop()
+
+
+def test_gateways_forward_their_log(mqtt_setup):
+    sim, broker = mqtt_setup
+    for name in ("gw-a", "gw-b"):
+        client = f"gateway-{sim[name].topology.mac.hex()}"
+        broker.wait_log(lambda line: f"Received PUBLISH from {client} " in line
+                        and "'canbus/gateway/log'" in line)
 
 
 def test_mqtt_commands_and_state_on_two_can_buses(mqtt_setup):

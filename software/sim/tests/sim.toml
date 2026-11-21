@@ -6,7 +6,6 @@
 name = "gw"
 bus = "vcan-test"
 https = 8543
-http = 8180
 
 # A light switch with the full sensor extension.
 [[node]]

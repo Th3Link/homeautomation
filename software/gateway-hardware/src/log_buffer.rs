@@ -67,6 +67,17 @@ fn record(line: core::fmt::Arguments<'_>) {
 /// `from` is older), whole lines only: the position of the first byte, the
 /// text and the position after it.
 pub fn read<const N: usize>(from: u32) -> (u32, heapless::String<N>, u32) {
+    let mut bytes = heapless::Vec::new();
+    let (start, end) = read_into(from, &mut bytes);
+    (
+        start,
+        heapless::String::from_utf8(bytes).unwrap_or_default(),
+        end,
+    )
+}
+
+/// Copies whole lines into caller-owned storage, truncating a torn UTF-8 suffix.
+pub fn read_into<const N: usize>(from: u32, bytes: &mut heapless::Vec<u8, N>) -> (u32, u32) {
     critical_section::with(|cs| {
         let ring = RING.borrow_ref(cs);
         let oldest = ring.written.saturating_sub(SIZE as u32);
@@ -89,17 +100,19 @@ pub fn read<const N: usize>(from: u32) -> (u32, heapless::String<N>, u32) {
             }
             pos += 1;
         }
-        let mut bytes: heapless::Vec<u8, N> = heapless::Vec::new();
-        for p in start..end {
-            let _ = bytes.push(at(p));
+        bytes.clear();
+        // Copy at most two contiguous spans. A UTF-8 character may straddle
+        // the end of the ring, so validate the combined bytes.
+        let offset = start as usize % SIZE;
+        let len = (end - start) as usize;
+        let first = len.min(SIZE - offset);
+        bytes
+            .extend_from_slice(&ring.buf[offset..offset + first])
+            .unwrap();
+        bytes.extend_from_slice(&ring.buf[..len - first]).unwrap();
+        if let Err(e) = core::str::from_utf8(bytes) {
+            bytes.truncate(e.valid_up_to());
         }
-        // A character the ring cut in two is dropped.
-        let valid = match core::str::from_utf8(&bytes) {
-            Ok(_) => bytes.len(),
-            Err(e) => e.valid_up_to(),
-        };
-        bytes.truncate(valid);
-        let out = heapless::String::from_utf8(bytes).unwrap_or_default();
-        (start, out, end)
+        (start, end)
     })
 }

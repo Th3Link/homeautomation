@@ -17,7 +17,6 @@
 use crate::config::{config, Key};
 use crate::console_log;
 use crate::device_list::DEVICE_LIST;
-use alloc::string::String;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_futures::select::{select3, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -56,6 +55,7 @@ static SETTINGS_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// The `LogDownload` frames from the nodes, with their device keys (a
 /// block's frames come back to back). Fed by [`crate::translate`].
+#[esp_hal::ram(unstable(rtc_fast))]
 static FRAMES: Channel<CriticalSectionRawMutex, (u32, LogFrame), { BLOCK_FRAMES + 8 }> =
     Channel::new();
 
@@ -131,9 +131,22 @@ impl State {
 pub struct WebLog {
     pub device_key: u32,
     pub state: State,
-    pub text: String,
+    bytes: &'static mut [u8; WEB_CAP],
+    len: usize,
     /// Bytes the node overwrote before they were downloaded.
     pub lost: u32,
+}
+
+impl WebLog {
+    pub fn text(&self) -> &str {
+        core::str::from_utf8(&self.bytes[..self.len]).expect("log contains only UTF-8")
+    }
+
+    fn append(&mut self, text: &str) {
+        let end = text.floor_char_boundary((WEB_CAP - self.len).min(text.len()));
+        self.bytes[self.len..self.len + end].copy_from_slice(&text.as_bytes()[..end]);
+        self.len += end;
+    }
 }
 
 static WEB: Mutex<CriticalSectionRawMutex, Option<WebLog>> = Mutex::new(None);
@@ -146,12 +159,24 @@ pub async fn request(device_key: u32) -> bool {
     if web.as_ref().is_some_and(|w| w.state == State::Running) {
         return false;
     }
-    *web = Some(WebLog {
-        device_key,
-        state: State::Running,
-        text: String::new(),
-        lost: 0,
+    let log = web.get_or_insert_with(|| {
+        // Only the payload occupies RTC SLOW. WEB owns the slice from the
+        // first download until reset and protects all reads and writes.
+        #[unsafe(link_section = ".rtc_slow.bss")]
+        static mut TEXT: [u8; WEB_CAP] = [0; WEB_CAP];
+        WebLog {
+            device_key,
+            state: State::Running,
+            // SAFETY: this initializer runs once under WEB. The Option is never cleared.
+            bytes: unsafe { &mut *(&raw mut TEXT) },
+            len: 0,
+            lost: 0,
+        }
     });
+    log.device_key = device_key;
+    log.state = State::Running;
+    log.len = 0;
+    log.lost = 0;
     WEB_REQUEST.signal(device_key);
     true
 }
@@ -227,12 +252,7 @@ async fn download(device_key: u32, web: bool) -> Outcome {
                 };
                 if web {
                     if let Some(w) = WEB.lock().await.as_mut() {
-                        let room = WEB_CAP.saturating_sub(w.text.len());
-                        let mut end = text.len().min(room);
-                        while !text.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        w.text.push_str(&text[..end]);
+                        w.append(text);
                     }
                 }
                 let ack = LogFrame::Ack { seq }.to_payload();
@@ -310,12 +330,6 @@ async fn round(skipped: &mut heapless::Vec<u32, 32>) {
 
 #[embassy_executor::task]
 pub async fn node_log_task() {
-    // On the heap: the receiver and the device keys would otherwise be
-    // static and take the main stack's room (see `crate::heap`).
-    crate::heap::boxed(run).await
-}
-
-async fn run() {
     let mut skipped: heapless::Vec<u32, 32> = heapless::Vec::new();
     let mut skipped_since = Instant::now();
     let mut next_round = Instant::now() + FIRST_ROUND;
@@ -349,11 +363,10 @@ async fn run() {
 /// since the last time (from boot on: the oldest the log still has).
 #[embassy_executor::task]
 pub async fn gateway_log_task() {
-    // On the heap: the text read would be static otherwise.
-    crate::heap::boxed(gateway_log).await
-}
-
-async fn gateway_log() {
+    #[esp_hal::ram(unstable(rtc_fast))]
+    static BATCH: Mutex<CriticalSectionRawMutex, heapless::Vec<u8, 1024>> =
+        Mutex::new(heapless::Vec::new());
+    let mut batch = BATCH.lock().await;
     let mut from = 0u32;
     loop {
         Timer::after(GATEWAY_EVERY).await;
@@ -361,12 +374,13 @@ async fn gateway_log() {
             continue;
         }
         loop {
-            let (_, text, next) = crate::log_buffer::read::<1024>(from);
+            let (_, next) = crate::log_buffer::read_into(from, &mut batch);
             from = next.max(from);
-            if text.is_empty() {
+            if batch.is_empty() {
                 break;
             }
-            publish_lines(GATEWAY_LOG_TOPIC, &text).await;
+            let text = core::str::from_utf8(&batch).expect("log batch is valid UTF-8");
+            publish_lines(GATEWAY_LOG_TOPIC, text).await;
         }
     }
 }

@@ -2,7 +2,7 @@
 # ten nodes. `./sim up` starts it, `./sim status` shows it. Copy this file
 # to try your own (`./sim -f mine.toml up`).
 #
-# Gateway:  name, bus (vcanN), https/http (host ports for the web UI),
+# Gateway:  name, bus (vcanN), https (host port for the web UI),
 #           console (console commands run once on a fresh image)
 # Node:     name, type (button | relay | shutter | heating), id (1-255),
 #           gateway (whose bus it is on) or bus, hwrev (button 1/2,
@@ -27,13 +27,11 @@
 name = "gw-eg"
 bus = "vcan0"
 https = 8443
-http = 8080
 
 [[gateway]]
 name = "gw-og"
 bus = "vcan1"
 https = 8444
-http = 8081
 
 # Ground floor (gw-eg)
 

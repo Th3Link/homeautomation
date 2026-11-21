@@ -135,7 +135,7 @@ async fn main(spawner: Spawner) -> ! {
         spawner.spawn(gateway_hardware::node_log::gateway_log_task().unwrap());
         spawner.spawn(wall_clock::sntp_task(stack).unwrap());
         spawner.spawn(cert::manager_task(stack).unwrap());
-        web::spawn(&spawner, stack, cert::https_enabled().await);
+        web::spawn(&spawner, stack);
     }
 
     can::send_can_message(

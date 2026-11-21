@@ -27,61 +27,45 @@ use picoserve::routing::{get, parse_path_segment, post, put, PathRouter};
 use picoserve::Router;
 use serde::{Deserialize, Serialize};
 
-const DEVICES: &str = "/devices";
-
-/// Adds the command routes to the API router.
+/// Keep the CAN command chains off the call stack of unrelated requests.
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let device = || parse_path_segment::<DeviceName>();
-    router
-        .route((DEVICES, device(), "/ping"), post(ping))
-        .route((DEVICES, device(), "/refresh"), post(refresh))
-        .route((DEVICES, device(), "/restart"), post(restart))
-        .route((DEVICES, device(), "/legacy-mode"), post(legacy_mode))
-        .route((DEVICES, device(), "/silence"), put(silence))
+    let devices = Router::new()
+        .route((device(), "/ping"), post(ping))
+        .route((device(), "/refresh"), post(refresh))
+        .route((device(), "/restart"), post(restart))
+        .route((device(), "/legacy-mode"), post(legacy_mode))
+        .route((device(), "/silence"), put(silence))
         .route(
-            (DEVICES, device(), "/relays", parse_path_segment::<u8>()),
+            (device(), "/relays", parse_path_segment::<u8>()),
             put(relay),
         )
         .route(
-            (
-                DEVICES,
-                device(),
-                "/rollershutters",
-                parse_path_segment::<u8>(),
-            ),
+            (device(), "/rollershutters", parse_path_segment::<u8>()),
             put(rollershutter),
         )
+        .route((device(), "/lamps", parse_path_segment::<u8>()), put(lamps))
         .route(
-            (DEVICES, device(), "/lamps", parse_path_segment::<u8>()),
-            put(lamps),
-        )
-        .route(
-            (DEVICES, device(), "/heating/manual"),
+            (device(), "/heating/manual"),
             get(heating_manual_state).put(heating_manual),
         )
-        .route((DEVICES, device(), "/heating/target"), put(heating_target))
-        .route((DEVICES, device(), "/heating/energy"), put(heating_energy))
-        .route(
-            (DEVICES, device(), "/heating/emergency"),
-            put(heating_emergency),
-        )
-        .route(
-            ("/device-types", parse_path_segment::<u8>(), "/ping"),
-            post(type_ping),
-        )
-        .route(
-            ("/device-types", parse_path_segment::<u8>(), "/refresh"),
-            post(type_refresh),
-        )
-        .route(
-            ("/device-types", parse_path_segment::<u8>(), "/restart"),
-            post(type_restart),
-        )
-        .route("/bus/discover", post(bus_discover))
-        .route("/bus/ping", post(bus_ping))
-        .route("/bus/refresh", post(bus_refresh))
-        .route("/bus/restart", post(bus_restart))
-        .route("/bus/silence", put(bus_silence))
+        .route((device(), "/heating/target"), put(heating_target))
+        .route((device(), "/heating/energy"), put(heating_energy))
+        .route((device(), "/heating/emergency"), put(heating_emergency));
+    let types = Router::new()
+        .route((parse_path_segment::<u8>(), "/ping"), post(type_ping))
+        .route((parse_path_segment::<u8>(), "/refresh"), post(type_refresh))
+        .route((parse_path_segment::<u8>(), "/restart"), post(type_restart));
+    let bus = Router::new()
+        .route("/discover", post(bus_discover))
+        .route("/ping", post(bus_ping))
+        .route("/refresh", post(bus_refresh))
+        .route("/restart", post(bus_restart))
+        .route("/silence", put(bus_silence));
+    router
+        .nest("/devices", devices)
+        .nest("/device-types", types)
+        .nest("/bus", bus)
 }
 
 /// `PATCH /devices/:device` is registered with the device's `GET`.

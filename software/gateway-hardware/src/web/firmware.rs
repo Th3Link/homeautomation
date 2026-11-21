@@ -32,6 +32,9 @@ const GATEWAY_MAX_SIZE: usize = 0x7C0000;
 const NODE_MAX_SIZE: usize = 0x100000;
 /// How much of the image is handled in one go.
 const CHUNK: usize = 4096;
+/// Shared by the mutually exclusive gateway and node uploads.
+#[esp_hal::ram(unstable(rtc_fast))]
+static UPLOAD: Mutex<CriticalSectionRawMutex, [u8; CHUNK]> = Mutex::new([0; CHUNK]);
 /// Receiving a whole image, which is paced by the CAN bus for nodes.
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -210,7 +213,7 @@ async fn receive<B: Read>(
         .await);
     }
 
-    let mut chunk = [0u8; CHUNK];
+    let mut chunk = UPLOAD.lock().await;
     let mut received = 0;
     while received < size {
         let want = chunk.len().min(size - received);

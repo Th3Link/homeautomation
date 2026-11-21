@@ -3,7 +3,7 @@
 [[gateway]]
 name = "gw"
 bus = "vcan-ota"
-console = ["web-https off", "hostname ota-gateway", "web-username ota-test", "web-password qemu-test-only"]
+console = ["hostname ota-gateway", "web-username ota-test", "web-password qemu-test-only"]
 
 [[node]]
 name = "taster"

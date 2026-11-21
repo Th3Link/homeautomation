@@ -83,11 +83,12 @@ def summarize(samples):
                 stack_untouched=stack_free)
 
 
-def sample_rest(url, user, password, seconds, *, cafile=None):
+def sample_rest(url, user, password, seconds, *, cafile=None, tls=None):
     auth = base64.b64encode(f"{user}:{password}".encode()).decode()
     request = urllib.request.Request(url.rstrip("/") + "/api/v1/system",
                                      headers={"Authorization": f"Basic {auth}"})
-    tls = ssl.create_default_context(cafile=cafile) if request.type == "https" else None
+    if tls is None and request.type == "https":
+        tls = ssl.create_default_context(cafile=cafile)
     start = time.monotonic()
     samples, errors = [], []
     next_sample = start

@@ -141,11 +141,14 @@ async fn read_device(
                 });
             };
             // Whole lines, at most a chunk.
-            let from = (query.from as usize).min(web.text.len());
-            let rest = web.text.get(from..).unwrap_or("");
-            let end = match rest.get(..CHUNK.min(rest.len())) {
-                Some(chunk) if chunk.len() < rest.len() => chunk.rfind('\n').map_or(0, |i| i + 1),
-                _ => rest.len(),
+            let text = web.text();
+            let from = (query.from as usize).min(text.len());
+            let rest = text.get(from..).unwrap_or("");
+            let end = if rest.len() <= CHUNK {
+                rest.len()
+            } else {
+                let chunk = &rest[..rest.floor_char_boundary(CHUNK)];
+                chunk.rfind('\n').map_or(chunk.len(), |i| i + 1)
             };
             buffer.rendered(&DeviceLog {
                 state: web.state.name(),

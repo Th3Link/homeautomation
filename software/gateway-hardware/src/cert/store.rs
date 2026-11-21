@@ -19,7 +19,7 @@ pub const FQDN: u8 = 0x92;
 pub const VALIDITY_YEARS: u8 = 0x93;
 pub const EST_URL: u8 = 0x94;
 pub const EST_AUTO_RENEW: u8 = 0x95;
-pub const HTTPS_ENABLED: u8 = 0x96;
+// 0x96 was the plain-HTTP fallback setting in earlier firmware.
 pub const NTP_SERVER: u8 = 0x97;
 /// The private key of the EST device identity (DER, PKCS#8 or SEC1/PKCS#1).
 pub const IDENTITY_KEY: u8 = 0x9B;

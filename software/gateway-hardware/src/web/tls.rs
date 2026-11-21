@@ -200,7 +200,7 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         effective_fqdn: &status.effective_fqdn,
         mode: status.settings.mode.code(),
         validity_years: status.settings.validity_years,
-        https: status.https_enabled,
+        https: true,
         time_known: status.time_known,
         time_authenticated: crate::wall_clock::authenticated(),
         ntp_server: &status.settings.ntp_server,
