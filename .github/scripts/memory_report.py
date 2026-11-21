@@ -40,6 +40,7 @@ import re
 import struct
 import sys
 from html import escape
+from pathlib import Path
 
 SHF_ALLOC = 0x2
 SHT_PROGBITS = 1
@@ -542,6 +543,13 @@ def read_optional_json(path):
         return None
 
 
+def number_cell(value, display=None):
+    key = "" if value is None else str(value)
+    if display is None:
+        display = "—" if value is None else f"{value:,}"
+    return f'<td class="number" data-sort="{escape(key)}">{escape(display)}</td>'
+
+
 def runtime_report(runtime, run):
     info = ""
     if run and type(run.get("databaseId")) is int:
@@ -566,12 +574,18 @@ def runtime_report(runtime, run):
     measures = ("heap_size", "heap_peak_used", "heap_min_free", "stack_size",
                 "stack_peak_used", "stack_untouched")
     for item in runtime.get("profiles", []):
-        state = str(item["status"]) + (" / partial" if item.get("partial") else "")
+        status = str(item["status"])
+        state = status + (" / partial" if item.get("partial") else "")
+        tone = "partial" if item.get("partial") else "neutral"
+        if status in ("failed", "aborted"):
+            tone = "failed"
+        elif status == "passed" and not item.get("partial"):
+            tone = "passed"
         label = escape(f'{item["scenario"]} #{item["run"]}')
         test = str(item.get("test", "")).split("::", 1)[0]
         if re.fullmatch(r"[0-9a-f]{40}", revision) and re.fullmatch(r"tests/\w+\.py", test):
             label = f'<a href="https://github.com/Th3Link/homeautomation/blob/{revision}/software/sim/{test}">{label}</a>'
-        cells = f'<th scope="row">{label}</th><td>{escape(state)}</td>'
+        cells = f'<th scope="row">{label}</th><td><span class="status {tone}">{escape(state)}</span></td>'
         gateways = [(g["name"], g["boots"]) for g in item.get("gateways", [])]
         if item.get("rest"):
             errors = len(item["rest"]["errors"])
@@ -581,35 +595,38 @@ def runtime_report(runtime, run):
                 chip = f'{gateway} / boot {n}' if boot else gateway
                 if boot.get("panic"):
                     chip += " (panic)"
-                samples = "—"
-                if boot.get("samples"):
-                    samples = (f'{boot["samples"]}, {boot["start_uptime_ms"] / 1000:.1f}–'
-                               f'{boot["end_uptime_ms"] / 1000:.1f} s')
-                values = "".join(f'<td>{boot[key]:,}</td>' if key in boot else '<td>—</td>'
-                                 for key in measures)
-                rows.append(f'<tr>{cells}<td>{escape(chip)}</td><td>{samples}</td>{values}</tr>')
+                count = boot.get("samples") or None
+                coverage = (f'{count}, {boot["start_uptime_ms"] / 1000:.1f}–'
+                            f'{boot["end_uptime_ms"] / 1000:.1f} s') if count else None
+                values = "".join(number_cell(boot.get(key)) for key in measures)
+                rows.append(f'<tr>{cells}<td>{escape(chip)}</td>{number_cell(count, coverage)}{values}</tr>')
 
     return f"""{info}
 <p>Bytes per boot, including startup. Coverage gives the number of samples and their
 firmware uptime range. Partial rows can end before the last peak. Repeats are shown separately.</p>
-<div class="table-scroll"><table><thead><tr><th>Scenario</th><th>Result</th><th>Gateway</th>
-<th>Coverage</th><th>Heap size</th><th>Heap peak</th><th>Heap minimum free</th>
-<th>Stack budget</th><th>Observed stack peak</th><th>Stack untouched</th></tr></thead>
+<div class="table-scroll data-scroll runtime-scroll" role="region" aria-labelledby="runtime" tabindex="0">
+<table class="data-table" data-sortable aria-labelledby="runtime"><thead><tr>
+<th scope="col">Scenario</th><th scope="col">Result</th><th scope="col">Gateway</th>
+<th scope="col" class="number">Coverage</th><th scope="col" class="number">Heap size</th>
+<th scope="col" class="number">Heap peak</th><th scope="col" class="number" title="Heap minimum free">Heap min. free</th>
+<th scope="col" class="number">Stack budget</th><th scope="col" class="number" title="Observed stack peak">Stack peak</th>
+<th scope="col" class="number">Stack untouched</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table></div>"""
 
 
 def chart(args):
     entries = read_optional_json(args.history) or []
     latest = entries[-1] if entries else {"sha": "—", "firmware": {}}
-    def optional_kib(m, key):
-        return f"{m[key] / 1024:.1f}" if m.get(key) is not None else "—"
+    def kib_cell(value):
+        return number_cell(value, f"{value / 1024:.1f}" if value is not None else None)
 
+    static_metrics = ("flash_image", "iram", "sram1_elf", "heap_reserved", "dram_static", "stack_budget")
     rows = "".join(
-        f"<tr><td><code>{escape(fw)}</code></td>"
-        + f"<td>{optional_kib(m, 'flash_bin')} / {m['app_partition'] / 1024:.0f}</td>"
-        + f"<td>{m['flash_image'] / 1024:.1f}</td><td>{m['iram'] / 1024:.1f}</td>"
-        + f"<td>{optional_kib(m, 'sram1_elf')}</td><td>{optional_kib(m, 'heap_reserved')}</td>"
-        + f"<td>{m['dram_static'] / 1024:.1f}</td><td>{m['stack_budget'] / 1024:.1f}</td>"
+        f'<tr><th scope="row"><code>{escape(fw)}</code></th>'
+        + number_cell(m.get("flash_bin"),
+                      f'{m["flash_bin"] / 1024:.1f} / {m["app_partition"] / 1024:.0f}'
+                      if m.get("flash_bin") is not None else f'— / {m["app_partition"] / 1024:.0f}')
+        + "".join(kib_cell(m.get(key)) for key in static_metrics)
         + "</tr>" for fw, m in sorted(latest["firmware"].items()))
     charts = []
     for name in ("gateway-hardware", "cancomponents-hardware"):
@@ -617,9 +634,14 @@ def chart(args):
         charts.append(f'<h3 id="trends-{name}"><code>{name}</code></h3>\n' +
                       (figures or '<p>No builds have been recorded for this firmware yet.</p>'))
     layouts = "\n".join(ram_layout(fw, metrics) for fw, metrics in sorted(latest["firmware"].items()))
-    static_data = f"""<h2>Latest ({escape(latest["sha"][:7])}, KiB)</h2>
-<div class="table-scroll"><table><tr><th>Firmware</th><th>Flash binary / slot</th><th>Flash ELF</th><th>SRAM0 IRAM</th>
-<th>SRAM1 ELF</th><th>SRAM1 heap</th><th>SRAM2 statics</th><th>SRAM2 stack budget</th></tr>{rows}</table></div>
+    static_data = f"""<h2 id="latest-build">Latest ({escape(latest["sha"][:7])}, KiB)</h2>
+<div class="table-scroll data-scroll" role="region" aria-labelledby="latest-build" tabindex="0">
+<table class="data-table" data-sortable aria-labelledby="latest-build"><thead><tr>
+<th scope="col">Firmware</th><th scope="col" class="number">Flash binary / slot</th>
+<th scope="col" class="number">Flash ELF</th><th scope="col" class="number">SRAM0 IRAM</th>
+<th scope="col" class="number">SRAM1 ELF</th><th scope="col" class="number">SRAM1 heap</th>
+<th scope="col" class="number">SRAM2 statics</th><th scope="col" class="number">SRAM2 stack budget</th>
+</tr></thead><tbody>{rows}</tbody></table></div>
 <p>The heap reservation is part of SRAM1 ELF usage. The ESP32 reserves another {SRAM1_ROM:,} B in SRAM1 for ROM data.
 Older builds may have missing measurements.</p>
 <h3>RAM sections by firmware and build profile</h3>
@@ -629,29 +651,13 @@ are listed in the memory map above.</p>
 <h2>Trends</h2>
 {''.join(charts)}""" if entries else '<p>No static history is available yet.</p>'
     runtime_data = runtime_report(read_optional_json(args.runtime), read_optional_json(args.runtime_run))
+    css = Path(__file__).with_suffix(".css").read_text(encoding="utf-8")
+    js = Path(__file__).with_suffix(".js").read_text(encoding="utf-8")
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Firmware memory history</title>
-<style>
-:root {{ color-scheme: light dark; --fg:#1d2330; --bg:#fff; --mut:#6b7385; --grid:#e3e6ee; }}
-@media (prefers-color-scheme: dark) {{ :root {{ --fg:#e6e9f0; --bg:#14171f; --mut:#9aa2b5; --grid:#2a2f3c; }} }}
-body {{ font:15px/1.5 system-ui,sans-serif; color:var(--fg); background:var(--bg);
-       max-width:820px; margin:0 auto; padding:24px 16px; }}
-svg {{ width:100%; height:auto; margin:8px 0 20px; }}
-.t {{ fill:var(--fg); font-weight:600; font-size:14px; }}
-.a {{ fill:var(--mut); font-size:11px; }} .g {{ stroke:var(--grid); }}
-.hash {{ font-family:ui-monospace,monospace; }}
-table {{ border-collapse:collapse; }} td,th {{ padding:4px 12px; text-align:right; }}
-th:first-child,td:first-child {{ text-align:left; }}
-.table-scroll {{ overflow-x:auto; }}
-.memory-map {{ width:100%; }}
-.memory-map th,.memory-map td {{ text-align:left; border-bottom:1px solid var(--grid); }}
-@media (min-width:42rem) {{ .address-map td:nth-child(3) code {{ white-space:nowrap; }} }}
-.bank th {{ padding-top:12px; }}
-details {{ border-top:1px solid var(--grid); padding:10px 0; }}
-summary {{ cursor:pointer; }}
-</style></head><body>
+<style>{css}</style></head><body>
 <p><a href="../">← Handbook</a></p>
 <h1>Firmware memory history</h1>
 <p>One point per commit on <code>main</code>. The ELF shows where the firmware
@@ -670,6 +676,7 @@ and the
 {static_data}
 <h2 id="runtime">Gateway runtime profiles</h2>
 {runtime_data}
+<script>{js}</script>
 </body></html>"""
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as f:

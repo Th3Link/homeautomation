@@ -1,0 +1,126 @@
+:root {
+  color-scheme: light dark;
+  --canvas: #fcfbf8;
+  --surface: #fff;
+  --stripe: #f8f6f0;
+  --header: #f0ede6;
+  --hover: #f1e7db;
+  --text: #242723;
+  --muted: #565b54;
+  --rule: #d8d5cc;
+  --link: #8c361f;
+  --pass-bg: #e5efe4;
+  --pass-fg: #24532c;
+  --fail-bg: #f6e4de;
+  --fail-fg: #802e23;
+  --partial-bg: #f4ebd5;
+  --partial-fg: #69501b;
+  --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #202320;
+    --surface: #242824;
+    --stripe: #292e2a;
+    --header: #303631;
+    --hover: #39362e;
+    --text: #f1eee5;
+    --muted: #c1c5b9;
+    --rule: #454b43;
+    --link: #ffb28f;
+    --pass-bg: #294232;
+    --pass-fg: #c2e4bd;
+    --fail-bg: #4b302c;
+    --fail-fg: #ffc4b9;
+    --partial-bg: #443a25;
+    --partial-fg: #efdaa6;
+  }
+}
+
+body {
+  box-sizing: border-box;
+  max-inline-size: 88rem;
+  margin: 0 auto;
+  padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 3rem;
+  font: 15px/1.55 system-ui, sans-serif;
+  color: var(--text);
+  background: var(--canvas);
+}
+
+a { color: var(--link); text-underline-offset: 0.16em; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+p { max-inline-size: 77ch; }
+h1, h2, h3 { line-height: 1.2; }
+h2 { margin-block-start: 2rem; }
+svg { display: block; width: 100%; max-inline-size: 62rem; height: auto; margin: 0.5rem 0 1.25rem; }
+.t { fill: var(--text); font-weight: 600; font-size: 14px; }
+.a { fill: var(--muted); font-size: 11px; }
+.g { stroke: var(--rule); }
+.hash, code { font-family: var(--mono); }
+
+table { border-collapse: collapse; }
+td, th { padding: 0.45rem 0.75rem; text-align: start; }
+.table-scroll { overflow: auto; }
+.memory-map { width: 100%; }
+.memory-map th, .memory-map td { border-block-end: 1px solid var(--rule); }
+@media (min-width: 42rem) { .address-map td:nth-child(3) code { white-space: nowrap; } }
+.bank th { padding-block-start: 0.75rem; }
+details { border-block-start: 1px solid var(--rule); padding-block: 0.625rem; }
+summary { cursor: pointer; }
+
+.data-scroll {
+  border: 1px solid var(--rule);
+  border-radius: 0.375rem;
+  background: var(--surface);
+}
+.runtime-scroll { max-block-size: min(70vh, 46rem); }
+.data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
+.data-table th, .data-table td { white-space: nowrap; }
+.data-table thead th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  background: var(--header);
+  border-block-end: 1px solid var(--rule);
+  white-space: normal;
+}
+.data-table thead th:has(button) { padding: 0; }
+.data-table tbody tr { --row: var(--surface); }
+.data-table tbody tr:nth-child(even) { --row: var(--stripe); }
+.data-table tbody tr:hover { --row: var(--hover); }
+.data-table tbody th, .data-table tbody td { background: var(--row); }
+.data-table tbody tr + tr > * { border-block-start: 1px solid var(--rule); }
+.data-table tr > :first-child { position: sticky; inset-inline-start: 0; border-inline-end: 1px solid var(--rule); }
+.data-table thead tr > :first-child { z-index: 2; }
+@media (max-width: 42rem) {
+  .runtime-scroll tbody th { max-inline-size: 8.75rem; white-space: normal; }
+}
+.data-table .number { text-align: end; font-variant-numeric: tabular-nums; }
+.data-table td[data-sort=""] { color: var(--muted); }
+.data-table button {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  min-block-size: 2.75rem;
+  border: 0;
+  padding: 0.45rem 0.75rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  text-align: start;
+  white-space: inherit;
+  cursor: pointer;
+}
+.data-table .number button { justify-content: end; text-align: end; }
+.data-table button:hover, .data-table th[aria-sort] button { background: var(--hover); }
+.data-table button:focus-visible { outline-offset: -3px; }
+.sort-mark { color: var(--muted); font-size: 0.8em; }
+.data-table th[aria-sort] .sort-mark { color: var(--link); }
+
+.status { display: inline-block; padding: 0.1em 0.55em; border-radius: 0.25rem; background: var(--header); }
+.status.passed { color: var(--pass-fg); background: var(--pass-bg); }
+.status.failed { color: var(--fail-fg); background: var(--fail-bg); }
+.status.partial { color: var(--partial-fg); background: var(--partial-bg); }
