@@ -95,8 +95,8 @@ configuration, MQTT transport, and gateway and node firmware updates.
 ### Wall switch
 
 <figure class="board">
-  <img src="assets/boards/switch.webp" alt="Wall switch PCB with four button positions, CAN connector footprint and expansion headers" loading="lazy">
-  <figcaption>BUTTON v3.0 ESP32 · PCB silkscreen revision</figcaption>
+  <img src="assets/boards/switch.webp" alt="Both sides of the wall switch PCB, with the four buttons on the left view and the CAN connector footprint and expansion headers on the right view" loading="lazy">
+  <figcaption>BUTTON v3.0 ESP32 · Button side (left) and reverse (right)</figcaption>
 </figure>
 
 An ESP32 CAN node for up to four local buttons. `cancomponents` reports
@@ -147,7 +147,7 @@ and fitted components.
 ### Sensor extension
 
 <figure class="board">
-  <img src="assets/boards/sensors.webp" alt="Sensor extension PCB with I²C parts, PIR footprint and sensor headers" loading="lazy">
+  <img src="assets/boards/sensors.webp" alt="Sensor extension PCB with I²C parts, PIR footprint and sensor connector pads" loading="lazy">
   <figcaption>SENSORUNIT2 v1.0 · 48 × 49 mm</figcaption>
 </figure>
 
@@ -302,6 +302,161 @@ gateway publishes retained configurations over MQTT.
 
 [CAN discovery design](adr/0021-can-discovery.md) ·
 [Home Assistant discovery design](../software/gateway-core/docs/adr/0022-home-assistant-discovery.md)
+
+## QEMU simulation
+
+Run the gateway and CAN-node firmware on Linux with one QEMU process per
+ESP32. The simulator connects the emulated CAN controllers over SocketCAN
+and models button inputs, relay outputs, and I²C and 1-Wire devices. The
+gateway's web UI and REST API are available on forwarded localhost ports.
+
+### Prepare the simulator
+
+Use Python 3.11 or newer, the ESP Rust toolchain, `espflash`, and a Linux
+kernel with SocketCAN and `vcan`. Build the
+[project's QEMU fork](https://github.com/Th3Link/qemu/tree/esp32-sim).
+Its `esp32-sim` branch includes the Ethernet MAC, GPIO, remote I²C and
+1-Wire models used by the firmware.
+
+On Ubuntu, install the host tools and QEMU build dependencies.
+
+```sh
+sudo apt-get install git build-essential pkg-config cmake ninja-build python3 python3-venv \
+  libglib2.0-dev libpixman-1-dev libslirp-dev libgcrypt20-dev iproute2
+```
+
+From the homeautomation repository root, build QEMU in a separate checkout
+and put the resulting binary in `QEMU`.
+
+```sh
+git clone --branch esp32-sim https://github.com/Th3Link/qemu.git "$HOME/qemu-esp32-sim"
+(
+  cd "$HOME/qemu-esp32-sim"
+  ./configure --target-list=xtensa-softmmu --enable-gcrypt --enable-slirp \
+    --disable-werror --disable-user --disable-docs
+  ninja -C build qemu-system-xtensa
+)
+export QEMU="$HOME/qemu-esp32-sim/build/qemu-system-xtensa"
+```
+
+Install the [ESP Rust toolchain](../README.md#building) and install
+`espflash` with `cargo install espflash --locked` if it is missing.
+Build the two release ELFs. The simulator uses them to prepare the flash
+images for each chip.
+
+```sh
+source "$HOME/export-esp.sh"
+(cd software/gateway-hardware && cargo build --release --locked)
+(cd software/cancomponents-hardware && cargo build --release --locked)
+
+cd software/sim
+python3 -m venv "$HOME/.venvs/homeautomation-sim"
+source "$HOME/.venvs/homeautomation-sim/bin/activate"
+python -m pip install pytest
+```
+
+### Start a gateway and several nodes
+
+The examples use [`tests/sim.toml`](../software/sim/tests/sim.toml).
+It places `gw`, a sensor-equipped switch (`taster`), a relay board
+(`relais`), and a PWM node (`pwm`) on the same `vcan-test` bus.
+Run these commands from `software/sim`. The `net` command uses
+`sudo` to create the virtual interface if it is missing.
+
+```sh
+./sim -f tests/sim.toml net
+./sim -f tests/sim.toml doctor
+./sim -f tests/sim.toml up -d
+./sim -f tests/sim.toml status
+```
+
+Open `https://127.0.0.1:8543/` for this gateway, or run
+`./sim -f tests/sim.toml tui` to see the chips and their events together.
+The first status output may show `booting` while the firmware starts.
+The `http` and `https` fields are host ports forwarded into that QEMU
+gateway. Inside QEMU, the host network is reachable at `10.0.2.2`.
+
+To build your own installation, copy a topology and add a
+`[[node]]` for each simulated board. `gateway = "gw"` puts the node
+on that gateway's CAN interface. Give each node a unique name and each
+node of the same type on that bus a distinct CAN ID. The
+[default topology](../software/sim/sim.toml) shows two gateways with
+separate buses and localhost ports. Use the same `-f` path in every
+command for a custom topology.
+
+The test topology keeps virtual flash under `tests/.sim/sim/chips/`.
+Device settings persist across runs. `./sim -f tests/sim.toml down` stops
+the installation. For troubleshooting, read `tests/.sim/sim/up.log` or
+the `serial.log` in each chip's directory. Use
+`./sim -f tests/sim.toml can --all` to watch protocol traffic, including
+the [discovery messages](#can-discovery).
+
+### Control nodes from Python
+
+`sim run` provides a connected `sim` object to the script. This example
+presses two simulated buttons and waits for the corresponding CAN
+reports from the two nodes.
+
+```sh
+./sim -f tests/sim.toml run examples/first_steps.py
+```
+
+The script prints one decoded event per node.
+
+```text
+taster: button 1 double
+relais: button 5 single
+```
+
+The [example script](../software/sim/examples/first_steps.py) waits until
+the gateway and nodes are ready. It looks up each node by its TOML name,
+then pairs each input with the expected CAN frame. The double press on
+`taster` matches the payload in the [wire-format example](#decode-a-button-event).
+
+```python
+taster = sim["taster"]
+taster.press(1, "double")
+sim.expect_can("ButtonEvent", chip=taster, data=[1, 4, 0, 0])
+
+relais = sim["relais"]
+relais.press(5)
+sim.expect_can("ButtonEvent", chip=relais, data=[5, 3, 0, 0])
+```
+
+To change a sensor input, call `taster.bme680.set(temperature=27.25)`
+and use `sim.expect_can("TemperatureSensor", chip=taster, value=27.25, timeout=40)`.
+Python can also connect directly via [`simlib.Sim`](../software/sim/README.md#scripts).
+
+### Verify CAN discovery with pytest
+
+Keep the `vcan-test` interface up. Stop the interactive session so pytest
+can start and stop its own supervisor, then run the discovery test.
+
+```sh
+./sim -f tests/sim.toml down
+python -m pytest tests/test_discovery.py -q
+```
+
+The [test](../software/sim/tests/test_discovery.py) sends `discover` to the
+gateway's serial console. It waits for the broadcast request, then checks
+the name announcement and addressed acknowledgement for each of the three
+nodes. The captured frames are the exchange described in [CAN discovery](#can-discovery).
+
+Run `python -m pytest tests` for the whole suite, which also exercises
+HTTPS. To run just discovery with fresh flash images, copy the test topology
+to an empty directory. The copy keeps the fixture names, CAN interface
+and ports, so stop the existing test installation first.
+
+```sh
+fresh=$(mktemp -d)
+cp tests/sim.toml "$fresh/sim.toml"
+python -m pytest tests/test_discovery.py --rootdir=. --sim-topology "$fresh/sim.toml"
+```
+
+QEMU can check firmware behavior, CAN messages, and the gateway API.
+For physical bus timing and electrical behavior, use hardware. See the
+[simulator reference](../software/sim/README.md#how-it-works) for the
+emulated peripherals and their limits.
 
 ## Rust API reference
 
