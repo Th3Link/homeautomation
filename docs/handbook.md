@@ -775,9 +775,9 @@ partition table. The ELF breaks RAM down by physical bank.
 | Bank | ESP32 capacity | Gateway placement |
 |---|---:|---|
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
-| SRAM1 | 128 KiB | Two MQTT buffer sections and a 94 KiB heap, alongside ROM data. The instruction address range mirrors the data range. |
+| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, a 34 KiB general heap and a 48 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
 | SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The linker gives the main stack the space left after statics. |
-| RTC FAST | 8 KiB | CAN log frame queue, gateway log batch for MQTT and one shared 4 KiB firmware upload chunk |
+| RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, certificate capture buffer and one shared 4 KiB firmware upload chunk |
 | RTC SLOW | 8 KiB | Node log text for the web API |
 
 The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
@@ -792,6 +792,9 @@ records peak usage as allocations happen, so a buffer that has already
 been freed can still affect the peak. The stack peak is the linker budget
 minus the remaining stack paint. This estimate includes the unpainted
 guard and startup area. Zero untouched bytes mean no reserve was observed.
+The `crypto_pool` object reports MbedTLS capacity, current use, peak use
+and failed allocation count. Its peak and the general heap peak can occur
+at different times.
 
 A profiling build emits UART samples every two seconds. This keeps the
 measurement available during MQTT or CAN activity even if a web request
@@ -830,6 +833,8 @@ and `--runs 1` for a single measurement.
 |---|---|
 | `idle`, `idle-rest`, `heap-probe` | Gateway idle over UART, idle with REST requests, and an 8 KiB allocation freed before the next sample |
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
+| `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
+| `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
 | `https-automation`, `combined` | The automation stack regression test, and an HTTPS request alongside active MQTT nodes |
 | `gateway-ota`, `can-ota` | The firmware update tests, including CRC rejection and the successful transfer |
 | `mqtt-tls` | Two gateways using TLS 1.3 with a local test broker and a generated certificate, with certificate verification disabled in the isolated test |
@@ -848,7 +853,7 @@ unset GATEWAY_PASSWORD
 
 The [Simulation workflow](../.github/workflows/simulation.yml) runs two
 repeats on schedule or on manual dispatch. Pull requests run the two-gateway
-MQTT smoke test. The memory page links to the latest scheduled or manually
+MQTT test, the dual-broker TLS load test and the automation stack regression. The memory page links to the latest scheduled or manually
 started run on `main`, including failures and runs that produced no artifact.
 Compare reserves across repeated runs of the same build and workload before
 using the measurements as thresholds.

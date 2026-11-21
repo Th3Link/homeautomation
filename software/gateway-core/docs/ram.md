@@ -1,6 +1,8 @@
 # RAM on the gateway (ESP32)
 
-## HTTPS, logs and firmware uploads
+For the shipping memory layout and workload measurements, see [MQTT, HTTPS and crypto storage](#mqtt-https-and-crypto-storage). The [baseline by bank](#baseline-by-bank) records the release before these changes.
+
+## First reduction in HTTPS, logging and OTA (`a9e1b19`)
 
 The gateway serves the UI and API on port 443. Removing the port 80 redirect eliminates a 7,688 B long-lived boxed future in the former default mode. A saved plain-HTTP setting from older firmware has no effect after upgrading. The five HTTPS sockets still share one active TLS session.
 
@@ -12,11 +14,46 @@ The gateway serves the UI and API on port 443. Removing the port 80 redirect eli
 | Shared firmware upload chunk for gateway and node updates, including its lock | RTC FAST, `.rtc_fast.data` | 4,112 |
 | Gateway log ring with cursor and lock | SRAM2, `.data` | 6,156 |
 
-The two log workers use ordinary Embassy task storage in SRAM2. A download resets its length and status under the same lock used by readers. Only its valid UTF-8 prefix is exposed. RTC FAST has 2,364 B left. Only one upload runs at a time, so all three upload routes use the same chunk. The flash driver still has its own sector-sized stack buffer. The bank figures and sizing experiment below describe the earlier build used to select these changes.
+The two log workers use ordinary Embassy task storage in SRAM2. A download resets its length and status under the same lock used by readers. Only its valid UTF-8 prefix is exposed. At this step RTC FAST had 2,364 B left. Only one upload runs at a time, so all three upload routes use the same chunk. The flash driver still has its own sector-sized stack buffer. The bank figures and sizing experiment below describe the earlier build used to select these changes.
 
-One local `memory-profile` release run repeated the baseline QEMU `combined` scenario with two gateways, active CAN nodes, Mosquitto and a concurrent HTTPS automation read. Gateway A reached 62,436 B peak heap and ended at 21,808 B. The baseline reached 72,724 B and ended at 32,000 B. The unchanged 96,256 B heap reservation therefore had 10,288 B more headroom at the measured peak. Stack margin in this workload was 23,620 B (baseline 26,316 B). A separate ten-second HTTPS `/system` capture completed on one boot with 15,508 B untouched. The full automation-edit workload still hit the guard in `put_button` during output lookup.
+One local `memory-profile` release run repeated the baseline QEMU `combined` scenario with two gateways, active CAN nodes, Mosquitto and a concurrent HTTPS automation read. Gateway A reached 62,436 B peak heap and ended at 21,808 B. The baseline reached 72,724 B and ended at 32,000 B. The unchanged 96,256 B heap reservation therefore had 10,288 B more headroom at the measured peak. Stack margin in this workload was 23,620 B (baseline 26,316 B). A separate ten-second HTTPS `/system` capture completed on one boot with 15,508 B untouched. At this step the full automation-edit workload still hit the guard in `put_button` during output lookup.
 
 Both HTTPS OTA scenarios completed their bad-CRC checks and the subsequent version switch from `qemu-v1` to `qemu-v2`. The gateway update preserved the configuration across reboot and reached 65,436 B peak heap with 15,508 B of stack untouched. The addressed CAN update left the other node on `qemu-v1` and reached 65,300 B peak gateway heap with 15,352 B of stack untouched. These are QEMU measurements.
+
+## MQTT, HTTPS and crypto storage
+
+| Storage in the release build | Placement | Bytes |
+|---|---|---:|
+| MQTT TCP RX / TX, per broker | SRAM1 ROM boot areas | 1,536 / 1,024 |
+| MQTT TLS records, per broker | Same allocation as its TCP windows | 8,192 / 1,024 |
+| HTTPS TCP RX / TX, five listeners | One pair in each ROM boot area, three in upper SRAM1 | 5 × 2,560 |
+| MQTT application publication queue, primary broker | SRAM2 | 4,896 |
+| Gateway OTA partial-sector scratch | Upper SRAM1 | 4,096 |
+| MbedTLS allocator for HTTPS, EST and certificate parsing | Upper SRAM1 | 49,152 |
+| General allocator, including Rust RSA and request futures | Upper SRAM1 | 34,816 |
+| MQTT pinned certificate capture, including lock | RTC FAST | 2,068 |
+
+The secondary broker subscribes, accepts commands and sends MQTT protocol acknowledgements. Application publications go to the primary broker. Removing the secondary queue saves 4,896 B. The two MQTT TCP window pairs save 3,072 B and the five HTTPS pairs save another 2,560 B. Together these remove **10,528 B of application storage**. Both MQTT sessions keep their own TLS records and a 2,048 B maximum MQTT packet. Moving the five HTTPS listeners into static storage also removes their lifetime heap allocations.
+
+Aligned, complete OTA sectors use the incoming chunk directly through the flash driver's 512 B DRAM bounce buffer. Partial sectors preserve adjacent data in one static 4 KiB workspace, including writes to boot metadata. NTS key exchange borrows the HTTPS buffers for TCP, its outgoing TLS records and its response. EST borrows them as its TCP buffers. The Home Assistant task streams one device or sensor at a time and releases its locks before publishing. The queue takes ownership of the discovery payload.
+
+The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 83,968 B combined, 12,288 B less than the earlier general heap. Pool and general-heap peaks can occur at different times. RTC FAST has 296 B free and the node log occupies RTC SLOW.
+
+### Measured before and after
+
+The same `combined` scenario exercises two gateways, active CAN nodes, MQTT and an HTTPS automation read. The values below come from gateway A. The baseline allocator included MbedTLS. On the new build each allocator tracks its own peak, and those peaks can occur at different times.
+
+| Bytes | Baseline `e3a0c88` | HTTPS/RTC step `a9e1b19` | This implementation |
+|---|---:|---:|---:|
+| General heap reserved | 96,256 | 96,256 | 34,816 |
+| Dedicated MbedTLS pool reserved | — | — | 49,152 |
+| Total reserved for both allocators | 96,256 | 96,256 | 83,968 |
+| General heap used at end of combined workload | 32,000 | 21,808 | 3,224 |
+| General heap peak in combined workload | 72,724 | 62,436 | 9,452 |
+| MbedTLS peak in combined workload | included above | included above | 39,276 |
+| Untouched stack in combined workload | 26,316 | 23,620 | 21,052 |
+
+The separate automation-edit test used to stop at the stack guard during the button save. In two consecutive QEMU runs it saved and read back the binding on the same boot. Both runs left **9,484 B** untouched immediately after the save and **9,276 B** after the entire edit sequence, out of 49,260 B in the profiling build. The minimum regression threshold is 8,192 B. The combined workload above has its own stack watermark.
 
 ## Baseline by bank
 
@@ -81,7 +118,7 @@ Each of the **two 13,312 B SRAM1 buffers** contains 2,048 B TCP RX, 2,048 B TCP 
 
 There is more room outside the record layer. The compiler puts 12,000 B into each MQTT task future (12,040 B including its Embassy slot). The TLS session child is 7,720 B, the plain child 4,600 B. Their layouts include a 2,048 B MQTT receive arena. The outer task also holds a 528 B full configuration and a 2,056 B optional pinned certificate across suspension points. Load only per-broker settings and keep temporary verification state in a bounded handshake workspace. If handshakes are serialized, keep existing connections serving traffic and retain independent per-session records. Preserve the advertised MQTT 5 maximum packet size and test large retained messages.
 
-Only the primary currently has a live application-queue producer, including the reconnect announcement. Dropping the unused secondary 16-entry queue would release **4,896 B in SRAM2**. If an explicit secondary publish must remain available, give it one or two entries and document its existing full-queue policy. Protocol traffic such as CONNECT, SUBSCRIBE and acknowledgements still needs the secondary socket's TX path.
+Only the primary had a live application-queue producer, including the reconnect announcement. Removing the unused secondary 16-entry queue released **4,896 B in SRAM2**. Protocol traffic such as CONNECT, SUBSCRIBE and acknowledgements still needs the secondary socket's TX path.
 
 ### OTA, RTC and flash scratch
 
@@ -89,7 +126,7 @@ All HTTP upload targets use the same `BUSY` guard. In the baseline each active u
 
 The gateway has a **second** sector-sized cost. `esp-hal-ota` calls `SharedFlash::Storage::write`, which delegates to `esp-storage 0.10.0`. That implementation reads a sector into a local aligned 4,096 B buffer, merges the data, erases and writes it back, even for full-sector writes. The existing 512 B static bounce serves other flash operations. For aligned full sectors, investigate erasing once and feeding the existing aligned DRAM bounce from RTC. Preserve bytes outside partial first/last writes and writes to OTA metadata. Keep the final readback/CRC. A static DRAM sector workspace is the fallback if the partial-sector path needs it. Reducing the HTTP chunk to 1 KiB with the existing writer can turn one sector erase into four. [Shared flash adapter](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/common-hardware/src/flash.rs) · [Gateway OTA](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/gateway-hardware/src/update.rs) · [Pinned sector writer](https://github.com/esp-rs/esp-hal/blob/63e97be553f435f29171f7ae5f37a41ad737a75a/esp-storage/src/storage.rs)
 
-The addressed CAN protocol stores its 1,024 B block until ACK or retransmission. Legacy frames carry at most eight bytes. The retry block could borrow the appropriate slice of the existing upload slot while sending, if all producers and cancellation paths preserve its lifetime. Keep retries byte-identical. The 1,068 B CAN session also fits in the remaining RTC FAST space. RTC SLOW now holds the full node log, so relocating the 4,116 B HA published-topic index there would require a smaller log or a different layout. [CAN update session](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/gateway-hardware/src/can_update.rs) · [HA index](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/gateway-hardware/src/ha.rs)
+The addressed CAN protocol stores its 1,024 B block until ACK or retransmission. Legacy frames carry at most eight bytes. The retry block could borrow the appropriate slice of the existing upload slot while sending, if all producers and cancellation paths preserve its lifetime. Keep retries byte-identical. The remaining RTC FAST space is too small for the 1,068 B CAN session. RTC SLOW holds the full node log, so relocating the 4,116 B HA published-topic index there would require a smaller log or a different layout. [CAN update session](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/gateway-hardware/src/can_update.rs) · [HA index](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/gateway-hardware/src/ha.rs)
 
 ### Other general-heap clients
 
@@ -117,14 +154,15 @@ An isolated copy of the gateway used a single RTC FAST mutex-protected upload ar
 
 The experimental release ELF places the 4,096 B upload array and 16 B of mutex state at `0x3ff80000` in `.rtc_fast.data` (4,112 B total). That leaves 4,080 B in FAST and all 8,192 B in SLOW. This initialized section also has a flash load image. A separate boot-initialized guard and a zeroed payload section could avoid storing the zeros in flash. The ELF still gives the main stack 45,924 B and reserves 96,256 B for the general heap. No runtime saving or new stack margin has been measured for this experiment.
 
-For the current HTTPS-only firmware, the same smaller RX windows would give 13,120 B of listener futures across five connections. The two MQTT savings land in different linker sections and cannot simply be added to a contiguous TLS pool. The upload move trades general heap for RTC. The TCP changes reduce total bytes required. Throughput and interoperability require separate tests.
+In this earlier experiment, shrinking the HTTPS RX windows without moving the buffers out of the listener futures would give 13,120 B across five connections. The two MQTT savings land in different linker sections and cannot simply be added to a contiguous TLS pool. The upload move trades general heap for RTC. The TCP changes reduce total bytes required. Throughput and interoperability require separate tests.
 
-## Order of implementation and acceptance
+## Implementation and remaining validation
 
-1. **Release unused SRAM2 and shrink the long-lived allocations.** Remove or shorten the secondary application queue. Apply the TCP window changes independently. Compare the ELF and the live allocator after boot, over HTTPS. Run two simultaneous brokers on one gateway, including two TLS connections, HA republish on reconnect, long certificate chains, retained commands and five browser sockets. Record transfer time for a large OTA before and after, including a higher-latency connection.
-2. **Validate the shared RTC slot on hardware and remove the flash-sector stack frame.** Check section address, size and initialization in the ELF and exercise the real ESP32 after cold boot and software reset. Test HTTPS uploads, gateway version switch, CAN retransmission, wrong CRC, truncated body, odd last sector, busy and retry. Compare per-boot watermarks. Retest the independent automation-edit stack-guard failure when no OTA is active.
-3. **Convert persistent application allocations to typed SRAM1 storage.** Start with the five HTTPS listeners. Then measure and migrate HA discovery, DNS, NTS/EST staging and temporary handler state in lifetime order. Keep shared storage behind one owner. Validate concurrent requests, repeated connects/disconnects and cancellation. Publish static bytes per bank, dynamic bytes by owner, largest free block, stack margin and total reserved bytes. A smaller peak with the same 94 KiB reservation is an intermediate result.
-4. **Bound the residual crypto allocator, then retire the general heap.** Exercise first boot, full certificate chains, key renewal, EST, NTS, dual-broker TLS, simultaneous HTTPS and OTA, and repeated failures. Record peak live counts per class, peak bytes, largest request, failed requests and steady-state alloc/free calls. Size the pool from these traces plus an explicit margin and repeat on hardware. Check that normal application paths make zero general-heap allocations, then check boot and crypto separately before reducing or removing `esp-alloc`. Track CPU stack in parallel. Require complete traces with no guard write or unexpected reset before accepting a smaller stack budget.
+1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
+2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
+3. **Application storage.** HTTPS socket buffers and the HA task are static. NTS-KE and EST reuse the HTTPS slot. DNS, DHCPv6, the automation reload snapshot, variable-length credential data, NTS receive records and some request futures still use the general heap.
+4. **Crypto allocator.** MbedTLS runs in a dedicated 48 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
+5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 
 ### Reproducing the sizes
 
@@ -136,7 +174,7 @@ elf=../../target/xtensa-esp32-none-elf/release/gateway-hardware
 xtensa-esp32-elf-readelf -SW "$elf"
 xtensa-esp32-elf-nm -S --size-sort --radix=d -C "$elf" | rg ' [bBdD] ' | tail -35
 cargo +esp rustc --locked --release --lib -- -Zprint-type-sizes > /tmp/gateway-types.txt 2>&1
-rg 'type: .*async fn body of web::(serve_plain|serve_tls|serve_redirect)\(\)' /tmp/gateway-types.txt
+rg 'web::(serve_session|https_task)|mqtt::.*task' /tmp/gateway-types.txt
 ```
 
 Generate each compiler dump from a fresh build of the gateway crate if Cargo reports it as fresh. Compare like profiles and feature sets. Use the existing simulation runner and preserve `runtime.json` plus serial logs for each before/after comparison. [Memory runner](https://github.com/Th3Link/homeautomation/blob/e3a0c88/software/sim/memory_profile.py) · [QEMU test scenarios](https://github.com/Th3Link/homeautomation/tree/e3a0c88/software/sim/tests)
