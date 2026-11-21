@@ -2088,5 +2088,414 @@
     "iram_total": 131072
    }
   }
+ },
+ {
+  "sha": "9f00a56d55366e88961841f2096c0d78618a1e80",
+  "date": "2026-11-21T20:45:44+01:00",
+  "subject": "Merge pull request #103 from Th3Link/docs/memory-report",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 498614,
+    "iram": 18680,
+    "dram_static": 45896,
+    "stack_budget": 150708,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 17656
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11820
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425968,
+       "size": 34076
+      },
+      {
+       "name": ".stack",
+       "addr": 1073460044,
+       "size": 150708
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "size": 1368,
+      "section": ".data"
+     }
+    ],
+    "flash_bin": 498720,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 0,
+    "sram1_sections": {},
+    "iram_total": 131072
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519409,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 11092
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11612
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425760,
+       "size": 34012
+      },
+      {
+       "name": ".stack",
+       "addr": 1073459772,
+       "size": 150980
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "size": 1368,
+      "section": ".data"
+     }
+    ],
+    "flash_bin": 519520,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 0,
+    "sram1_sections": {},
+    "iram_total": 131072
+   },
+   "gateway-hardware/debug": {
+    "flash_image": 3125266,
+    "iram": 17816,
+    "dram_static": 152984,
+    "stack_budget": 43624,
+    "app_partition": 8126464,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 16792
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [
+      {
+       "name": ".rom_boot_pro_uninit",
+       "addr": 1073611840,
+       "size": 13312
+      },
+      {
+       "name": ".rom_boot_app_uninit",
+       "addr": 1073627984,
+       "size": 13312
+      },
+      {
+       "name": ".dram2_uninit",
+       "addr": 1073643056,
+       "size": 96256
+      }
+     ],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 38112
+      },
+      {
+       "name": ".bss",
+       "addr": 1073452256,
+       "size": 114872
+      },
+      {
+       "name": ".stack",
+       "addr": 1073567128,
+       "size": 43624
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "gateway_hardware::mqtt::mqtt_task::POOL",
+      "size": 24080,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::DMA_STORAGE",
+      "size": 18676,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::mqtt::PUBLISH_QUEUES",
+      "size": 9792,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::NET_RESOURCES",
+      "size": 8792,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::automation::RUNTIME",
+      "size": 8376,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::automation::automation_task::POOL",
+      "size": 7520,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::device_list::DEVICE_LIST",
+      "size": 6820,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::console::console_task::POOL",
+      "size": 6664,
+      "section": ".bss"
+     }
+    ],
+    "flash_bin": 3125376,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 122880,
+    "sram1_sections": {
+     ".rom_boot_pro_uninit": 13312,
+     ".rom_boot_app_uninit": 13312,
+     ".dram2_uninit": 96256
+    },
+    "heap_reserved": 96256,
+    "iram_total": 131072
+   },
+   "gateway-hardware/release": {
+    "flash_image": 3211953,
+    "iram": 12032,
+    "dram_static": 150684,
+    "stack_budget": 45924,
+    "app_partition": 8126464,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 11008
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [
+      {
+       "name": ".rom_boot_pro_uninit",
+       "addr": 1073611840,
+       "size": 13312
+      },
+      {
+       "name": ".rom_boot_app_uninit",
+       "addr": 1073627984,
+       "size": 13312
+      },
+      {
+       "name": ".dram2_uninit",
+       "addr": 1073643056,
+       "size": 96256
+      }
+     ],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 35968
+      },
+      {
+       "name": ".bss",
+       "addr": 1073450112,
+       "size": 114716
+      },
+      {
+       "name": ".stack",
+       "addr": 1073564828,
+       "size": 45924
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "gateway_hardware::mqtt::mqtt_task::POOL",
+      "size": 24080,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::DMA_STORAGE",
+      "size": 18676,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::mqtt::PUBLISH_QUEUES",
+      "size": 9792,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::NET_RESOURCES",
+      "size": 8792,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::automation::RUNTIME",
+      "size": 8376,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::automation::automation_task::POOL",
+      "size": 7520,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::device_list::DEVICE_LIST",
+      "size": 6820,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::console::console_task::POOL",
+      "size": 6664,
+      "section": ".bss"
+     }
+    ],
+    "flash_bin": 3212064,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 122880,
+    "sram1_sections": {
+     ".rom_boot_pro_uninit": 13312,
+     ".rom_boot_app_uninit": 13312,
+     ".dram2_uninit": 96256
+    },
+    "heap_reserved": 96256,
+    "iram_total": 131072
+   }
+  }
  }
 ]
