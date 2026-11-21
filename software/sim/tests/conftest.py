@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -37,26 +38,35 @@ def pytest_addoption(parser):
                     help="leave the simulation running after the tests")
 
 
-@pytest.fixture(scope="session")
-def sim(request):
-    """The running simulation (simlib/client.py)."""
-    path = request.config.getoption("--sim-topology")
+@contextmanager
+def running_simulation(path, *, keep=False):
     topo = Topology(path)
     missing = [b for b in topo.buses if not can.interface_exists(b)]
     if missing:
         pytest.exit(f"no CAN interface {', '.join(missing)}: ./sim -f {path} net", returncode=2)
-    started = False
-    if supervisor.request(topo, {"cmd": "status"}, 2) is None:
-        subprocess.run([sys.executable, str(SIM), "-f", path, "up", "-d"], check=True)
-        started = True
-    s = Sim(path)
+    started = supervisor.request(topo, {"cmd": "status"}, 2) is None
     try:
-        s.wait_ready(timeout=180)
-        yield s
+        if started:
+            subprocess.run([sys.executable, str(SIM), "-f", path, "up", "-d"], check=True)
+        with Sim(path) as sim:
+            sim.wait_ready(timeout=180)
+            yield sim
     finally:
-        s.close()
-        if started and not request.config.getoption("--sim-keep"):
+        if started and not keep:
             supervisor.request(topo, {"cmd": "down"}, 10)
+
+
+@pytest.fixture(scope="session")
+def start_sim():
+    return running_simulation
+
+
+@pytest.fixture(scope="session")
+def sim(request, start_sim):
+    """The running simulation (simlib/client.py)."""
+    path = request.config.getoption("--sim-topology")
+    with start_sim(path, keep=request.config.getoption("--sim-keep")) as simulation:
+        yield simulation
 
 
 @pytest.fixture(autouse=True)
