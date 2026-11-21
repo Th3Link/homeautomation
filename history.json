@@ -1130,5 +1130,180 @@
     ]
    }
   }
+ },
+ {
+  "sha": "6042fe8b0738ec431bdd169d524970f08d7d827d",
+  "date": "2026-11-21T14:58:37+01:00",
+  "subject": "Merge pull request #100 from Th3Link/docs/updates",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 498614,
+    "iram": 18680,
+    "dram_static": 45896,
+    "stack_budget": 150708,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 17656
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11820
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425968,
+       "size": 34076
+      },
+      {
+       "name": ".stack",
+       "addr": 1073460044,
+       "size": 150708
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "size": 1368,
+      "section": ".data"
+     }
+    ]
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519409,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 11092
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11612
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425760,
+       "size": 34012
+      },
+      {
+       "name": ".stack",
+       "addr": 1073459772,
+       "size": 150980
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "size": 1368,
+      "section": ".data"
+     }
+    ]
+   }
+  }
  }
 ]
