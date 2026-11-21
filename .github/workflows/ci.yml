@@ -128,6 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        crate: [gateway-hardware, cancomponents-hardware]
         profile: [debug, release]
         include:
           # matrix.bin is the Cargo *package*/binary name, which isn't
@@ -225,6 +226,11 @@ jobs:
           [ -n "$run_id" ] && gh run download "$run_id" --name firmware-metrics --dir baseline
       - name: Write report
         run: |
+          for crate in gateway-hardware cancomponents-hardware; do
+            for profile in debug release; do
+              test -s "metrics/$crate-$profile.json" || { echo "Missing metrics for $crate ($profile)"; exit 1; }
+            done
+          done
           python3 .github/scripts/memory_report.py report --metrics metrics \
             ${{ github.event_name == 'pull_request' && '--baseline baseline' || '' }} \
             | tee -a "$GITHUB_STEP_SUMMARY"

@@ -59,7 +59,7 @@ jobs:
         id: qemu
         with:
           path: ~/.cache/homeautomation-qemu
-          key: esp32-qemu-ubuntu24-x64-${{ env.QEMU_REVISION }}
+          key: esp32-qemu-roms-ubuntu24-x64-${{ env.QEMU_REVISION }}
       - name: Build the pinned ESP32 QEMU
         if: steps.qemu.outputs.cache-hit != 'true'
         run: |
@@ -71,9 +71,17 @@ jobs:
           ./configure --target-list=xtensa-softmmu --enable-gcrypt --enable-slirp \
             --disable-werror --disable-user --disable-docs
           ninja -C build qemu-system-xtensa
-          install -D build/qemu-system-xtensa "$HOME/.cache/homeautomation-qemu/qemu-system-xtensa"
-      - name: Select the simulator
-        run: echo "QEMU=$HOME/.cache/homeautomation-qemu/qemu-system-xtensa" >> "$GITHUB_ENV"
+          prefix="$HOME/.cache/homeautomation-qemu"
+          install -D build/qemu-system-xtensa "$prefix/bin/qemu-system-xtensa"
+          # QEMU resolves share/qemu relative to the installed executable.
+          install -d "$prefix/share/qemu"
+          install -m 644 pc-bios/esp32-v3-rom.bin pc-bios/esp32-v3-rom-app.bin "$prefix/share/qemu/"
+      - name: Verify the installed ESP32 machine can load both ROMs
+        shell: bash
+        run: |
+          qemu="$HOME/.cache/homeautomation-qemu/bin/qemu-system-xtensa"
+          printf 'quit\n' | timeout 10s "$qemu" -machine esp32 -m 4M -display none -S -monitor stdio -serial null
+          echo "QEMU=$qemu" >> "$GITHUB_ENV"
       - name: Build firmware for the PR smoke test
         if: github.event_name == 'pull_request'
         run: |
