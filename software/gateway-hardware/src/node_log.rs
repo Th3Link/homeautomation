@@ -164,11 +164,12 @@ pub async fn request(device_key: u32) -> bool {
         // first download until reset and protects all reads and writes.
         #[unsafe(link_section = ".rtc_slow.bss")]
         static mut TEXT: [u8; WEB_CAP] = [0; WEB_CAP];
+        let text = &raw mut TEXT;
         WebLog {
             device_key,
             state: State::Running,
             // SAFETY: this initializer runs once under WEB. The Option is never cleared.
-            bytes: unsafe { &mut *(&raw mut TEXT) },
+            bytes: unsafe { &mut *text },
             len: 0,
             lost: 0,
         }
