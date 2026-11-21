@@ -974,8 +974,8 @@ async fn enroll(
         identity_credentials().await
     };
 
-    let _slot = crate::https::slot().await;
-    let p7 = est::exchange(stack, url, operation, &csr, trust, client)
+    let mut slot = crate::https::slot().await;
+    let p7 = est::exchange(stack, url, operation, &csr, trust, client, &mut slot)
         .await
         .map_err(EnrollError::Est)?;
     let certs = pkcs7::certificates(&p7).ok_or(EnrollError::Est(EstError::Malformed))?;

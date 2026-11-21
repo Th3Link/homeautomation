@@ -197,23 +197,29 @@ async fn key_exchange(
     }
 
     // One TLS session at a time, with the web server and the EST client:
-    // the handshake's future, its buffers and the certificate check are
-    // another ~25 KB of heap. Taken before connecting: chrony gives a
-    // session 2 s from the connection on, there's no time to wait for it
-    // in between.
-    let _slot = crate::https::slot().await;
-    // On the heap, for the moment it takes. The handshake's messages and
-    // the request are small, the answer is under a kilobyte; only the
-    // server's flight with its certificates needs a large record buffer.
-    let mut rx = alloc::vec![0u8; 1024];
-    let mut tx = alloc::vec![0u8; 512];
-    let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
+    // reuse its HTTP buffers for TCP, outgoing records and the KE response.
+    // Acquire the slot before connecting because the server handshake is timed.
+    let mut slot = crate::https::slot().await;
+    let crate::https::Buffers { http, out } = &mut *slot;
+    let (rx, write_record) = http.split_at_mut(1024);
+    let (tx, answer) = out.split_at_mut(512);
+    let mut socket = TcpSocket::new(stack, rx, tx);
     socket.set_timeout(Some(KE_TIMEOUT));
     if let Err(e) = crate::resolve::connect(&mut socket, &addresses, port).await {
         console_log!("nts: {host}:{port}: {e:?}");
         return Err("cannot connect");
     }
-    crate::heap::boxed(|| handshake(socket, &roots, host, port)).await
+    crate::heap::boxed(|| {
+        handshake(
+            socket,
+            &roots,
+            host,
+            port,
+            write_record,
+            &mut answer[..KE_ANSWER_CAP],
+        )
+    })
+    .await
 }
 
 /// NTS-KE over the connected `socket`: TLS, the request, the answer, the
@@ -223,9 +229,10 @@ async fn handshake(
     roots: &Trusted,
     host: &str,
     port: u16,
+    write_record: &mut [u8],
+    answer: &mut [u8],
 ) -> Result<Association, &'static str> {
     let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
-    let mut write_record = alloc::vec![0u8; 1024];
 
     // The chain is checked once the server has answered: chrony gives the
     // whole session 2 s, the check alone takes over one. Until then
@@ -238,7 +245,7 @@ async fn handshake(
     const ALPN: &[&[u8]] = &[nts::ALPN];
     let opened = with_timeout(
         KE_TIMEOUT,
-        tls::open_with_alpn(socket, &mut read_record, &mut write_record, trust, ALPN),
+        tls::open_with_alpn(socket, &mut read_record, write_record, trust, ALPN),
     )
     .await;
     let mut connection = match opened {
@@ -260,7 +267,7 @@ async fn handshake(
         Ok(Err(_)) => return Err("connection lost"),
         Err(_) => return Err("no answer"),
     }
-    let mut answer = alloc::vec![0u8; KE_ANSWER_CAP];
+
     let mut len = 0;
     let response = loop {
         let read = match with_deadline(deadline, connection.read(&mut answer[len..])).await {

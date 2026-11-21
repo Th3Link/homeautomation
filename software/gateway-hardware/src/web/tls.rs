@@ -33,24 +33,26 @@ use serde::{Deserialize, Serialize};
 const UPLOAD_MAX: usize = 10 * 1024;
 
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
-    router
-        .route("/tls", get(read).patch(update))
-        .route("/tls/self-signed", post(self_signed))
-        .route("/tls/csr", get(csr))
+    let certificates = Router::new()
+        .route("/csr", get(csr))
         .route(
-            "/tls/certificate",
+            "/certificate",
             picoserve::routing::put_service(Upload(Target::Certificate)),
         )
         .route(
-            "/tls/trust-anchor",
+            "/trust-anchor",
             picoserve::routing::put_service(Upload(Target::TrustAnchor))
                 .delete(delete_trust_anchor),
         )
         .route(
-            "/tls/est/identity",
+            "/est/identity",
             picoserve::routing::put_service(Upload(Target::Identity)).delete(delete_identity),
         )
-        .route("/tls/est/enroll", post(enroll))
+        .route("/est/enroll", post(enroll))
+        .route("/self-signed", post(self_signed));
+    router
+        .nest("/tls", certificates)
+        .route("/tls", get(read).patch(update))
 }
 
 fn api_error(error: CertError) -> ApiError {

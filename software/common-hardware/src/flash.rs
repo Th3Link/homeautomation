@@ -209,3 +209,61 @@ impl NorFlash for SharedFlash {
 }
 
 impl embedded_storage::nor_flash::MultiwriteNorFlash for SharedFlash {}
+
+/// Sector-preserving writes for the gateway OTA partition and its boot metadata.
+/// Access to the partial-sector scratch space is serialized by the FLASH lock.
+#[derive(Clone, Copy)]
+pub struct GatewayOtaFlash;
+
+impl ReadStorage for GatewayOtaFlash {
+    type Error = FlashStorageError;
+
+    fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        ReadStorage::read(&mut SharedFlash, offset, bytes)
+    }
+
+    fn capacity(&self) -> usize {
+        ReadStorage::capacity(&SharedFlash)
+    }
+}
+
+impl Storage for GatewayOtaFlash {
+    fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        const SECTOR: usize = FlashStorage::ERASE_SIZE;
+        #[unsafe(link_section = ".dram2_uninit")]
+        static mut SCRATCH: [u8; SECTOR] = [0; SECTOR];
+        SharedFlash.with(|flash| {
+            let capacity = ReadStorage::capacity(flash);
+            let mut pos = offset as usize;
+            if pos > capacity || bytes.len() > capacity - pos {
+                return Err(FlashStorageError::OutOfBounds);
+            }
+            let mut rest = bytes;
+            while !rest.is_empty() {
+                let skip = pos % SECTOR;
+                let start = (pos - skip) as u32;
+                let count = rest.len().min(SECTOR - skip);
+                let (chunk, tail) = rest.split_at(count);
+                let data = if count == SECTOR {
+                    chunk
+                } else {
+                    // SAFETY: FLASH holds exclusive access and the uninitialized
+                    // linker section is initialized before forming a reference.
+                    let scratch = unsafe {
+                        let ptr = &raw mut SCRATCH;
+                        ptr.write_bytes(0, 1);
+                        &mut *ptr
+                    };
+                    read_through_bounce(flash, start, scratch)?;
+                    scratch[skip..skip + count].copy_from_slice(chunk);
+                    &scratch[..]
+                };
+                NorFlash::erase(flash, start, start + SECTOR as u32)?;
+                write_through_bounce(flash, start, data)?;
+                pos += count;
+                rest = tail;
+            }
+            Ok(())
+        })
+    }
+}

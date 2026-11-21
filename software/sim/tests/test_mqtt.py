@@ -1,6 +1,7 @@
 """Two QEMU gateways share a real Mosquitto broker, one CAN bus each."""
 
 import base64
+import gzip
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -25,7 +27,7 @@ HOST = "127.0.0.1"
 
 
 class Broker:
-    def __init__(self, directory, port, tls_port=None):
+    def __init__(self, directory, port, tls_port=None, *, large_cert=False):
         self.port = port
         self.log = directory / "mosquitto.log"
         self.config = directory / "mosquitto.conf"
@@ -33,9 +35,10 @@ class Broker:
         config = f"listener {port} {HOST}\nallow_anonymous true\npersistence false\n"
         if tls_port:
             cert, key = directory / "broker.crt", directory / "broker.key"
+            extension = ["-addext", "nsComment=" + "x" * 4096] if large_cert else []
             subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
                             "-nodes", "-days", "1", "-subj", "/CN=QEMU MQTT test broker",
-                            "-keyout", key, "-out", cert], check=True, capture_output=True)
+                            "-keyout", key, "-out", cert] + extension, check=True, capture_output=True)
             config += (f"listener {tls_port} {HOST}\ncertfile {cert}\nkeyfile {key}\n"
                        "tls_version tlsv1.3\nciphers_tls1.3 TLS_AES_128_GCM_SHA256\n")
             # Keep the server parameters comparable across OpenSSL releases.
@@ -83,10 +86,10 @@ class Broker:
         self.wait_log(lambda line: f"Received PUBLISH from {client} " in line
                       and "'canbus/available/" in line)
 
-    def publish(self, topic, payload):
+    def publish(self, topic, payload, *, retain=False):
         subprocess.run(
             ["mosquitto_pub", "-V", "mqttv5", "-h", HOST, "-p", str(self.port),
-             "-t", topic, "-m", payload],
+             "-t", topic, "-m", payload] + (["-r"] if retain else []),
             check=True, capture_output=True, text=True, timeout=10,
         )
 
@@ -252,3 +255,48 @@ def test_active_nodes_with_https_and_mqtt(mqtt_setup):
         https = pool.submit(read_automation)
         assert_mqtt_commands(sim, broker)
         https.result()
+
+
+def test_secondary_commands_during_five_https_downloads(mqtt_setup, tmp_path):
+    sim, primary = mqtt_setup
+    gateway = sim["gw-a"]
+    tls = os.environ.get("SIM_MQTT_TLS") == "1"
+    with ExitStack() as reservations:
+        ports = []
+        for _ in range(2 if tls else 1):
+            sock = reservations.enter_context(socket.socket())
+            sock.bind((HOST, 0))
+            ports.append(sock.getsockname()[1])
+    secondary = Broker(tmp_path, ports[0], ports[1] if tls else None, large_cert=tls)
+    secondary.start()
+    try:
+        # Seed a packet larger than both reduced TCP windows before subscribing.
+        secondary.publish("canbus/relais_command/absent", "x" * 1800, retain=True)
+        gateway.console(f"mqtt2-uri {'mqtts' if tls else 'mqtt'}://10.0.2.2:{ports[-1]}")
+        if tls:
+            gateway.console("mqtt2-insecure on")
+        gateway.console("mqtt2-enabled on")
+        client = f"gateway-{gateway.topology.mac.hex()}"
+        secondary.wait_log(lambda line: "canbus/debug/#" in line)
+        secondary.wait_log(lambda line: f"Sending PUBLISH to {client}" in line and "/absent'" in line)
+
+        barrier = Barrier(6, timeout=15)
+        def download():
+            req = urllib.request.Request(gateway.topology.url + "/assets/app.js")
+            req.add_header("Authorization", "Basic " + base64.b64encode(b"CAN2MQTTSETUP:Can2MqttPass").decode())
+            barrier.wait()
+            with urllib.request.urlopen(req, context=ssl._create_unverified_context(), timeout=60) as response:
+                return gzip.decompress(response.read())
+
+        expected = gzip.decompress((TOPOLOGY.parents[2] / "gateway-web/dist/app.js.gz").read_bytes())
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            pages = [pool.submit(download) for _ in range(5)]
+            barrier.wait()
+            for state in (3, 0, 3, 0):
+                assert primary.receive("canbus/relais_state/relaya/0/0", action=lambda:
+                    secondary.publish("canbus/relais_command/relaya", f"0/{state}/0")) == (False, str(state))
+            assert all(page.result() == expected for page in pages)
+        assert f"Received PUBLISH from {client} " not in secondary.log.read_text()
+    finally:
+        gateway.console("mqtt2-enabled off")
+        secondary.stop()

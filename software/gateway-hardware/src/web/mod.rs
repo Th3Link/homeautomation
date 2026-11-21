@@ -58,30 +58,48 @@ static SERVER_CONFIG: Config = Config::new(Timeouts {
 /// Starts the HTTPS listeners on port 443.
 pub fn spawn(spawner: &Spawner, stack: Stack<'static>) {
     spawner.spawn(system::restart_task().unwrap());
-    for _ in 0..HTTPS_TASKS {
-        spawner.spawn(https_task(stack).unwrap());
+    for buffers in listener_buffers() {
+        spawner.spawn(https_task(stack, buffers).unwrap());
+    }
+}
+
+struct TcpBuffers {
+    rx: [u8; 1536],
+    tx: [u8; 1024],
+}
+
+/// Each ROM boot stack has room for one listener next to an MQTT connection.
+/// The remaining three share SRAM1 with the allocators.
+fn listener_buffers() -> [&'static mut TcpBuffers; HTTPS_TASKS] {
+    use core::mem::MaybeUninit;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    static TAKEN: AtomicBool = AtomicBool::new(false);
+    #[unsafe(link_section = ".rom_boot_pro_uninit")]
+    static mut PRO: MaybeUninit<TcpBuffers> = MaybeUninit::uninit();
+    #[unsafe(link_section = ".rom_boot_app_uninit")]
+    static mut APP: MaybeUninit<TcpBuffers> = MaybeUninit::uninit();
+    #[unsafe(link_section = ".dram2_uninit")]
+    static mut REST: MaybeUninit<[TcpBuffers; HTTPS_TASKS - 2]> = MaybeUninit::uninit();
+    assert!(!TAKEN.swap(true, Ordering::Relaxed));
+    // SAFETY: this is called once after the ROM stack is retired. Each listener
+    // receives a distinct pair of byte arrays, zeroed before any reference exists.
+    unsafe {
+        let pro = (&raw mut PRO).cast::<TcpBuffers>();
+        let app = (&raw mut APP).cast::<TcpBuffers>();
+        let rest = (&raw mut REST).cast::<[TcpBuffers; HTTPS_TASKS - 2]>();
+        pro.write_bytes(0, 1);
+        app.write_bytes(0, 1);
+        rest.write_bytes(0, 1);
+        let [a, b, c] = &mut *rest;
+        [&mut *pro, &mut *app, a, b, c]
     }
 }
 
 #[embassy_executor::task(pool_size = HTTPS_TASKS)]
-async fn https_task(stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_tls(stack)).await
-}
-
-/// Port 443: accepts a connection, waits until the client sends something,
-/// then for the TLS slot, and serves the connection ([`serve_session`]).
-///
-/// This future only holds the socket's buffers (~3 KB): several of these
-/// wait at the same time. The session's own future (the handshake and
-/// picoserve, ~20 KB) is put on the heap only while it runs, and only one
-/// runs at a time.
-async fn serve_tls(stack: Stack<'static>) -> ! {
+async fn https_task(stack: Stack<'static>, buffers: &'static mut TcpBuffers) -> ! {
     use embassy_time::with_timeout;
-
-    let mut tcp_rx = [0u8; 2048];
-    let mut tcp_tx = [0u8; 1024];
     loop {
-        let mut socket = embassy_net::tcp::TcpSocket::new(stack, &mut tcp_rx, &mut tcp_tx);
+        let mut socket = embassy_net::tcp::TcpSocket::new(stack, &mut buffers.rx, &mut buffers.tx);
         if socket.accept(HTTPS_PORT).await.is_err() {
             continue;
         }
@@ -139,13 +157,13 @@ fn app() -> Router<impl PathRouter> {
     let api = devices::routes(api);
     let api = mqtt::routes(api);
     let api = sensors::routes(api);
-    let api = tls::routes(api);
     let api = location::routes(api);
     let api = network::routes(api);
     let api = logs::routes(api);
     let api = settings::routes(api)
         .route("/system", get(system::get_system))
         .route("/system/restart", post(system::restart));
+    let api = tls::routes(api);
     let api = firmware::routes(api);
     let api = automation::routes(api);
     // The API outermost: every route a request passes on its way costs a

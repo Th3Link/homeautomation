@@ -5,17 +5,17 @@
 //! OTA, just fed from HTTP bytes instead of CAN frames.
 
 use crate::console_log;
-use crate::flash::SharedFlash;
+use crate::flash::GatewayOtaFlash;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use esp_hal_ota::Ota;
 
-static OTA: Mutex<CriticalSectionRawMutex, Option<Ota<SharedFlash>>> = Mutex::new(None);
+static OTA: Mutex<CriticalSectionRawMutex, Option<Ota<GatewayOtaFlash>>> = Mutex::new(None);
 
 /// Marks the currently-running app partition valid (confirming a prior OTA
 /// update didn't need a rollback). Call once at boot.
 pub async fn init() {
-    match Ota::new(SharedFlash) {
+    match Ota::new(GatewayOtaFlash) {
         Ok(mut ota) => {
             ota.ota_mark_app_valid().ok();
         }
@@ -29,7 +29,7 @@ pub async fn init() {
 /// image with the given CRC32 (`Update::start` / `IUpdate::start` in the
 /// original). Returns `false` if the OTA partition couldn't be opened.
 pub async fn start(size: u32, crc: u32) -> bool {
-    match Ota::new(SharedFlash) {
+    match Ota::new(GatewayOtaFlash) {
         Ok(mut ota) => {
             if ota.ota_begin(size, crc).is_ok() {
                 *OTA.lock().await = Some(ota);

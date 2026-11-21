@@ -73,7 +73,7 @@ RAM_BANKS = {
 
 BANK_USES = {
     "SRAM0": "64 KiB for the flash caches. The remaining 128 KiB hold interrupt vectors and code in IRAM.",
-    "SRAM1": "The data and instruction addresses map to the same bank. The gateway places its heap and MQTT buffers here, alongside ROM data.",
+    "SRAM1": "The data and instruction addresses map to the same bank. The gateway uses it for allocators and network buffers alongside ROM data.",
     "SRAM2": "8 KiB reserved for ROM. The primary 192 KiB DRAM range holds statics, task state, and the main stack.",
     "RTC FAST": "Retained memory with mirrored data and instruction addresses.",
     "RTC SLOW": "Retained memory shared with the low-power subsystem.",
@@ -86,8 +86,8 @@ SECTION_USES = {
     ".bss": "Zero-initialized statics and task state",
     ".noinit": "Static data left uninitialized at boot",
     ".stack": "Main stack reservation",
-    ".rom_boot_pro_uninit": "Gateway MQTT buffers for the primary broker",
-    ".rom_boot_app_uninit": "Gateway MQTT buffers for the secondary broker",
+    ".rom_boot_pro_uninit": "Primary MQTT connection and, on newer builds, one HTTPS listener",
+    ".rom_boot_app_uninit": "Secondary MQTT connection and, on newer builds, one HTTPS listener",
 }
 
 DEFAULT_APP_PARTITION = 0x100000  # if partitions.csv can't be read
@@ -245,7 +245,10 @@ def measure(args):
         if section["name"] in SRAM1_SLOTS
     }
     if args.name == "gateway-hardware":
-        m["heap_reserved"] = m["sram1_sections"].get(".dram2_uninit", 0)
+        for obj in symbols:
+            if obj["section"] == ".dram2_uninit" and demangle(obj["name"]).endswith("::HEAP"):
+                m["heap_reserved"] = obj["size"]
+                break
     if args.image:
         m["flash_bin"] = os.path.getsize(args.image)
         if m["flash_bin"] > m["app_partition"]:
@@ -507,7 +510,7 @@ def ram_layout(firmware, metrics):
             name = section["name"]
             purpose = SECTION_USES.get(name, "")
             if name == ".dram2_uninit":
-                purpose = ("Gateway heap reservation" if firmware.startswith("gateway-hardware/")
+                purpose = ("General heap, plus the TLS pool, HTTPS listeners and OTA scratch on newer builds" if firmware.startswith("gateway-hardware/")
                            else "Static data left uninitialized at boot")
             if name in SRAM1_SLOTS:
                 slot_start, slot_end = SRAM1_SLOTS[name]
@@ -599,18 +602,22 @@ def runtime_report(runtime, run):
                 coverage = (f'{count}, {boot["start_uptime_ms"] / 1000:.1f}–'
                             f'{boot["end_uptime_ms"] / 1000:.1f} s') if count else None
                 values = "".join(number_cell(boot.get(key)) for key in measures)
+                crypto = boot.get("crypto_pool", {})
+                values += "".join(number_cell(crypto.get(key)) for key in ("size", "peak", "failures"))
                 rows.append(f'<tr>{cells}<td>{escape(chip)}</td>{number_cell(count, coverage)}{values}</tr>')
 
     return f"""{info}
 <p>Bytes per boot, including startup. Coverage gives the number of samples and their
-firmware uptime range. Partial rows can end before the last peak. Repeats are shown separately.</p>
+firmware uptime range. Partial rows can end before the last peak. MbedTLS has its own pool on newer firmware. The heap and pool peaks can occur at different times.</p>
 <div class="table-scroll data-scroll runtime-scroll" role="region" aria-labelledby="runtime" tabindex="0">
 <table class="data-table" data-sortable aria-labelledby="runtime"><thead><tr>
 <th scope="col">Scenario</th><th scope="col">Result</th><th scope="col">Gateway</th>
 <th scope="col" class="number">Coverage</th><th scope="col" class="number">Heap size</th>
 <th scope="col" class="number">Heap peak</th><th scope="col" class="number" title="Heap minimum free">Heap min. free</th>
 <th scope="col" class="number">Stack budget</th><th scope="col" class="number" title="Observed stack peak">Stack peak</th>
-<th scope="col" class="number">Stack untouched</th></tr></thead>
+<th scope="col" class="number">Stack untouched</th>
+<th scope="col" class="number">TLS pool size</th><th scope="col" class="number">TLS pool peak</th>
+<th scope="col" class="number">TLS allocation failures</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table></div>"""
 
 

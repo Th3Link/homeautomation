@@ -21,9 +21,8 @@ refuses more than four unconfirmed ones).
   its own slot with its own connection. Commands are accepted from either
   and handled identically. Everything the gateway publishes (node states,
   sensor readings, its own `available` announcement) goes to the
-  **primary** broker only; the secondary broker is receive-only, and
-  publishing something to it too is a deliberate exception that has to be
-  programmed per message (`mqtt::publish_secondary`; there is none yet).
+  **primary** broker. Only that slot has a publication queue. The secondary
+  slot subscribes and sends MQTT protocol acknowledgements.
   Console commands `mqtt-…` configure the primary slot, `mqtt2-…` the
   secondary; a slot that isn't enabled stays idle.
 - Broker address: `mqtt://<host>[:<port>]` (port defaults to `1883`,

@@ -65,6 +65,7 @@ pub async fn exchange(
     csr: &[u8],
     trust: &CStr,
     client: Option<Credentials<'static>>,
+    buffers: &mut https::Buffers,
 ) -> Result<Vec<u8>, EstError> {
     let server = est::parse_url(url).ok_or(EstError::BadUrl)?;
     let tls = https::tls().ok_or(EstError::Tls)?;
@@ -80,9 +81,7 @@ pub async fn exchange(
     host.push('\0');
     let host = CStr::from_bytes_with_nul(host.as_bytes()).map_err(|_| EstError::BadUrl)?;
 
-    let mut rx = alloc::vec![0u8; 2048];
-    let mut tx = alloc::vec![0u8; 2048];
-    let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
+    let mut socket = TcpSocket::new(stack, &mut buffers.http, &mut buffers.out);
     socket.set_timeout(Some(TIMEOUT));
     match crate::resolve::connect(&mut socket, &addresses, server.port).await {
         Ok(()) => {}

@@ -39,12 +39,9 @@ async fn main(spawner: Spawner) -> ! {
     // panic loop.
     console_log!("reset reason: {:?}", esp_hal::system::reset_reason());
 
-    // The heap lives in the RAM the ESP32's ROM leaves free above the
-    // normal data segment (`dram2`, ~96 KB), so it costs the statics nothing.
-    // It holds the web server's tasks (see `web`), the one MbedTLS session
-    // of HTTPS/EST (see `https`) and the RSA signature check of the MQTT
-    // TLS; everything else stays on heapless/static allocation.
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 94 * 1024);
+    // SRAM1 also houses the dedicated MbedTLS arena and the static socket buffers.
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 34 * 1024);
+    gateway_hardware::crypto_pool::init();
 
     // TLS needs unpredictable random numbers; without a radio the hardware
     // generator only gets entropy from the ADC noise source.
