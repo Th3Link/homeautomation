@@ -425,13 +425,14 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
                 series.setdefault(fw.rsplit("/", 1)[1], []).append((i, m))
     if not series:
         return ""
-    W, H, L, R, T, B = 760, 220, 62, 20, 34, 34
+    W, H, L, R, T, B = 760, 232, 62, 40, 34, 48
     vals = [m[key] for pts in series.values() for _, m in pts]
     lo, hi = min(vals), max(vals)
     pad = max((hi - lo) * 0.15, hi * 0.01, 1)
     lo, hi = max(0, lo - pad), hi + pad
-    n = max(len(entries) - 1, 1)
-    x = lambda i: L + (W - L - R) * i / n
+    points = sorted({i for pts in series.values() for i, _ in pts})
+    first, last = points[0], points[-1]
+    x = lambda i: L + (W - L - R) * ((i - first) / (last - first) if last > first else 0.5)
     y = lambda v: T + (H - T - B) * (1 - (v - lo) / (hi - lo))
     o = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{title}">',
          f'<text x="{L}" y="20" class="t">{title} (KiB)</text>']
@@ -440,11 +441,20 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
         o.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" '
                  f'class="g"/><text x="{L - 6}" y="{y(v) + 4:.1f}" class="a" '
                  f'text-anchor="end">{v / 1024:.1f}</text>')
-    step = max(1, len(entries) // 6)
-    for i, e in enumerate(entries):
-        if i % step == 0 or i == len(entries) - 1:
-            o.append(f'<text x="{x(i):.1f}" y="{H - 12}" class="a" '
-                     f'text-anchor="middle">{escape(e["date"][5:10])}</text>')
+    ticks = [first]
+    spacing = (last - first) / 6
+    for i in points[1:-1]:
+        if i - ticks[-1] >= spacing and last - i >= spacing:
+            ticks.append(i)
+    if last != first:
+        ticks.append(last)
+    for i in ticks:
+        date = escape(entries[i]["date"][:10])
+        sha = escape(entries[i]["sha"][:7])
+        o.append(f'<text x="{x(i):.1f}" y="{H - 26}" class="a" '
+                 f'text-anchor="middle">{date}</text>')
+        o.append(f'<text x="{x(i):.1f}" y="{H - 12}" class="a hash" '
+                 f'text-anchor="middle">{sha}</text>')
     for ci, (name, pts) in enumerate(sorted(series.items())):
         col = PALETTE[ci % len(PALETTE)]
         o.append(f'<text x="{W - R - 164 + ci * 90}" y="20" class="a" '
@@ -462,7 +472,8 @@ def svg_chart(entries, firmware, key, title, cap_key, cap_note):
             o.append(
                 f'<circle cx="{x(i):.1f}" cy="{y(m[key]):.1f}" r="3.5" fill="{col}">'
                 f'<title>{escape(name)}: {m[key]:,} B ({m[key] / 1024:.1f} KiB){share}\n'
-                f'{escape(entries[i]["sha"][:7])} {escape(entries[i]["subject"])}</title></circle>')
+                f'{escape(entries[i]["date"][:10])} · {escape(entries[i]["sha"][:7])}\n'
+                f'{escape(entries[i]["subject"])}</title></circle>')
     o.append("</svg>")
     return "\n".join(o)
 
@@ -600,11 +611,11 @@ def chart(args):
         + f"<td>{optional_kib(m, 'sram1_elf')}</td><td>{optional_kib(m, 'heap_reserved')}</td>"
         + f"<td>{m['dram_static'] / 1024:.1f}</td><td>{m['stack_budget'] / 1024:.1f}</td>"
         + "</tr>" for fw, m in sorted(latest["firmware"].items()))
-    names = sorted({fw.split("/")[0] for e in entries for fw in e["firmware"]})
-    charts = "\n".join(
-        f"<h2><code>{escape(n)}</code></h2>\n"
-        + "\n".join(svg_chart(entries, n, *c) for c in CHARTS)
-        for n in names)
+    charts = []
+    for name in ("gateway-hardware", "cancomponents-hardware"):
+        figures = "\n".join(filter(None, (svg_chart(entries, name, *c) for c in CHARTS)))
+        charts.append(f'<h3 id="trends-{name}"><code>{name}</code></h3>\n' +
+                      (figures or '<p>No builds have been recorded for this firmware yet.</p>'))
     layouts = "\n".join(ram_layout(fw, metrics) for fw, metrics in sorted(latest["firmware"].items()))
     static_data = f"""<h2>Latest ({escape(latest["sha"][:7])}, KiB)</h2>
 <div class="table-scroll"><table><tr><th>Firmware</th><th>Flash binary / slot</th><th>Flash ELF</th><th>SRAM0 IRAM</th>
@@ -616,7 +627,7 @@ Older builds may have missing measurements.</p>
 are listed in the memory map above.</p>
 {layouts}
 <h2>Trends</h2>
-{charts}""" if entries else '<p>No static history is available yet.</p>'
+{''.join(charts)}""" if entries else '<p>No static history is available yet.</p>'
     runtime_data = runtime_report(read_optional_json(args.runtime), read_optional_json(args.runtime_run))
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -630,6 +641,7 @@ body {{ font:15px/1.5 system-ui,sans-serif; color:var(--fg); background:var(--bg
 svg {{ width:100%; height:auto; margin:8px 0 20px; }}
 .t {{ fill:var(--fg); font-weight:600; font-size:14px; }}
 .a {{ fill:var(--mut); font-size:11px; }} .g {{ stroke:var(--grid); }}
+.hash {{ font-family:ui-monospace,monospace; }}
 table {{ border-collapse:collapse; }} td,th {{ padding:4px 12px; text-align:right; }}
 th:first-child,td:first-child {{ text-align:left; }}
 .table-scroll {{ overflow-x:auto; }}
