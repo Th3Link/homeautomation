@@ -30,20 +30,35 @@ Both HTTPS OTA scenarios completed their bad-CRC checks and the subsequent versi
 | MQTT application publication queue, primary broker | SRAM2 | 4,896 |
 | Gateway OTA partial-sector scratch | Upper SRAM1 | 4,096 |
 | MbedTLS allocator for HTTPS, EST and certificate parsing | Upper SRAM1 | 49,152 |
-| General allocator, including Rust RSA and request futures | Upper SRAM1 | 34,816 |
+| DHCPv6 client, UDP packet metadata and buffers, outgoing message | Upper SRAM1 | 2,664 |
+| General allocator, including Rust RSA and request futures | Upper SRAM1 | 31,744 |
 | MQTT pinned certificate capture, including lock | RTC FAST | 2,068 |
 
 The secondary broker subscribes, accepts commands and sends MQTT protocol acknowledgements. Application publications go to the primary broker. Removing the secondary queue saves 4,896 B. The two MQTT TCP window pairs save 3,072 B and the five HTTPS pairs save another 2,560 B. Together these remove **10,528 B of application storage**. Both MQTT sessions keep their own TLS records and a 2,048 B maximum MQTT packet. Moving the five HTTPS listeners into static storage also removes their lifetime heap allocations.
 
 Aligned, complete OTA sectors use the incoming chunk directly through the flash driver's 512 B DRAM bounce buffer. Partial sectors preserve adjacent data in one static 4 KiB workspace, including writes to boot metadata. NTS key exchange borrows the HTTPS buffers for TCP, its outgoing TLS records and its response. EST borrows them as its TCP buffers. The Home Assistant task streams one device or sensor at a time and releases its locks before publishing. The queue takes ownership of the discovery payload.
 
-The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 83,968 B combined, 12,288 B less than the earlier general heap. Pool and general-heap peaks can occur at different times. RTC FAST has 296 B free and the node log occupies RTC SLOW.
+The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 80,896 B combined, 15,360 B less than the earlier general heap. Pool and general-heap peaks can occur at different times. RTC FAST has 296 B free and the node log occupies RTC SLOW.
 
-### Measured before and after
+### DHCPv6 workspace
+
+The DHCPv6 task initializes one 2,664 B workspace in upper SRAM1 whenever it starts. The workspace holds the client state, two receive and two transmit metadata entries, the 768 B receive buffer, the 384 B transmit buffer and the 384 B outgoing message. It stays reserved when DHCPv6 is off. The task runs on the Embassy executor and uses no general heap for this storage.
+
+| Bytes | Before (`cc03d13`) | Static DHCPv6 |
+|---|---:|---:|
+| General heap reservation in SRAM1 | 34,816 | 31,744 |
+| DHCPv6 workspace in SRAM1 | — | 2,664 |
+| DHCPv6 task pool in SRAM2 | 64 | 184 |
+| General heap at the end of the QEMU idle scenario | 3,224 | 424 |
+| General heap peak in the combined CAN/MQTT/HTTPS scenario | 9,452 | 6,652 |
+
+Upper SRAM1 gains 408 B after accounting for the new workspace. The larger task pool costs 120 B of SRAM2 stack budget, leaving a **net saving of 288 B** across those banks. The 2,800 B drop in live heap use measures the removal of the DHCPv6 allocation. The idle heap peak includes startup work and reached 3,384 B on both builds.
+
+### Earlier MQTT and HTTPS measurements
 
 The same `combined` scenario exercises two gateways, active CAN nodes, MQTT and an HTTPS automation read. The values below come from gateway A. The baseline allocator included MbedTLS. On the new build each allocator tracks its own peak, and those peaks can occur at different times.
 
-| Bytes | Baseline `e3a0c88` | HTTPS/RTC step `a9e1b19` | This implementation |
+| Bytes | Baseline `e3a0c88` | HTTPS/RTC step `a9e1b19` | After #104 (`cc03d13`) |
 |---|---:|---:|---:|
 | General heap reserved | 96,256 | 96,256 | 34,816 |
 | Dedicated MbedTLS pool reserved | — | — | 49,152 |
@@ -160,7 +175,7 @@ In this earlier experiment, shrinking the HTTPS RX windows without moving the bu
 
 1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
 2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
-3. **Application storage.** HTTPS socket buffers and the HA task are static. NTS-KE and EST reuse the HTTPS slot. DNS, DHCPv6, the automation reload snapshot, variable-length credential data, NTS receive records and some request futures still use the general heap.
+3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. DNS, the automation reload snapshot, variable-length credential data, NTS receive records and some request futures still use the general heap.
 4. **Crypto allocator.** MbedTLS runs in a dedicated 48 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
 5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 

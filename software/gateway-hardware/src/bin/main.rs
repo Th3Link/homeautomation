@@ -39,8 +39,8 @@ async fn main(spawner: Spawner) -> ! {
     // panic loop.
     console_log!("reset reason: {:?}", esp_hal::system::reset_reason());
 
-    // SRAM1 also houses the dedicated MbedTLS arena and the static socket buffers.
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 34 * 1024);
+    // SRAM1 also houses the dedicated MbedTLS arena and the static network buffers.
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 31 * 1024);
     gateway_hardware::crypto_pool::init();
 
     // TLS needs unpredictable random numbers; without a radio the hardware
@@ -124,9 +124,7 @@ async fn main(spawner: Spawner) -> ! {
         for slot in 0..gateway_core::config::MQTT_BROKERS {
             spawner.spawn(mqtt::mqtt_task(stack, slot).unwrap());
         }
-        if let Some(mode) = dhcpv6::mode(&network) {
-            spawner.spawn(dhcpv6::dhcpv6_task(stack, mode).unwrap());
-        }
+        dhcpv6::spawn(&spawner, stack, &network);
         ha::init(&spawner).await;
         spawner.spawn(gateway_hardware::node_log::node_log_task().unwrap());
         spawner.spawn(gateway_hardware::node_log::gateway_log_task().unwrap());
