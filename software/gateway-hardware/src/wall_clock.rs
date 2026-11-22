@@ -79,12 +79,6 @@ pub fn clock() -> Clock {
 /// failed NTS key exchange).
 #[embassy_executor::task]
 pub async fn sntp_task(stack: Stack<'static>) {
-    let mut buffers = UdpBuffers {
-        rx_meta: [PacketMetadata::EMPTY; 2],
-        tx_meta: [PacketMetadata::EMPTY; 2],
-        rx: [0; 128],
-        tx: [0; 128],
-    };
     loop {
         crate::ethernet::wait_ready().await;
         let server = crate::cert::ntp_server().await;
@@ -97,10 +91,7 @@ pub async fn sntp_task(stack: Stack<'static>) {
                 }
             }
             Some(Server::Plain(host)) => {
-                // On the heap, like the EST client: the DNS lookup's future
-                // is large and only needed for a moment.
-                let synced = crate::heap::boxed(|| query(stack, &mut buffers, host)).await;
-                if synced {
+                if query(stack, host).await {
                     RESYNC
                 } else {
                     RETRY
@@ -116,32 +107,23 @@ pub async fn sntp_task(stack: Stack<'static>) {
     }
 }
 
-struct UdpBuffers {
-    rx_meta: [PacketMetadata; 2],
-    tx_meta: [PacketMetadata; 2],
-    rx: [u8; 128],
-    tx: [u8; 128],
-}
-
 /// Asks the addresses of `server` in turn (IPv6 first, see
 /// [`crate::resolve`]) until one answers.
-async fn query(stack: Stack<'static>, buffers: &mut UdpBuffers, server: &str) -> bool {
+async fn query(stack: Stack<'static>, server: &str) -> bool {
     let addresses = crate::resolve::resolve(stack, server).await;
     if addresses.is_empty() {
         console_log!("sntp: cannot resolve {server}");
         return false;
     }
+    let mut rx_meta = [PacketMetadata::EMPTY; 2];
+    let mut tx_meta = [PacketMetadata::EMPTY; 2];
+    let mut rx = [0; 128];
+    let mut tx = [0; 128];
     for address in addresses {
         // A socket for each address: a request to a neighbour that doesn't
         // answer neighbour discovery stays queued in its socket, and the
         // next one would wait behind it.
-        let mut socket = UdpSocket::new(
-            stack,
-            &mut buffers.rx_meta,
-            &mut buffers.rx,
-            &mut buffers.tx_meta,
-            &mut buffers.tx,
-        );
+        let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
         if socket.bind(0).is_ok() && ask(&mut socket, address, server).await {
             return true;
         }
@@ -151,24 +133,23 @@ async fn query(stack: Stack<'static>, buffers: &mut UdpBuffers, server: &str) ->
 
 async fn ask(socket: &mut UdpSocket<'_>, address: IpAddress, server: &str) -> bool {
     // Version 4, mode 3 (client); everything else zero.
-    let mut request = [0u8; 48];
-    request[0] = 0x23;
-    if socket.send_to(&request, (address, NTP_PORT)).await.is_err() {
+    let mut packet = [0u8; 48];
+    packet[0] = 0x23;
+    if socket.send_to(&packet, (address, NTP_PORT)).await.is_err() {
         return false;
     }
-    let mut answer = [0u8; 48];
     let received =
-        embassy_time::with_timeout(Duration::from_secs(5), socket.recv_from(&mut answer)).await;
+        embassy_time::with_timeout(Duration::from_secs(5), socket.recv_from(&mut packet)).await;
     let Ok(Ok((48.., _))) = received else {
         return false;
     };
     // Mode 4 (server), a stratum, and a transmit timestamp.
-    let stratum = answer[1];
-    if answer[0] & 0x07 != 4 || stratum == 0 || stratum > 15 {
+    let stratum = packet[1];
+    if packet[0] & 0x07 != 4 || stratum == 0 || stratum > 15 {
         return false;
     }
     let seconds = u64::from(u32::from_be_bytes([
-        answer[40], answer[41], answer[42], answer[43],
+        packet[40], packet[41], packet[42], packet[43],
     ]));
     let Some(unix) = seconds.checked_sub(NTP_TO_UNIX) else {
         return false;

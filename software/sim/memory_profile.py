@@ -29,6 +29,7 @@ FIELDS = ("boot_id", "uptime_ms", "heap_size", "heap_used", "heap_peak_used",
 CRYPTO_FIELDS = ("size", "used", "peak", "failures")
 SCENARIOS = {
     "idle": ("idle.toml", "test_memory.py::test_idle_memory"),
+    "sntp-dns": ("sntp-dns.toml", "test_memory.py::test_pending_sntp_lookup"),
     "idle-rest": ("idle.toml", "test_memory.py::test_rest_memory"),
     "heap-probe": ("idle.toml", "test_memory.py::test_transient_heap_allocation"),
     "can-mqtt": ("mqtt.toml", "test_mqtt.py::test_mqtt_commands_and_state_on_two_can_buses"),
