@@ -67,30 +67,9 @@ instead of silently dropping malformed requests.
 
 ## One main stack for everything (gateway)
 
-Every task's poll, MbedTLS's handshake and the flash access run on the one
-main stack (~47 KB, what DRAM leaves after the statics). Rust's async code
-needs much more of it than the future sizes suggest: a poll function keeps
-room for every future it builds by value, and `Box::pin(f())` builds `f`'s
-future on the stack before moving it to the heap. The HTTPS request path
-went past 60 KB that way and wrote below the stack into the statics
-without hitting esp-hal's stack guard (one word): random crashes on the
-first authenticated request. It is down to ~32 KB now: large futures are
-built through `heap::boxed` (in their own frame, polled through `dyn`, so
-no caller keeps room for them), the certificate status is boxed, flash
-reads and writes skip `esp-storage`'s 4 KiB stack buffer, and the MQTT
-buffers are static.
+The Embassy executor, request handlers, MbedTLS, flash operations and interrupt handlers share the PRO CPU stack. A deeply nested poll can exhaust it even when its future lives in static storage. The HTTPS server places its session, HTTP server, router and selected handler in four fixed slots. NTS key exchange can use the entire area while it holds the same TLS lock. Each future must fit at compile time. Network operations sharing a slot must finish and release it before the next one starts.
 
-The margin is measured, not computed: the stack is painted at boot and
-`GET /system` reports `stack_untouched`. ~14 KB were left after HTTPS
-requests, uploads and a firmware update over HTTPS; MQTT over TLS (RSA
-signature check on the stack) is not measured yet. A new large future in
-a handler or task shows up there first.
-
-With HA discovery, NTS and the CA trust store (in review on 2026-11-01)
-the statics are ~9 KB larger, the stack that much smaller (38 KB), and only
-2.7 KB of it were left untouched in a measurement on the test gateway.
-Where the RAM goes and how to win back far more than that:
-[RAM on the gateway](ram.md).
+Run the `https-automation` QEMU scenario after changing the router or the shape of an automation command. It writes and reads back a button, checks the boot ID and requires at least 8 KiB of untouched stack after the save and the complete edit sequence. On hardware, compare `stack_untouched` and the separate TLS pool counters under the installation's usual traffic. The per-bank layout and the QEMU measurements are in the [gateway RAM notes](ram.md).
 
 ## Single gateway, too many nodes, no gateway-to-gateway coordination
 

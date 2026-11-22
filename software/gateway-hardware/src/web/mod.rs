@@ -111,7 +111,7 @@ async fn https_task(stack: Stack<'static>, buffers: &'static mut TcpBuffers) -> 
         let first = with_timeout(FIRST_BYTE_TIMEOUT, socket.read_with(|data| (0, data.len())));
         if matches!(first.await, Ok(Ok(1..))) {
             let mut slot = crate::https::slot().await;
-            crate::heap::boxed(|| serve_session(&mut socket, &mut slot)).await;
+            crate::future_slot::session(|| serve_session(&mut socket, &mut slot)).await;
         }
         socket.close();
         let _ = with_timeout(Duration::from_secs(1), socket.flush()).await;
@@ -141,7 +141,7 @@ async fn serve_session(
             let app = app();
             let http = &mut buffers.http;
             let out = &mut buffers.out;
-            let _ = crate::heap::boxed(|| {
+            let _ = crate::future_slot::http(|| {
                 picoserve::Server::new(&app, &SERVER_CONFIG, http)
                     .serve(TlsConnection::new(read, write, out))
             })
@@ -213,7 +213,7 @@ async fn dispatch<R: Read, W: picoserve::response::ResponseWriter<Error = R::Err
 ) -> Result<ResponseSent, W::Error> {
     let router = Router::new().nest("/api/v1", routes);
     // Build only the selected module’s request future, outside the poll frame.
-    crate::heap::boxed(|| router.handle_request(request, writer)).await
+    crate::future_slot::route(|| router.handle_request(request, writer)).await
 }
 
 /// Lets only requests through that carry the configured web credentials in

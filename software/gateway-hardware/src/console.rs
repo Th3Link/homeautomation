@@ -63,7 +63,7 @@ pub async fn init(
 enum Commands<'a> {
     /// Show all current configuration values.
     Show,
-    /// Exercise an 8 KiB heap allocation and free it immediately in profiling builds.
+    /// Report whether the firmware has a general heap.
     MemoryProbe,
     /// Set this gateway's own CAN device id (used when it addresses
     /// itself, e.g. `Available` broadcasts).
@@ -363,17 +363,7 @@ async fn handle_command(
 ) -> Result<(), ()> {
     match command {
         Commands::Show => cmd_show(writer).await,
-        Commands::MemoryProbe => {
-            #[cfg(feature = "memory-profile")]
-            let message = if crate::memory::probe() {
-                "memory probe: allocated and freed 8192 bytes"
-            } else {
-                "memory probe: allocation failed"
-            };
-            #[cfg(not(feature = "memory-profile"))]
-            let message = "memory probe requires a profiling build";
-            respond(writer, message).await
-        }
+        Commands::MemoryProbe => respond(writer, "memory probe: no general heap").await,
         Commands::DeviceId(id) => respond(writer, cmd_device_id(id).await).await,
         Commands::DeviceType(t) => respond(writer, cmd_device_type(t.0).await).await,
         Commands::Hwrev(rev) => respond(writer, cmd_hwrev(rev).await).await,
@@ -493,10 +483,7 @@ async fn handle_command(
             };
             respond(writer, text).await
         }
-        // ~15 KB of state (the certificate status): on the heap while it
-        // runs, rather than in this task's static memory, which comes out
-        // of the main stack's room.
-        Commands::TlsStatus => crate::heap::boxed(|| cmd_tls_status(writer)).await,
+        Commands::TlsStatus => cmd_tls_status(writer).await,
         Commands::TlsFqdn(s) => respond(writer, cmd_tls_fqdn(s).await).await,
         Commands::TlsSelfSigned => respond(writer, cmd_tls_self_signed().await).await,
         Commands::TlsBuiltInRoots(v) => {
@@ -811,7 +798,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         )),
     )
     .await?;
-    match &status.certificate {
+    match &status.details.certificate {
         Some((info, state, origin)) => {
             respond(
                 writer,
@@ -866,7 +853,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             } else {
                 "off"
             },
-            status.trust_anchor_count
+            status.details.trust_anchor_count
         )),
     )
     .await?;

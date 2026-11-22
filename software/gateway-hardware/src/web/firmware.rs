@@ -32,9 +32,6 @@ const GATEWAY_MAX_SIZE: usize = 0x7C0000;
 const NODE_MAX_SIZE: usize = 0x100000;
 /// How much of the image is handled in one go.
 const CHUNK: usize = 4096;
-/// Shared by the mutually exclusive gateway and node uploads.
-#[esp_hal::ram(unstable(rtc_fast))]
-static UPLOAD: Mutex<CriticalSectionRawMutex, [u8; CHUNK]> = Mutex::new([0; CHUNK]);
 /// Receiving a whole image, which is paced by the CAN bus for nodes.
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -213,9 +210,10 @@ async fn receive<B: Read>(
         .await);
     }
 
-    let mut chunk = UPLOAD.lock().await;
     let mut received = 0;
     while received < size {
+        let mut scratch = crate::https::scratch().await;
+        let chunk = &mut scratch[..CHUNK];
         let want = chunk.len().min(size - received);
         let read = match reader.read_exact(&mut chunk[..want]).await {
             Err(_) => {
@@ -337,7 +335,7 @@ impl RequestHandlerService<(), ()> for GatewayUpload {
         request: Request<'_, R>,
         response_writer: W,
     ) -> Result<ResponseSent, W::Error> {
-        crate::heap::boxed(|| handle(Ok(Target::Gateway), request, response_writer)).await
+        crate::future_slot::handler(|| handle(Ok(Target::Gateway), request, response_writer)).await
     }
 }
 
@@ -357,7 +355,7 @@ impl RequestHandlerService<(), (DeviceName,)> for DeviceUpload {
             .resolve(name.as_str())
             .map(Target::Device)
             .ok_or(ApiError::not_found("no such device"));
-        crate::heap::boxed(|| handle(target, request, response_writer)).await
+        crate::future_slot::handler(|| handle(target, request, response_writer)).await
     }
 }
 
@@ -371,6 +369,9 @@ impl RequestHandlerService<(), (u8,)> for TypeUpload {
         request: Request<'_, R>,
         response_writer: W,
     ) -> Result<ResponseSent, W::Error> {
-        crate::heap::boxed(|| handle(Ok(Target::Type(device_type)), request, response_writer)).await
+        crate::future_slot::handler(|| {
+            handle(Ok(Target::Type(device_type)), request, response_writer)
+        })
+        .await
     }
 }

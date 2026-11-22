@@ -4,6 +4,10 @@
 runner = "espflash flash --partition-table ./partitions.csv --monitor --chip esp32 --erase-parts otadata --baud 921600"
 
 [env]
+# MbedTLS starts with its no-libc platform hooks. Boot installs the dedicated
+# TLS pool before any certificate or session is constructed. Its compiled-in
+# self-tests still require the declarations from stdio.h.
+CFLAGS_xtensa_esp32_none_elf = "-DMBEDTLS_PLATFORM_NO_STD_FUNCTIONS -DMBEDTLS_PLATFORM_SNPRINTF_MACRO=snprintf -include stdio.h"
 # smoltcp's compile-time table sizes (its build.rs reads SMOLTCP_*). The
 # defaults (2 addresses, 1 DNS server) drop the IPv6 link-local address as
 # soon as an IPv4 and a global IPv6 address exist.
@@ -19,9 +23,12 @@ SMOLTCP_DNS_MAX_RESULT_COUNT = "2"
 [build]
 rustflags = [
   "-C", "link-arg=-nostartfiles",
+  # Leave these wrappers undefined. Any reference to a libc heap must fail
+  # to link, even if a dependency brings its own allocator.
+  "-C", "link-arg=-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free",
 ]
 
 target = "xtensa-esp32-none-elf"
 
 [unstable]
-build-std = ["core", "alloc"]
+build-std = ["core"]

@@ -152,7 +152,7 @@ pub struct System {
 
 pub async fn get_system() -> Result<impl IntoResponse, ApiError> {
     // On the heap: the network part makes it ~1 KB (see `crate::heap`).
-    crate::heap::boxed(|| async {
+    crate::future_slot::handler(|| async {
         let memory = crate::memory::Memory::capture();
         json(&System {
             firmware_version: env!("VERGEN_GIT_DESCRIBE"),

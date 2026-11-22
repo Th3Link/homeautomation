@@ -27,7 +27,7 @@ HOST = "127.0.0.1"
 
 
 class Broker:
-    def __init__(self, directory, port, tls_port=None, *, large_cert=False):
+    def __init__(self, directory, port, tls_port=None, *, large_cert=False, key_type="ec"):
         self.port = port
         self.log = directory / "mosquitto.log"
         self.config = directory / "mosquitto.conf"
@@ -36,7 +36,8 @@ class Broker:
         if tls_port:
             cert, key = directory / "broker.crt", directory / "broker.key"
             extension = ["-addext", "nsComment=" + "x" * 4096] if large_cert else []
-            subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+            key_args = ["-newkey", "rsa:2048"] if key_type == "rsa" else ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"]
+            subprocess.run(["openssl", "req", "-x509", *key_args,
                             "-nodes", "-days", "1", "-subj", "/CN=QEMU MQTT test broker",
                             "-keyout", key, "-out", cert] + extension, check=True, capture_output=True)
             config += (f"listener {tls_port} {HOST}\ncertfile {cert}\nkeyfile {key}\n"
@@ -255,6 +256,47 @@ def test_active_nodes_with_https_and_mqtt(mqtt_setup):
         https = pool.submit(read_automation)
         assert_mqtt_commands(sim, broker)
         https.result()
+
+
+@pytest.mark.parametrize("key_type", ["ec", "rsa"])
+def test_pinned_broker_renewal(sim, api, tmp_path, key_type):
+    with ExitStack() as reservations:
+        ports = []
+        for _ in range(2):
+            listener = reservations.enter_context(socket.socket())
+            listener.bind((HOST, 0))
+            ports.append(listener.getsockname()[1])
+    broker = Broker(tmp_path, *ports, key_type=key_type)
+    gateway = sim["gw"]
+    path = "/mqtt/primary"
+    try:
+        broker.start()
+        assert api("PATCH", path, {"enabled": True, "uri": f"mqtts://10.0.2.2:{ports[1]}",
+                                   "tls_insecure": False})[0] == 200
+        assert api("POST", path + "/trust")[0] == 202
+        broker.wait_gateway(gateway)
+        _, pin = api("GET", path + "/certificate")
+        assert pin["pinned"] and pin["sha256"]
+
+        # A new certificate for the pinned public key must still connect.
+        broker.stop()
+        subprocess.run(["openssl", "req", "-x509", "-key", tmp_path / "broker.key",
+                        "-subj", "/CN=Renewed broker", "-days", "1",
+                        "-out", tmp_path / "broker.crt"], check=True, capture_output=True)
+        broker.start()
+        broker.wait_gateway(gateway)
+        assert api("GET", path + "/certificate")[1] == pin
+
+        broker.stop()
+        mark = sim.mark()
+        broker = Broker(tmp_path, *ports, key_type=key_type)
+        broker.start()
+        sim.expect("doesn't match the pinned one", chip="gw", kind="serial", since=mark, timeout=35)
+        assert api("GET", path)[1]["connected"] is False
+    finally:
+        broker.stop()
+        api("PATCH", path, {"enabled": False})
+        api("DELETE", path + "/certificate")
 
 
 def test_secondary_commands_during_five_https_downloads(mqtt_setup, tmp_path):

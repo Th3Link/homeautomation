@@ -27,7 +27,7 @@ struct Config {
 }
 
 async fn read() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let cfg = config().await.load_or_init().await;
         json(&Config {
             hostname: cfg.hostname,

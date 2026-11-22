@@ -118,7 +118,7 @@ impl fmt::Display for RequestHead<'_> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Answer<'a> {
     /// 200: the base64 of a certs-only PKCS#7 holding the certificate.
-    Issued(&'a [u8]),
+    Issued(&'a mut [u8]),
     /// 202: the request awaits approval; ask again after that many seconds.
     Pending { retry_after: u32 },
     /// Any other status.
@@ -178,7 +178,7 @@ pub fn parse_response(response: &mut [u8]) -> Result<Answer<'_>, Malformed> {
             None => body.len(),
         }
     };
-    Ok(Answer::Issued(&response[body_start..body_start + len]))
+    Ok(Answer::Issued(&mut body[..len]))
 }
 
 fn contains_ignore_case(haystack: &str, needle: &str) -> bool {

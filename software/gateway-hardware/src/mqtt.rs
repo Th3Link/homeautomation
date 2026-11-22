@@ -32,14 +32,12 @@ use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use gateway_core::config::BrokerConfig;
 use gateway_core::config::MQTT_BROKERS;
 use gateway_core::helper::{mqtt_client_id, BrokerAddress};
 use heapless::String;
-use heapless::Vec;
 use rust_mqtt::buffer::BumpBuffer;
 use rust_mqtt::client::event::{Event, Publish};
 use rust_mqtt::client::options::{
@@ -463,12 +461,6 @@ fn take_buffers(slot: usize) -> &'static mut Buffers {
     }
 }
 
-/// The certificate a capturing connection saw (`mqtt-trust`). One for both
-/// slots: captures are rare and short, a second one waits for the first.
-#[esp_hal::ram(unstable(rtc_fast))]
-static CAPTURED: Mutex<CriticalSectionRawMutex, Vec<u8, { tls::CERT_CAP }>> =
-    Mutex::new(Vec::new());
-
 /// The connection to one broker (slot 0 or 1), kept up forever: connects,
 /// serves, and reconnects after a pause when the connection is lost or the
 /// configuration changes. A slot that isn't enabled just idles.
@@ -477,8 +469,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
     let broker = slot + 1;
     let buffers = take_buffers(slot);
     loop {
-        let cfg = config().await.load_or_init().await;
-        let settings = &cfg.brokers[slot];
+        let settings = config().await.load_or_init().await.brokers[slot].clone();
         if !settings.enabled {
             Timer::after(Duration::from_secs(5)).await;
             continue;
@@ -498,13 +489,21 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         let capturing = address.tls && TRUST_REQUESTED[slot].swap(false, Ordering::Relaxed);
         let checked = address.tls && !capturing && !settings.tls_insecure;
         let pinned = if checked {
-            crate::config::pinned_certificate(slot).await
+            match crate::config::pinned_key(slot).await {
+                Ok(pin) => pin,
+                Err(()) => {
+                    console_log!("mqtt{broker}: the stored certificate has no usable public key");
+                    Timer::after(Duration::from_secs(10)).await;
+                    continue;
+                }
+            }
         } else {
             None
         };
-        let roots = if checked && pinned.is_none() {
-            let roots = Trusted::load().await;
-            let waiting = if roots.is_empty() {
+        let verify_ca = checked && pinned.is_none();
+        if verify_ca {
+            let has_roots = !Trusted::load().await.is_empty();
+            let waiting = if !has_roots {
                 Some("no certificate authority to check it against")
             } else if crate::wall_clock::now().is_none() {
                 Some("the time isn't known yet (SNTP) to check its certificate")
@@ -524,7 +523,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                 for _ in 0..30 {
                     if TRUST_REQUESTED[slot].load(Ordering::Relaxed)
                         || RECONNECT[slot].try_take().is_some()
-                        || (!roots.is_empty() && crate::wall_clock::now().is_some())
+                        || (has_roots && crate::wall_clock::now().is_some())
                     {
                         break;
                     }
@@ -532,10 +531,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                 }
                 continue;
             }
-            Some(roots)
-        } else {
-            None
-        };
+        }
 
         let addresses = crate::resolve::resolve(stack, address.host).await;
         if addresses.is_empty() {
@@ -552,14 +548,17 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
         }
 
         if !address.tls {
-            session(socket, settings, slot, &address).await;
+            session(socket, &settings, slot, &address).await;
             continue;
         }
 
         let mut captured = if capturing {
-            let mut captured = CAPTURED.lock().await;
-            captured.clear();
-            Some(captured)
+            Some(crate::cert::capture_buffer().await)
+        } else {
+            None
+        };
+        let roots = if verify_ca {
+            Some(Trusted::load().await)
         } else {
             None
         };
@@ -588,16 +587,18 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
             ),
         )
         .await;
+        drop(roots);
         match opened {
             Ok(Ok(connection)) if capturing => {
                 drop(connection);
-                if let Some(captured) = &captured {
-                    pin_captured(slot, captured).await;
+                if let Some(captured) = captured {
+                    pin_captured(slot, &captured).await;
                 }
                 Timer::after(Duration::from_secs(1)).await;
             }
-            Ok(Ok(connection)) => session(connection, settings, slot, &address).await,
+            Ok(Ok(connection)) => session(connection, &settings, slot, &address).await,
             Ok(Err(e)) => {
+                drop(captured);
                 console_log!("mqtt{broker}: TLS handshake failed: {e:?}");
                 if pinned.is_some() {
                     console_log!(
@@ -614,6 +615,7 @@ pub async fn mqtt_task(stack: Stack<'static>, slot: usize) {
                 Timer::after(Duration::from_secs(10)).await;
             }
             Err(_) => {
+                drop(captured);
                 console_log!("mqtt{broker}: TLS handshake timed out");
                 Timer::after(Duration::from_secs(10)).await;
             }

@@ -27,8 +27,9 @@ pub fn size() -> usize {
 /// Fills the stack below the current frame with the pattern. Call once,
 /// early in `main`.
 pub fn paint() {
-    let marker = 0u8;
-    let here = core::ptr::addr_of!(marker) as usize;
+    // A local can be placed above live spills in a large poll frame. Read
+    // the architectural stack pointer, below every live local in that frame.
+    let here = xtensa_lx::get_stack_pointer() as usize;
     let top = here.min((&raw const _stack_start_cpu0) as usize) - SPARE;
     let mut word = bottom();
     while word < top {

@@ -3,12 +3,14 @@
 import json
 import os
 import ssl
+import subprocess
 import time
 from pathlib import Path
 
 import pytest
 
 from memory_profile import IDLE_SECONDS, parse_serial_sample, rest_summary, sample_rest
+from simlib.images import default_elf
 
 pytestmark = pytest.mark.skipif(not os.environ.get("SIM_MEMORY_PROFILE"),
                                 reason="run with memory_profile.py")
@@ -43,11 +45,16 @@ def test_rest_memory(sim):
     assert len(measured["boots"]) == 1 and measured["boots"][0]["samples"] >= 2
 
 
-def test_transient_heap_allocation(sim):
+def test_no_general_heap(sim):
+    # Also check the linked image. A hard-coded zero in telemetry alone does
+    # not establish that the allocator is absent.
+    symbols = subprocess.check_output(["readelf", "--wide", "--syms", default_elf("gateway")], text=True)
+    names = {line.split()[-1] for line in symbols.splitlines() if line.split()}
+    assert not names.intersection({"malloc", "calloc", "realloc", "free"})
+    assert not any("esp_alloc" in name or "__rust_alloc" in name for name in names)
     _, before = next_sample(sim)
-    assert "memory probe: allocated and freed 8192 bytes" in sim["gw"].console("memory-probe")
+    assert "memory probe: no general heap" in sim["gw"].console("memory-probe")
     _, after = next_sample(sim, since=sim.mark())
     assert after["boot_id"] == before["boot_id"]
-    assert after["heap_peak_used"] > before["heap_peak_used"]
-    assert after["heap_peak_used"] >= before["heap_used"] + 8192
-    assert after["heap_used"] == before["heap_used"]
+    for sample in before, after:
+        assert sample["heap_size"] == sample["heap_used"] == sample["heap_peak_used"] == 0

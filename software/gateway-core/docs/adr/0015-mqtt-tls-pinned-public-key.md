@@ -36,8 +36,7 @@ the broker is authenticated by its **public key**, pinned by the user:
   renewals with an unchanged key go unnoticed, which is what a LAN broker
   wants. A new key needs `mqtt-trust` again (or the REST API's
   `POST /mqtt/:slot/trust`).
-- RSA verification needs a heap (the `rsa` crate), so the firmware has
-  one: 94 KiB in the otherwise unused `dram2` region of the ESP32.
+- The first implementation used the Rust `rsa` crate and a general heap. The gateway now checks RSA-PSS signatures with MbedTLS in its dedicated pool. Renewal with the same key and rejection of a different key are covered for both RSA and EC in the `mqtt-pinned` QEMU profile.
 - The broker has to speak TLS 1.3 and offer that cipher suite; every
   current Mosquitto/OpenSSL does.
 - The same TLS code can't be used as an HTTPS server (client-only); the web

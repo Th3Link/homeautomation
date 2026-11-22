@@ -74,6 +74,20 @@ pub fn decode(text: &[u8], out: &mut [u8]) -> Result<usize, Invalid> {
     Ok(len)
 }
 
+/// Decodes raw base64 over its input. The output never overtakes unread text.
+pub fn decode_base64_in_place(data: &mut [u8]) -> Result<&mut [u8], Invalid> {
+    let mut decoder = Decoder::default();
+    let mut len = 0;
+    for i in 0..data.len() {
+        if let Some(byte) = decoder.push(data[i])? {
+            data[len] = byte;
+            len += 1;
+        }
+    }
+    decoder.finish()?;
+    Ok(&mut data[..len])
+}
+
 /// Decodes the PEM blocks labelled `label` in `data` where they are: their
 /// DER ends up one after the other at the start of `data`, and the rest of
 /// `data` is garbage afterwards. Returns where each block's DER ends (the
@@ -226,6 +240,11 @@ mod tests {
             let mut out = [0u8; 8];
             let n = decode(coded.as_bytes(), &mut out).unwrap();
             assert_eq!(&out[..n], plain.as_bytes());
+            let mut in_place = coded.as_bytes().to_vec();
+            assert_eq!(
+                decode_base64_in_place(&mut in_place).unwrap(),
+                plain.as_bytes()
+            );
         }
     }
 

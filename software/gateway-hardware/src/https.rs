@@ -93,6 +93,32 @@ pub async fn slot() -> MutexGuard<'static, CriticalSectionRawMutex, Buffers> {
     SLOT.lock().await
 }
 
+/// NTS-KE needs one receive record and room for the peer chain until verification.
+/// Certificate uploads use 10 KiB for input and 6 KiB for the ordered DER chain.
+pub(crate) const SCRATCH_SIZE: usize = 16 * 1024;
+type ScratchBuffer = &'static mut [u8; SCRATCH_SIZE];
+pub(crate) type Scratch = MutexGuard<'static, CriticalSectionRawMutex, ScratchBuffer>;
+
+/// Acquire before taking the config lock. Never acquire the TLS session slot
+/// while holding scratch: NTS-KE and web handlers already hold that slot.
+pub(crate) async fn scratch() -> Scratch {
+    static BUFFER: OnceLock<Mutex<CriticalSectionRawMutex, ScratchBuffer>> = OnceLock::new();
+    #[unsafe(link_section = ".dram2_uninit")]
+    static mut BYTES: core::mem::MaybeUninit<[u8; SCRATCH_SIZE]> = core::mem::MaybeUninit::uninit();
+    BUFFER
+        .get_or_init(|| {
+            // SAFETY: this initializer runs once. Only the mutex exposes the
+            // array after it has been zeroed in place in upper SRAM1.
+            let ptr = (&raw mut BYTES).cast::<[u8; SCRATCH_SIZE]>();
+            unsafe {
+                ptr.write_bytes(0, 1);
+                Mutex::new(&mut *ptr)
+            }
+        })
+        .lock()
+        .await
+}
+
 /// A TCP socket that MbedTLS can split into a read and a write half.
 pub struct TcpStream<'a, 's>(pub &'a mut TcpSocket<'s>);
 

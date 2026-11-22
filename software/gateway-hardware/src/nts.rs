@@ -41,9 +41,8 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 /// Requests in a row without an authenticated answer before the key
 /// exchange is repeated.
 const MAX_UNANSWERED: u8 = 4;
-/// A request with a cookie and seven placeholders, with the ~100-byte
-/// cookies servers hand out (956 bytes), and its answer.
-const PACKET_CAP: usize = 1024;
+// Keep the deferred peer chain beside the full incoming TLS record.
+const _: () = assert!(crate::https::SCRATCH_SIZE >= 2 * tls::READ_RECORD_BYTES);
 /// The NTS-KE answer: eight cookies and the records around them.
 const KE_ANSWER_CAP: usize = 1280;
 /// Seconds from 1900 (NTP's epoch) to 1970.
@@ -62,6 +61,7 @@ struct Association {
     unanswered: u8,
 }
 
+#[esp_hal::ram(unstable(rtc_fast))]
 static ASSOCIATION: Mutex<CriticalSectionRawMutex, Option<Association>> = Mutex::new(None);
 
 /// The state of NTS, for the UI.
@@ -110,7 +110,12 @@ pub enum Outcome {
 
 /// Sets the clock from the NTS server `host` (NTS-KE on `port`), with a
 /// key exchange first if needed.
-pub async fn synchronise(stack: Stack<'static>, host: &str, port: u16) -> Outcome {
+pub(crate) async fn synchronise(
+    stack: Stack<'static>,
+    host: &str,
+    port: u16,
+    buffers: &mut crate::wall_clock::DatagramBuffers,
+) -> Outcome {
     let mut association = ASSOCIATION.lock().await;
     let usable = association
         .as_ref()
@@ -146,7 +151,7 @@ pub async fn synchronise(stack: Stack<'static>, host: &str, port: u16) -> Outcom
         return Outcome::Failed;
     };
 
-    let result = crate::heap::boxed(|| query(stack, established)).await;
+    let result = query(stack, established, buffers).await;
     let cookies = established.cookies.len();
     match result {
         Ok(unix) => {
@@ -187,10 +192,6 @@ async fn key_exchange(
     host: &str,
     port: u16,
 ) -> Result<Association, &'static str> {
-    let roots = Trusted::load().await;
-    if roots.is_empty() {
-        return Err("no trusted certificate authority to check the server against");
-    }
     let addresses = crate::resolve::resolve(stack, host).await;
     if addresses.is_empty() {
         return Err("cannot resolve the name");
@@ -200,6 +201,10 @@ async fn key_exchange(
     // reuse its HTTP buffers for TCP, outgoing records and the KE response.
     // Acquire the slot before connecting because the server handshake is timed.
     let mut slot = crate::https::slot().await;
+    let roots = Trusted::load().await;
+    if roots.is_empty() {
+        return Err("no trusted certificate authority to check the server against");
+    }
     let crate::https::Buffers { http, out } = &mut *slot;
     let (rx, write_record) = http.split_at_mut(1024);
     let (tx, answer) = out.split_at_mut(512);
@@ -209,7 +214,7 @@ async fn key_exchange(
         console_log!("nts: {host}:{port}: {e:?}");
         return Err("cannot connect");
     }
-    crate::heap::boxed(|| {
+    crate::future_slot::nts(|| {
         handshake(
             socket,
             &roots,
@@ -232,20 +237,22 @@ async fn handshake(
     write_record: &mut [u8],
     answer: &mut [u8],
 ) -> Result<Association, &'static str> {
-    let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
+    let mut scratch = crate::https::scratch().await;
+    let (read_record, chain) = scratch.split_at_mut(tls::READ_RECORD_BYTES);
 
     // The chain is checked once the server has answered: chrony gives the
     // whole session 2 s, the check alone takes over one. Until then
     // nothing the server sent is used.
-    let mut chain = alloc::vec::Vec::new();
+    let mut chain_len = 0;
     let trust = Trust::Later {
         host,
-        chain: &mut chain,
+        chain,
+        len: &mut chain_len,
     };
     const ALPN: &[&[u8]] = &[nts::ALPN];
     let opened = with_timeout(
         KE_TIMEOUT,
-        tls::open_with_alpn(socket, &mut read_record, write_record, trust, ALPN),
+        tls::open_with_alpn(socket, read_record, write_record, trust, ALPN),
     )
     .await;
     let mut connection = match opened {
@@ -305,7 +312,7 @@ async fn handshake(
     let _ = with_deadline(deadline, connection.close()).await;
 
     if let Err(problems) = tls::verify_chain(
-        split_concatenated(&chain),
+        split_concatenated(&chain[..chain_len]),
         roots.iter(),
         host,
         Dates::NowOrBuildTime,
@@ -331,7 +338,11 @@ async fn handshake(
 
 /// Asks the NTP server of `association` (each address in turn, a cookie
 /// each) until one answers; the time in Unix seconds.
-async fn query(stack: Stack<'static>, association: &mut Association) -> Result<i64, &'static str> {
+async fn query(
+    stack: Stack<'static>,
+    association: &mut Association,
+    buffers: &mut crate::wall_clock::DatagramBuffers,
+) -> Result<i64, &'static str> {
     let addresses = crate::resolve::resolve(stack, &association.ntp_host).await;
     if addresses.is_empty() {
         return Err("cannot resolve the NTP server");
@@ -339,16 +350,19 @@ async fn query(stack: Stack<'static>, association: &mut Association) -> Result<i
     let rng = Trng::try_new().map_err(|_| "no random numbers")?;
     let mut rx_meta = [PacketMetadata::EMPTY; 2];
     let mut tx_meta = [PacketMetadata::EMPTY; 2];
-    let mut rx = alloc::vec![0u8; PACKET_CAP];
-    let mut tx = alloc::vec![0u8; PACKET_CAP];
-    let mut packet = alloc::vec![0u8; PACKET_CAP];
 
     let mut failed = "no answer";
     for address in addresses {
         // A socket for each address: a request to a neighbour that doesn't
         // answer neighbour discovery stays queued in its socket, and the
         // next one would wait behind it.
-        let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
+        let mut socket = UdpSocket::new(
+            stack,
+            &mut rx_meta,
+            &mut buffers.rx,
+            &mut tx_meta,
+            &mut buffers.tx,
+        );
         socket.bind(0).map_err(|_| "no socket")?;
         let Some(cookie) = association.cookies.take() else {
             return Err("out of cookies");
@@ -363,35 +377,32 @@ async fn query(stack: Stack<'static>, association: &mut Association) -> Result<i
         rng.read(&mut nonce);
         // Ask for as many fresh cookies as are missing.
         let wanted = nts::MAX_COOKIES - association.cookies.len() - 1;
-        let len = nts::request(
-            &mut packet,
-            &association.keys,
-            &cookie,
-            wanted,
-            &sent,
-            &nonce,
-        )
-        .ok_or("cookie too long")?;
-        if socket
-            .send_to(&packet[..len], (address, association.ntp_port))
-            .await
-            .is_err()
         {
-            continue;
+            let mut scratch = crate::https::scratch().await;
+            let packet = &mut scratch[..crate::wall_clock::DATAGRAM_CAP];
+            let len = nts::request(packet, &association.keys, &cookie, wanted, &sent, &nonce)
+                .ok_or("cookie too long")?;
+            if socket
+                .send_to(&packet[..len], (address, association.ntp_port))
+                .await
+                .is_err()
+            {
+                continue;
+            }
         }
 
         // Anything that isn't the answer (forged, or to another request)
         // is passed over until it comes or the time is up.
         let deadline = Instant::now() + ANSWER_TIMEOUT;
-        while let Ok(Ok((received, _))) =
-            with_deadline(deadline, socket.recv_from(&mut packet)).await
+        while let Ok(result) = with_deadline(
+            deadline,
+            socket.recv_from_with(|packet, _| {
+                nts::parse_response(packet, &association.keys, &sent, &mut association.cookies)
+            }),
+        )
+        .await
         {
-            match nts::parse_response(
-                &packet[..received],
-                &association.keys,
-                &sent,
-                &mut association.cookies,
-            ) {
+            match result {
                 Ok(answer) => {
                     let seconds = answer.transmit >> 32;
                     return seconds

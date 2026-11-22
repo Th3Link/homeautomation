@@ -244,7 +244,8 @@ def measure(args):
         section["name"]: section["size"] for section in ram_sections["SRAM1"]
         if section["name"] in SRAM1_SLOTS
     }
-    if args.name == "gateway-hardware":
+    if args.name == "gateway-hardware" and symbols:
+        m["heap_reserved"] = 0
         for obj in symbols:
             if obj["section"] == ".dram2_uninit" and demangle(obj["name"]).endswith("::HEAP"):
                 m["heap_reserved"] = obj["size"]
@@ -510,8 +511,12 @@ def ram_layout(firmware, metrics):
             name = section["name"]
             purpose = SECTION_USES.get(name, "")
             if name == ".dram2_uninit":
-                purpose = ("General heap, plus the TLS pool, HTTPS listeners and OTA scratch on newer builds" if firmware.startswith("gateway-hardware/")
-                           else "Static data left uninitialized at boot")
+                purpose = "Static data left uninitialized at boot"
+                if firmware.startswith("gateway-hardware/"):
+                    if metrics.get("heap_reserved") == 0:
+                        purpose = "MbedTLS pool, HTTPS buffers and request frames, DHCPv6, NTP and shared TLS/OTA workspaces"
+                    else:
+                        purpose = "General heap, plus the TLS pool, HTTPS listeners and OTA scratch on newer builds"
             if name in SRAM1_SLOTS:
                 slot_start, slot_end = SRAM1_SLOTS[name]
                 purpose += f" ({kib(slot_end - slot_start)} linker range)"

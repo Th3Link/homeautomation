@@ -91,19 +91,30 @@ impl<const BUF: usize> ConfigStore<BUF> {
             .map_err(|_| ())
     }
 
-    /// Reads a byte string of at most `N` bytes; `None` if the key is unset
-    /// or the value is longer.
-    pub async fn get_bytes<const N: usize>(
+    /// Inspect a value in the flash store's read buffer before it is reused.
+    pub async fn with_bytes<T>(
         &mut self,
         key: impl Into<u8>,
-    ) -> Option<heapless::Vec<u8, N>> {
+        inspect: impl FnOnce(&[u8]) -> T,
+    ) -> Option<T> {
         let raw: &[u8] = self
             .map
             .fetch_item(&mut self.buffer, &key.into())
             .await
             .ok()
             .flatten()?;
-        heapless::Vec::from_slice(raw).ok()
+        Some(inspect(raw))
+    }
+
+    /// Reads a byte string of at most `N` bytes; `None` if the key is unset
+    /// or the value is longer.
+    pub async fn get_bytes<const N: usize>(
+        &mut self,
+        key: impl Into<u8>,
+    ) -> Option<heapless::Vec<u8, N>> {
+        self.with_bytes(key, |raw| heapless::Vec::from_slice(raw).ok())
+            .await
+            .flatten()
     }
 
     /// Reads a byte string into `out`; its length, or `None` if the key is

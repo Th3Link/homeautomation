@@ -74,24 +74,52 @@ pub fn clock() -> Clock {
     }
 }
 
+/// An NTS request with a cookie and seven placeholders is about 956 bytes.
+pub(crate) const DATAGRAM_CAP: usize = 1024;
+
+/// The one time client uses either plain SNTP or authenticated NTP. Both
+/// borrow these socket rings from upper SRAM1 for an exchange.
+pub(crate) struct DatagramBuffers {
+    pub rx: [u8; DATAGRAM_CAP],
+    pub tx: [u8; DATAGRAM_CAP],
+}
+
+impl DatagramBuffers {
+    fn take() -> &'static mut Self {
+        use core::mem::MaybeUninit;
+        use core::sync::atomic::{AtomicBool, Ordering};
+        static TAKEN: AtomicBool = AtomicBool::new(false);
+        #[unsafe(link_section = ".dram2_uninit")]
+        static mut BUFFERS: MaybeUninit<DatagramBuffers> = MaybeUninit::uninit();
+        assert!(!TAKEN.swap(true, Ordering::Relaxed));
+        // SAFETY: the single time task owns both arrays for the rest of the boot.
+        unsafe {
+            let ptr = (&raw mut BUFFERS).cast::<Self>();
+            ptr.write_bytes(0, 1);
+            &mut *ptr
+        }
+    }
+}
+
 /// Asks the configured time server for the time, now and every six hours
 /// (until a server has answered: every 10 s, or every minute after a
 /// failed NTS key exchange).
 #[embassy_executor::task]
 pub async fn sntp_task(stack: Stack<'static>) {
+    let buffers = DatagramBuffers::take();
     loop {
         crate::ethernet::wait_ready().await;
         let server = crate::cert::ntp_server().await;
         let wait = match parse_server(&server) {
             Some(Server::Nts { host, port }) => {
-                match crate::nts::synchronise(stack, host, port).await {
+                match crate::nts::synchronise(stack, host, port, buffers).await {
                     crate::nts::Outcome::Synchronised => RESYNC,
                     crate::nts::Outcome::Failed => RETRY,
                     crate::nts::Outcome::KeyExchangeFailed => KE_RETRY,
                 }
             }
             Some(Server::Plain(host)) => {
-                if query(stack, host).await {
+                if query(stack, host, buffers).await {
                     RESYNC
                 } else {
                     RETRY
@@ -109,7 +137,7 @@ pub async fn sntp_task(stack: Stack<'static>) {
 
 /// Asks the addresses of `server` in turn (IPv6 first, see
 /// [`crate::resolve`]) until one answers.
-async fn query(stack: Stack<'static>, server: &str) -> bool {
+async fn query(stack: Stack<'static>, server: &str, buffers: &mut DatagramBuffers) -> bool {
     let addresses = crate::resolve::resolve(stack, server).await;
     if addresses.is_empty() {
         console_log!("sntp: cannot resolve {server}");
@@ -117,13 +145,17 @@ async fn query(stack: Stack<'static>, server: &str) -> bool {
     }
     let mut rx_meta = [PacketMetadata::EMPTY; 2];
     let mut tx_meta = [PacketMetadata::EMPTY; 2];
-    let mut rx = [0; 128];
-    let mut tx = [0; 128];
     for address in addresses {
         // A socket for each address: a request to a neighbour that doesn't
         // answer neighbour discovery stays queued in its socket, and the
         // next one would wait behind it.
-        let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
+        let mut socket = UdpSocket::new(
+            stack,
+            &mut rx_meta,
+            &mut buffers.rx[..128],
+            &mut tx_meta,
+            &mut buffers.tx[..128],
+        );
         if socket.bind(0).is_ok() && ask(&mut socket, address, server).await {
             return true;
         }
