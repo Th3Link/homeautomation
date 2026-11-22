@@ -65,3 +65,12 @@ def test_settings_by_hand_take_effect_after_a_restart(sim, api, network_reset):
     assert net["ipv6_gateway"] == "fe80::2"
     assert (net["slaac"], net["dhcpv6_setting"], net["dhcpv6_mode"]) == (False, "enforce", "stateful")
     assert not api("GET", "/network")[1]["restart_required"]
+
+
+def test_dhcpv6_off_keeps_slaac_after_restart(sim, api, network_reset):
+    status, saved = api("PUT", "/network", dict(DEFAULTS, dhcpv6="off"))
+    assert status == 200 and saved["restart_required"]
+    net = restart(sim, api)
+    assert (net["dhcpv6_setting"], net["dhcpv6_mode"]) == ("off", "off")
+    assert net["slaac"] and "SLAAC" in origins(net["ipv6"]).values()
+    assert "DHCPv6" not in origins(net["dns_servers"]).values()

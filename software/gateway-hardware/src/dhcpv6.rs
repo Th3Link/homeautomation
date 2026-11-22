@@ -13,11 +13,13 @@
 use crate::console_log;
 use core::cell::RefCell;
 use core::fmt::Write;
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use dhcpeav6_client::{
     Client, ClientConfig, Configuration, Duid, Mode, State, ALL_DHCP_RELAY_AGENTS_AND_SERVERS,
     CLIENT_PORT, SERVER_PORT,
 };
+use embassy_executor::Spawner;
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{Dhcpv6Lease, IpEndpoint, Ipv6Cidr, Ipv6RouterFlags, Stack};
@@ -100,11 +102,14 @@ pub fn mode(settings: &NetworkConfig) -> Option<Dhcpv6Mode> {
     }
 }
 
-#[embassy_executor::task]
-pub async fn dhcpv6_task(stack: Stack<'static>, mode: Dhcpv6Mode) {
-    // On the heap, like the web server's tasks: the client and its buffers
-    // (~2.5 KB) would otherwise be static and take the stack's room.
-    crate::heap::boxed(|| run(stack, mode == Dhcpv6Mode::Enforce)).await
+/// Long-lived client and datagram storage in upper SRAM1.
+struct Workspace {
+    client: Dhcpv6Client,
+    rx_meta: [PacketMetadata; 2],
+    tx_meta: [PacketMetadata; 2],
+    rx: [u8; 768],
+    tx: [u8; 384],
+    message: [u8; 384],
 }
 
 /// The client's mode for the routers' `flags`, or stateful if `enforce`.
@@ -116,22 +121,50 @@ fn client_mode(flags: Ipv6RouterFlags, enforce: bool) -> Mode {
     }
 }
 
-async fn run(stack: Stack<'static>, enforce: bool) {
+/// Start the single client when the configured network mode calls for it.
+pub fn spawn(spawner: &Spawner, stack: Stack<'static>, settings: &NetworkConfig) {
+    if let Some(mode) = mode(settings) {
+        spawner.spawn(dhcpv6_task(stack, mode).unwrap());
+    }
+}
+
+#[embassy_executor::task]
+async fn dhcpv6_task(stack: Stack<'static>, mode: Dhcpv6Mode) {
+    let enforce = mode == Dhcpv6Mode::Enforce;
     let embassy_net::HardwareAddress::Ethernet(mac) = stack.hardware_address();
     let mac = mac.0;
     let rng = esp_hal::rng::Rng::new();
-    let mut client = Dhcpv6Client::new(ClientConfig {
+    let config = ClientConfig {
         duid: Duid::link_layer(mac),
         // One IA_NA on one interface: any number that stays the same.
         iaid: u32::from_be_bytes([mac[2], mac[3], mac[4], mac[5]]),
         seed: u64::from(rng.random()) << 32 | u64::from(rng.random()),
-    });
+    };
 
-    let mut rx_meta = [PacketMetadata::EMPTY; 2];
-    let mut tx_meta = [PacketMetadata::EMPTY; 2];
-    let mut rx = [0u8; 768];
-    let mut tx = [0u8; 384];
-    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
+    #[unsafe(link_section = ".dram2_uninit")]
+    static mut WORKSPACE: MaybeUninit<Workspace> = MaybeUninit::uninit();
+    let storage = &raw mut WORKSPACE;
+    // SAFETY: Embassy allows one instance of this task; no borrow outlives it.
+    // The linker leaves this section uninitialized, including after a reset.
+    let Workspace {
+        client,
+        rx_meta,
+        tx_meta,
+        rx,
+        tx,
+        message,
+    } = unsafe {
+        (*storage).write(Workspace {
+            client: Dhcpv6Client::new(config),
+            rx_meta: [PacketMetadata::EMPTY; 2],
+            tx_meta: [PacketMetadata::EMPTY; 2],
+            rx: [0; 768],
+            tx: [0; 384],
+            message: [0; 384],
+        })
+    };
+
+    let mut socket = UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
     if socket.bind(CLIENT_PORT).is_err() {
         console_log!("dhcpv6: cannot bind port {CLIENT_PORT}");
         return;
@@ -142,17 +175,16 @@ async fn run(stack: Stack<'static>, enforce: bool) {
     let mut flags = stack.ipv6_router_flags();
     let mut link_up = stack.is_link_up();
     let mut releasing = false;
-    let mut message = [0u8; 384];
     let mut published = None;
     client.set_mode(client_mode(flags, enforce), now());
     loop {
-        while let Ok(Some(len)) = client.poll(now(), &mut message) {
+        while let Ok(Some(len)) = client.poll(now(), message) {
             // Without a link the message is lost; the retransmissions go on.
             let _ = socket.send_to(&message[..len], servers).await;
         }
         let changed = client.configuration_changed();
         if changed {
-            apply(stack, &client);
+            apply(stack, client);
         }
         if changed || published != Some((client.mode(), client.state())) {
             published = Some((client.mode(), client.state()));
