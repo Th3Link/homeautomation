@@ -244,13 +244,14 @@ def measure(args):
         section["name"]: section["size"] for section in ram_sections["SRAM1"]
         if section["name"] in SRAM1_SLOTS
     }
-    if args.name == "gateway-hardware" and symbols:
+    if symbols:
         m["sram1_objects"] = [
             dict(name=demangle(obj["name"]), addr=obj["addr"], size=obj["size"],
                  section=obj["section"])
             for obj in sorted(symbols, key=lambda obj: obj["addr"])
             if obj["section"] in SRAM1_SLOTS
         ]
+    if args.name == "gateway-hardware" and symbols:
         m["heap_reserved"] = 0
         for obj in symbols:
             if obj["section"] == ".dram2_uninit" and demangle(obj["name"]).endswith("::HEAP"):
@@ -521,16 +522,19 @@ def section_spans(section, objects):
     return spans
 
 
-def gateway_placement(metrics, revision):
+def firmware_placement(firmware, title, metrics, revision):
+    gateway = firmware == "gateway"
+    anchor = firmware + "-placement"
     sections = metrics.get("ram_sections", {})
-    if not sections.get("SRAM1") or not sections.get("SRAM2"):
-        return '<p id="gateway-placement">Gateway release section measurements are unavailable for this build.</p>'
+    if "SRAM1" not in sections or not sections.get("SRAM2"):
+        return f'<p id="{anchor}">{title} release section measurements are unavailable for this build.</p>'
 
     # Preserve the ROM holes and linker-window boundaries. An instruction alias or
     # a changed linker layout needs a new model before we can project placements.
     sections1 = {s["name"]: s for s in sections["SRAM1"]}
-    if len(sections1) != len(sections["SRAM1"]) or sections1.keys() - SRAM1_SLOTS.keys():
-        return '<p id="gateway-placement">This SRAM1 layout is outside the modeled linker windows.</p>'
+    windows = SRAM1_SLOTS if gateway else {".dram2_uninit": SRAM1_SLOTS[".dram2_uninit"]}
+    if len(sections1) != len(sections["SRAM1"]) or sections1.keys() - windows.keys():
+        return f'<p id="{anchor}">This SRAM1 layout is outside the modeled linker windows.</p>'
     banks = {"SRAM1": [], "SRAM2": []}
 
     def add(bank, label, start, spans):
@@ -540,13 +544,18 @@ def gateway_placement(metrics, revision):
     for name, (start, end) in SRAM1_SLOTS.items():
         if cursor < start:
             add("SRAM1", "ROM", cursor, [dict(kind="rom", label="ROM", size=start - cursor)])
+        if name not in windows:
+            label = "PRO boot area" if name == ".rom_boot_pro_uninit" else "APP boot area"
+            add("SRAM1", label, start, [dict(kind="reserved", label=label, size=end - start)])
+            cursor = end
+            continue
         section = sections1.get(name)
         spans = []
         used = 0
         if section:
             used = section["size"]
             if section["addr"] != start or used > end - start:
-                return '<p id="gateway-placement">This SRAM1 layout is outside the modeled linker windows.</p>'
+                return f'<p id="{anchor}">This SRAM1 layout is outside the modeled linker windows.</p>'
             spans = section_spans(section, metrics.get("sram1_objects", []))
         spans.append(dict(kind="gap", label="Unallocated", size=end - start - used))
         add("SRAM1", name, start, spans)
@@ -558,21 +567,28 @@ def gateway_placement(metrics, revision):
     for section in sorted(sections["SRAM2"], key=lambda s: s["addr"]):
         addr = section["addr"]
         if addr < cursor or addr + section["size"] > DRAM[1]:
-            return '<p id="gateway-placement">This SRAM2 layout is outside the modeled linker range.</p>'
+            return f'<p id="{anchor}">This SRAM2 layout is outside the modeled linker range.</p>'
         if cursor < addr:
             add("SRAM2", "Unallocated", cursor, [dict(kind="gap", label="Unallocated", size=addr - cursor)])
         add("SRAM2", section["name"], addr, section_spans(section, metrics.get("top_ram", [])))
         cursor = addr + section["size"]
     if cursor != DRAM[1] or banks["SRAM2"][-1]["label"] != ".stack":
-        return '<p id="gateway-placement">This SRAM2 layout has no main stack at the end of the bank.</p>'
+        return f'<p id="{anchor}">This SRAM2 layout has no main stack at the end of the bank.</p>'
 
+    if gateway:
+        windows_note = "SRAM1 has three linker windows. Using the APP boot window requires the second CPU to stay parked."
+        notes = """Moving a static to SRAM2 reduces the main stack budget. A swap stays within SRAM1.
+Check alignment after linking and <a href="#runtime">stack usage under QEMU</a>."""
+    else:
+        windows_note = "Only upper SRAM1 is available to the node linker."
+        notes = """Moving a static out of SRAM2 leaves more room for the stack. Upper SRAM1 requires
+explicit initialization. Verify alignment after linking."""
     data = escape(json.dumps(banks, separators=(",", ":")), quote=True)
-    return f"""<section class="placement" data-banks="{data}">
-<header><h2 id="gateway-placement">Gateway SRAM placement</h2>
+    return f"""<section class="placement" data-firmware="{firmware}" data-banks="{data}">
+<header><h2 id="{anchor}">{title} SRAM placement</h2>
 <code>release · {escape(revision[:7])}</code></header>
-<p>Each strip follows one physical bank from low to high address. SRAM1 has three linker windows.
-In SRAM2 the main stack occupies the space above the statics.</p>
-<noscript>Enable JavaScript to explore placements. The section tables below list the linked addresses.</noscript>
+<p>{windows_note}</p>
+<noscript>Enable JavaScript for placement previews.</noscript>
 <div class="placement-ui" hidden>
 <label>Placement preview <select></select></label>
 <p class="placement-note"></p>
@@ -582,10 +598,7 @@ In SRAM2 the main stack occupies the space above the statics.</p>
 <details><summary>Address ranges and objects</summary>
 <div class="table-scroll"><table class="memory-map"><thead><tr><th>Bank / section</th>
 <th>Start</th><th>Bytes</th><th>Contents</th></tr></thead><tbody></tbody></table></div></details>
-<p>Moving a static to SRAM2 packs its source window and charges its size to the main stack.
-The SRAM1 swap, when available, shows the largest gap obtainable by exchanging one pair of named statics.
-Alignment and boot initialization need a new link and a firmware test. Compare the projected
-budget with <a href="#runtime">stack usage under QEMU</a> before moving a buffer. The APP boot window requires the second CPU to stay parked.</p>
+<p>{notes}</p>
 </div></section>"""
 
 
@@ -707,8 +720,8 @@ def runtime_report(runtime, run):
                 rows.append(f'<tr>{cells}<td>{escape(chip)}</td>{number_cell(count, coverage)}{values}</tr>')
 
     return f"""{info}
-<p>Bytes per boot, including startup. Coverage gives the number of samples and their
-firmware uptime range. Partial rows can end before the last peak. MbedTLS has its own pool on newer firmware. The heap and pool peaks can occur at different times.</p>
+<p>Bytes per boot, including startup. Coverage shows sample count and uptime range.
+Partial runs can miss peaks. Heap and TLS pool usage can peak at different times.</p>
 <div class="table-scroll data-scroll runtime-scroll" role="region" aria-labelledby="runtime" tabindex="0">
 <table class="data-table" data-sortable aria-labelledby="runtime"><thead><tr>
 <th scope="col">Scenario</th><th scope="col">Result</th><th scope="col">Gateway</th>
@@ -741,6 +754,13 @@ def chart(args):
         charts.append(f'<h3 id="trends-{name}"><code>{name}</code></h3>\n' +
                       (figures or '<p>No builds have been recorded for this firmware yet.</p>'))
     layouts = "\n".join(ram_layout(fw, metrics) for fw, metrics in sorted(latest["firmware"].items()))
+    placements = []
+    placement_links = []
+    for firmware, title in (("gateway", "Gateway"), ("cancomponents", "CANcomponents")):
+        metrics = latest["firmware"].get(f"{firmware}-hardware/release", {})
+        placements.append(firmware_placement(firmware, title, metrics, latest["sha"]))
+        if metrics.get("ram_sections"):
+            placement_links.append(f'<a href="#{firmware}-placement">{title} SRAM placement ↓</a>')
     static_data = f"""<h2 id="latest-build">Latest ({escape(latest["sha"][:7])}, KiB)</h2>
 <div class="table-scroll data-scroll" role="region" aria-labelledby="latest-build" tabindex="0">
 <table class="data-table" data-sortable aria-labelledby="latest-build"><thead><tr>
@@ -749,12 +769,9 @@ def chart(args):
 <th scope="col" class="number">SRAM1 ELF</th><th scope="col" class="number">SRAM1 heap</th>
 <th scope="col" class="number">SRAM2 statics</th><th scope="col" class="number">SRAM2 stack budget</th>
 </tr></thead><tbody>{rows}</tbody></table></div>
-<p>The heap reservation is part of SRAM1 ELF usage. The ESP32 reserves another {SRAM1_ROM:,} B in SRAM1 for ROM data.
-Older builds may have missing measurements.</p>
-{gateway_placement(latest["firmware"].get("gateway-hardware/release", {}), latest["sha"])}
-<h3>RAM sections by firmware and build profile</h3>
-<p>The bank totals cover the ELF sections below. Cache and ROM reservations
-are listed in the memory map above.</p>
+<p>SRAM1 ELF includes the heap reservation. ROM uses another {SRAM1_ROM:,} B.</p>
+{''.join(placements)}
+<h3>ELF sections by firmware and profile</h3>
 {layouts}
 <h2>Trends</h2>
 {''.join(charts)}""" if entries else '<p>No static history is available yet.</p>'
@@ -768,19 +785,13 @@ are listed in the memory map above.</p>
 <style>{css}</style></head><body>
 <p><a href="../">← Handbook</a></p>
 <h1>Firmware memory history</h1>
-<p>One point per commit on <code>main</code>. The ELF shows where the firmware
-places code and data and how much space the linker reserves for heap and
-stack. Usage within those reservations depends on the workload.</p>
-{('<p><a href="#gateway-placement">Explore gateway SRAM placement ↓</a></p>' if latest["firmware"].get("gateway-hardware/release", {}).get("ram_sections") else "")}
+<p>ELF layout per <code>main</code> commit and <a href="#runtime">gateway usage under QEMU</a>.</p>
+{('<p>' + ' · '.join(placement_links) + '</p>') if placement_links else ''}
 <h2>ESP32 memory map</h2>
 <div class="table-scroll"><table class="memory-map address-map">
 <thead><tr><th>Bank</th><th>Physical size</th><th>Address range</th><th>Use</th></tr></thead>
 <tbody>{ram_bank_map()}</tbody></table></div>
-<p>The 520 KiB of internal SRAM comes from SRAM0 (192 KiB), SRAM1 (128 KiB),
-and SRAM2 (200 KiB). RTC memory is separate. Most code and read-only data
-are mapped from flash. See the
-<a href="https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf">ESP32 technical reference manual</a>
-and the
+<p>520 KiB internal SRAM, plus 16 KiB RTC memory. <a href="https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf">ESP32 technical reference manual</a> ·
 <a href="https://github.com/Th3Link/homeautomation/blob/main/software/gateway-core/docs/ram.md">gateway linker and RAM notes</a>.</p>
 {static_data}
 <h2 id="runtime">Gateway runtime profiles</h2>
