@@ -775,7 +775,7 @@ partition table. The ELF breaks RAM down by physical bank.
 | Bank | ESP32 capacity | Gateway placement |
 |---|---:|---|
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
-| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, a 34 KiB general heap and a 48 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
+| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a 31 KiB general heap and a 48 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
 | SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The linker gives the main stack the space left after statics. |
 | RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, certificate capture buffer and one shared 4 KiB firmware upload chunk |
 | RTC SLOW | 8 KiB | Node log text for the web API |
