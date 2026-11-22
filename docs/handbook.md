@@ -775,9 +775,9 @@ partition table. The ELF breaks RAM down by physical bank.
 | Bank | ESP32 capacity | Gateway placement |
 |---|---:|---|
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
-| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a shared 14 KiB workspace, a 16 KiB general heap and a 52 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
+| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a shared 16 KiB workspace for certificate and protocol data, 10,912 B for request futures, the time client’s UDP rings and a 52 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
 | SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The automation task holds its reload snapshot here. MQTT, EST and NTS share a single cached copy of the installed trust anchors (up to 6 KiB). The linker gives the main stack the space left after statics. |
-| RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, one slot used for either certificate status or MQTT certificate capture |
+| RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, one slot for certificate status or MQTT certificate capture, and the authenticated time client’s keys and cookies |
 | RTC SLOW | 8 KiB | Node log text for the web API |
 
 The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
@@ -785,16 +785,9 @@ linker ranges and their contents. RTC memory is accounted for separately.
 
 ### Read the runtime measurements
 
-`GET /api/v1/system` includes `boot_id` and uptime, heap size and usage,
-`heap_peak_used` and `heap_min_free`, and `stack_size`, `stack_peak_used`
-and `stack_untouched`. All memory values are in bytes. The allocator
-records peak usage as allocations happen, so a buffer that has already
-been freed can still affect the peak. The stack peak is the linker budget
-minus the remaining stack paint. This estimate includes the unpainted
-guard and startup area. Zero untouched bytes mean no reserve was observed.
-The `crypto_pool` object reports MbedTLS capacity, current use, peak use
-and failed allocation count. Its peak and the general heap peak can occur
-at different times.
+`GET /api/v1/system` reports the boot ID, uptime and memory use in bytes. The gateway builds against Rust `core` without a global allocator. Its general heap size, current use, peak and minimum free space are all **0 B**. These fields remain in the API so earlier firmware measurements can be compared on the same charts.
+
+The separate `crypto_pool` object shows the fixed MbedTLS pool’s capacity, current use, high-water mark and failed allocation count. Read `stack_untouched` for the stack margin. At boot the firmware paints unused stack below the ESP32 stack pointer. The reported `stack_peak_used` is the stack budget minus the untouched bytes and includes the unpainted guard and startup area.
 
 A profiling build emits UART samples every two seconds. This keeps the
 measurement available during MQTT or CAN activity even if a web request
@@ -831,11 +824,11 @@ and `--runs 1` for a single measurement.
 
 | Scenario | Measured workload |
 |---|---|
-| `idle`, `idle-rest`, `heap-probe` | Gateway idle over UART, idle with REST requests, and an 8 KiB allocation freed before the next sample |
+| `idle`, `idle-rest`, `heap-probe` | Gateway idle over UART, idle with REST requests, and verification that the linked image and running firmware have no general allocator |
 | `sntp-dns` | UART sample while the time server’s DNS lookup waits for a reply on an isolated guest LAN. The general heap must be empty. |
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
 | `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
-| `mqtt-pinned` | Connect to Mosquitto with a pinned public key, renew its certificate with the same key, then check that a different key is rejected |
+| `mqtt-pinned` | Connect to Mosquitto with pinned EC and RSA keys, renew each certificate with the same key, then check that a different key is rejected |
 | `https-est` | Enroll and renew over mutual TLS with built-in and installed trust anchors, a client identity chain and chunked PKCS#7 replies |
 | `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
 | `https-trust-import` | Install a six-certificate CA bundle as PEM and DER, read its fingerprint and count, reject invalid uploads and remove it |

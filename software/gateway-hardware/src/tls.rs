@@ -50,10 +50,10 @@
 //! within one [`READ_RECORD_BYTES`] record.
 
 use crate::cert::roots::Trusted;
-use alloc::boxed::Box;
 use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use embassy_net::tcp::TcpSocket;
 use embedded_tls::{
     Aes128GcmSha256, CertificateEntryRef, CertificateRef, CertificateVerifyRef, CryptoProvider,
@@ -66,9 +66,7 @@ use gateway_core::x509::cert::Certificate;
 use gateway_core::x509::check::{check_dates, Clock};
 use heapless::{String, Vec};
 use mbedtls_rs::sys as mbedtls;
-// embedded-tls 0.19 and rsa 0.9 are still on sha2 0.10 (digest 0.10): the
-// handshake transcript and the RSA-PSS digests take the copy rsa re-exports.
-use rsa::sha2 as handshake_sha2;
+// embedded-tls 0.19 uses digest 0.10 for its handshake transcript.
 use sha2::{Digest, Sha256};
 
 /// Largest server certificate (DER) that can be pinned or captured.
@@ -109,7 +107,8 @@ pub enum Trust<'a> {
     /// 1.2 s here).
     Later {
         host: &'a str,
-        chain: &'a mut alloc::vec::Vec<u8>,
+        chain: &'a mut [u8],
+        len: &'a mut usize,
     },
     /// Anything goes: encrypted, but not authenticated.
     AnyCertificate,
@@ -210,7 +209,7 @@ pub async fn open_with_alpn<'a>(
             };
             connection.open(TlsContext::new(&config, provider)).await?;
         }
-        Trust::Later { host, chain } => {
+        Trust::Later { host, chain, len } => {
             let config = if host.parse::<core::net::IpAddr>().is_ok() {
                 config
             } else {
@@ -218,7 +217,7 @@ pub async fn open_with_alpn<'a>(
             };
             let provider = KeyProvider {
                 rng,
-                verifier: KeyVerifier::new(Check::Later(chain)),
+                verifier: KeyVerifier::new(Check::Later(chain, len)),
             };
             connection.open(TlsContext::new(&config, provider)).await?;
         }
@@ -344,7 +343,7 @@ enum Check<'a> {
         problems: &'a mut u32,
     },
     /// None now: the chain is kept for later ([`Trust::Later`]).
-    Later(&'a mut alloc::vec::Vec<u8>),
+    Later(&'a mut [u8], &'a mut usize),
 }
 
 /// Accepts a server whose certificate passes the [`Check`] and which proves
@@ -403,11 +402,15 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
                     return Err(TlsError::InvalidCertificate);
                 }
             }
-            Check::Later(kept) => {
-                kept.clear();
+            Check::Later(kept, len) => {
+                **len = 0;
                 for entry in cert.entries.iter() {
                     if let CertificateEntryRef::X509(der) = entry {
-                        kept.extend_from_slice(der);
+                        let end = **len + der.len();
+                        kept.get_mut(**len..end)
+                            .ok_or(TlsError::InsufficientSpace)?
+                            .copy_from_slice(der);
+                        **len = end;
                     }
                 }
             }
@@ -439,12 +442,18 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
                     Signature::from_der(verify.signature).map_err(|_| TlsError::DecodeError)?;
                 key.verify(&message, &signature).is_ok()
             }
-            SignatureScheme::RsaPssRsaeSha256 => {
-                verify_rsa_pss::<handshake_sha2::Sha256>(&self.key, &message, verify.signature)?
-            }
-            SignatureScheme::RsaPssRsaeSha384 => {
-                verify_rsa_pss::<handshake_sha2::Sha384>(&self.key, &message, verify.signature)?
-            }
+            SignatureScheme::RsaPssRsaeSha256 => verify_rsa_pss(
+                &self.key,
+                mbedtls::mbedtls_md_type_t_MBEDTLS_MD_SHA256,
+                &sha2::Sha256::digest(message),
+                verify.signature,
+            )?,
+            SignatureScheme::RsaPssRsaeSha384 => verify_rsa_pss(
+                &self.key,
+                mbedtls::mbedtls_md_type_t_MBEDTLS_MD_SHA384,
+                &sha2::Sha384::digest(message),
+                verify.signature,
+            )?,
             _ => return Err(TlsError::InvalidSignatureScheme),
         };
         if verified {
@@ -458,18 +467,41 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
 /// Checks an RSA-PSS signature (TLS 1.3's only RSA scheme for handshake
 /// signatures) made over `message` by the holder of the PKCS#1
 /// `RSAPublicKey` in `key`.
-fn verify_rsa_pss<D>(key: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, TlsError>
-where
-    D: handshake_sha2::Digest + handshake_sha2::digest::FixedOutputReset,
-{
-    use rsa::pkcs1::DecodeRsaPublicKey;
-    use rsa::pss::{Signature, VerifyingKey};
-    use rsa::signature::Verifier;
-
-    let key = rsa::RsaPublicKey::from_pkcs1_der(key).map_err(|_| TlsError::DecodeError)?;
-    let key = VerifyingKey::<D>::new(key);
-    let signature = Signature::try_from(signature).map_err(|_| TlsError::DecodeError)?;
-    Ok(key.verify(message, &signature).is_ok())
+fn verify_rsa_pss(
+    key: &[u8],
+    algorithm: mbedtls::mbedtls_md_type_t,
+    digest: &[u8],
+    signature: &[u8],
+) -> Result<bool, TlsError> {
+    let mut context = MaybeUninit::uninit();
+    // SAFETY: init prepares the context for parse and free, including failed
+    // parses. After checking the type, private_pk_ctx is the RSA context
+    // (the C header's inline mbedtls_pk_rsa accessor). The RSA verifier reads
+    // one modulus-sized signature; check its length before passing the pointer.
+    unsafe {
+        let ctx = context.as_mut_ptr();
+        mbedtls::mbedtls_pk_init(ctx);
+        let parsed = mbedtls::mbedtls_pk_parse_public_key(ctx, key.as_ptr(), key.len());
+        let result = if parsed != 0
+            || mbedtls::mbedtls_pk_get_type(ctx) != mbedtls::mbedtls_pk_type_t_MBEDTLS_PK_RSA
+        {
+            Err(TlsError::DecodeError)
+        } else {
+            let rsa = (*ctx).private_pk_ctx.cast();
+            Ok(signature.len() == mbedtls::mbedtls_rsa_get_len(rsa)
+                && mbedtls::mbedtls_rsa_rsassa_pss_verify_ext(
+                    rsa,
+                    algorithm,
+                    digest.len() as u32,
+                    digest.as_ptr(),
+                    algorithm,
+                    digest.len() as i32,
+                    signature.as_ptr(),
+                ) == 0)
+        };
+        mbedtls::mbedtls_pk_free(ctx);
+        result
+    }
 }
 
 /// The `serverAuth` extended key usage (1.3.6.1.5.5.7.3.1), DER content.
@@ -483,8 +515,8 @@ const SERVER_AUTH: &[u8] = &[0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
 /// `serverAuth` (where it says). Returns MbedTLS' `MBEDTLS_X509_BADCERT_*`
 /// flags on failure, see [`ChainProblems`].
 ///
-/// The certificates aren't copied, only MbedTLS' parsed view of them is on
-/// the heap while this runs.
+/// The certificates aren't copied, MbedTLS keeps its parsed entries in the dedicated
+/// TLS pool for the duration of this check.
 pub fn verify_chain<'a>(
     chain: impl Iterator<Item = &'a [u8]>,
     roots: impl Iterator<Item = &'a [u8]>,
@@ -498,14 +530,16 @@ pub fn verify_chain<'a>(
     let name = CStr::from_bytes_with_nul(name.as_bytes())
         .map_err(|_| mbedtls::MBEDTLS_X509_BADCERT_CN_MISMATCH)?;
 
-    let mut presented = Certificates::new();
+    let mut presented_head = MaybeUninit::uninit();
+    let mut presented = Certificates::new(&mut presented_head);
     let mut presented_der: Vec<&[u8], 8> = Vec::new();
     for der in chain {
         if !presented.add(der) || presented_der.push(der).is_err() {
             return Err(mbedtls::MBEDTLS_X509_BADCERT_OTHER);
         }
     }
-    let mut trusted = Certificates::new();
+    let mut trusted_head = MaybeUninit::uninit();
+    let mut trusted = Certificates::new(&mut trusted_head);
     for der in roots {
         // An installed CA certificate was parsed before it was stored; one
         // that MbedTLS can't read is just not trusted.
@@ -584,18 +618,19 @@ pub fn verify_chain<'a>(
 
 /// A list of certificates parsed by MbedTLS without copying them, so they
 /// have to outlive it.
-struct Certificates<'a> {
-    // Boxed: MbedTLS links to it from the next entry of the list.
-    list: Box<mbedtls::mbedtls_x509_crt>,
-    _der: PhantomData<&'a [u8]>,
+struct Certificates<'head, 'der> {
+    list: &'head mut mbedtls::mbedtls_x509_crt,
+    _der: PhantomData<&'der [u8]>,
 }
 
-impl<'a> Certificates<'a> {
-    fn new() -> Self {
-        // SAFETY: a plain C struct, all-zero is a valid value; `init` sets
-        // it up as an empty list.
-        let mut list = Box::new(unsafe { core::mem::zeroed::<mbedtls::mbedtls_x509_crt>() });
-        unsafe { mbedtls::mbedtls_x509_crt_init(&mut *list) };
+impl<'head, 'der> Certificates<'head, 'der> {
+    fn new(head: &'head mut MaybeUninit<mbedtls::mbedtls_x509_crt>) -> Self {
+        // SAFETY: init initializes the C list at its final address. Borrowing
+        // the head keeps it stationary until Drop frees the parsed entries.
+        let list = unsafe {
+            mbedtls::mbedtls_x509_crt_init(head.as_mut_ptr());
+            head.assume_init_mut()
+        };
         Self {
             list,
             _der: PhantomData,
@@ -603,7 +638,7 @@ impl<'a> Certificates<'a> {
     }
 
     /// Appends one certificate; false if MbedTLS can't parse it.
-    fn add(&mut self, der: &'a [u8]) -> bool {
+    fn add(&mut self, der: &'der [u8]) -> bool {
         // SAFETY: `der` outlives the list (the lifetime), which MbedTLS
         // only reads.
         unsafe {
@@ -617,7 +652,7 @@ impl<'a> Certificates<'a> {
     }
 }
 
-impl Drop for Certificates<'_> {
+impl Drop for Certificates<'_, '_> {
     fn drop(&mut self) {
         // SAFETY: set up by `init`; frees what MbedTLS allocated for it.
         unsafe { mbedtls::mbedtls_x509_crt_free(&mut *self.list) };

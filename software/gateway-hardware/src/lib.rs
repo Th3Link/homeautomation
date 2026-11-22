@@ -8,8 +8,6 @@
 //! actual peripherals (CAN/TWAI, Ethernet, MQTT/HTTP sockets, flash-backed
 //! config storage, OTA, the commissioning console).
 /// Shared with `cancomponents-hardware` — see `common_hardware`'s own docs.
-extern crate alloc;
-
 pub use common_hardware::console_log;
 pub use common_hardware::{flash, logging};
 
@@ -24,8 +22,8 @@ pub mod device_list;
 pub mod dhcpv6;
 pub mod echo;
 pub mod ethernet;
+mod future_slot;
 pub mod ha;
-pub mod heap;
 pub mod heating_state;
 pub mod https;
 pub mod lamps;

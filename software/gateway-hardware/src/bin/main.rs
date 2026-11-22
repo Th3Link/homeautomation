@@ -39,8 +39,6 @@ async fn main(spawner: Spawner) -> ! {
     // panic loop.
     console_log!("reset reason: {:?}", esp_hal::system::reset_reason());
 
-    // SRAM1 also houses the dedicated MbedTLS arena and the static network buffers.
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 16 * 1024);
     gateway_hardware::crypto_pool::init();
 
     // TLS needs unpredictable random numbers; without a radio the hardware

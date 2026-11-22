@@ -27,7 +27,7 @@ struct Network {
 }
 
 async fn read() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let settings = config::network().await;
         let running = crate::ethernet::info().await.map(|net| net.settings);
         let mac: [u8; 6] = esp_hal::efuse::base_mac_address()
@@ -48,7 +48,7 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
 
 /// Takes all the settings at once.
 async fn update(Json(settings): Json<NetworkConfig>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         settings.validate().map_err(ApiError::invalid)?;
         config::set_network(&settings).await.map_err(|()| {
             ApiError::new(

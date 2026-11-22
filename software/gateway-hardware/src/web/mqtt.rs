@@ -101,7 +101,7 @@ struct Brokers {
 }
 
 async fn read_all() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let cfg = config().await.load_or_init().await;
         let [primary, secondary] = cfg.brokers;
         json(&Brokers {
@@ -115,7 +115,7 @@ async fn read_all() -> Result<impl IntoResponse, ApiError> {
 }
 
 async fn read(Slot(slot): Slot) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let cfg = config().await.load_or_init().await;
         json(&view(slot, cfg.brokers[slot].clone()).await).await
     })
@@ -154,7 +154,7 @@ struct Update {
 }
 
 async fn update(Slot(slot): Slot, Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         if let Some(uri) = &body.uri {
             if parse_broker_uri(uri).is_none() {
                 return Err(ApiError::invalid(
@@ -204,9 +204,10 @@ async fn update(Slot(slot): Slot, Json(body): Json<Update>) -> Result<impl IntoR
             }
         }
         crate::mqtt::reconnect(slot);
-        read(Slot(slot)).await
+        Ok::<(), ApiError>(())
     })
-    .await
+    .await?;
+    read(Slot(slot)).await
 }
 
 /// The next connection to the broker takes the certificate it presents and

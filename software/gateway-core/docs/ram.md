@@ -29,18 +29,21 @@ Both HTTPS OTA scenarios completed their bad-CRC checks and the subsequent versi
 | HTTPS TCP RX / TX, five listeners | One pair in each ROM boot area, three in upper SRAM1 | 5 × 2,560 |
 | MQTT application publication queue, primary broker | SRAM2 | 4,896 |
 | Gateway OTA partial-sector scratch | Upper SRAM1 | 4,096 |
-| Shared certificate, JSON, firmware upload and NTS-KE workspace | Upper SRAM1 | 14,336 |
+| Shared certificate, JSON, firmware upload and NTS-KE workspace | Upper SRAM1 | 16,384 |
+| HTTPS session, HTTP server, router and handler futures (also used by NTS-KE) | Upper SRAM1 | 10,912 |
+| NTP UDP socket rings for SNTP and NTS | Upper SRAM1 | 2 × 1,024 |
 | Installed trust anchors, shared across verified clients | SRAM2 | 6,144 DER payload |
 | MbedTLS allocator for HTTPS, EST and certificate parsing | Upper SRAM1 | 53,248 |
 | DHCPv6 client, UDP packet metadata and buffers, outgoing message | Upper SRAM1 | 2,664 |
-| General allocator, including Rust RSA and request futures | Upper SRAM1 | 16,384 |
+| General allocator | None | 0 |
 | Certificate status or MQTT certificate capture | RTC FAST | One shared slot |
+| NTS association, including its keys and cookies | RTC FAST | 1,800 |
 
 The secondary broker subscribes, accepts commands and sends MQTT protocol acknowledgements. Application publications go to the primary broker. Removing the secondary queue saves 4,896 B. The two MQTT TCP window pairs save 3,072 B and the five HTTPS pairs save another 2,560 B. Together these remove **10,528 B of application storage**. Both MQTT sessions keep their own TLS records and a 2,048 B maximum MQTT packet. Moving the five HTTPS listeners into static storage also removes their lifetime heap allocations.
 
 Aligned, complete OTA sectors use the incoming chunk directly through the flash driver's 512 B DRAM bounce buffer. Partial sectors preserve adjacent data in one static 4 KiB workspace, including writes to boot metadata. NTS key exchange borrows the HTTPS buffers for TCP, its outgoing TLS records and its response. EST borrows them as its TCP buffers. The Home Assistant task streams one device or sensor at a time and releases its locks before publishing. The queue takes ownership of the discovery payload.
 
-The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 69,632 B combined. Pool and general-heap peaks can occur at different times. RTC FAST has 2,344 B free and the node log occupies RTC SLOW.
+The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The TLS pool is the firmware’s only allocator. RTC FAST has 544 B free and the node log occupies RTC SLOW.
 
 ### DHCPv6 workspace
 
@@ -119,35 +122,36 @@ both builds. The flash image shrinks by 348 B. A production QEMU run left
 11,292 B of stack untouched immediately after saving an automation button
 and 11,084 B after the edit sequence on both builds.
 
-### Shared certificate storage and the TLS pool
+### Gateway without a general heap
 
-Certificate uploads, JSON serialization, EST requests and replies, NTS key exchange and firmware uploads borrow the same 14 KiB buffer in upper SRAM1. Each user retains its own protocol limit. A certificate upload accepts up to 10 KiB and can decode an identity key beside the request. The key buffer is wiped when its guard drops. Firmware uploads release the workspace between chunks. The OTA flash writer still needs its separate 4 KiB buffer for partial sectors.
+The gateway builds against Rust `core`. The linker rejects calls to the standard C heap. MbedTLS has its own fixed pool for sessions, certificates and RSA-PSS verification. The `heap-probe` scenario checks the symbols in the linked image as well as the zero capacities and peaks reported by the running firmware.
 
-The gateway loads installed trust anchors once and shares them with each verified client for its handshake. The flash writer updates the cached copy after committing the new bundle. EST converts a chain to PEM in the workspace and omits installed duplicates of enabled built-in roots. A single certificate can go directly into MbedTLS as DER. Certificate status and MQTT capture take turns in RTC FAST.
+Certificate uploads, JSON serialization, EST requests and replies, NTS key exchange and firmware uploads borrow one 16 KiB workspace in upper SRAM1. Each protocol retains its own limit. A certificate upload accepts up to 10 KiB. The remaining 6 KiB can hold the ordered DER chain or the decoded identity key. Key scratch is wiped when its guard drops. Firmware uploads release the workspace between chunks. The flash writer still has its own 4 KiB buffer for partial sectors.
 
-| Release reservation or image, bytes | Before (`2c6c1f4`) | After |
+Four fixed slots hold the nested HTTPS session, HTTP server, resource router and selected handler. The compiler checks the size and alignment of every future placed in them. NTS key exchange acquires the same TLS lock and uses the whole area. The time task owns the UDP rings for plain and authenticated NTP. Its long-lived keys and cookies reside in RTC FAST. MQTT, EST and NTS share one cached copy of the installed trust anchors, updated after the new flash slot is committed.
+
+| Production release, bytes | Before (`2c6c1f4`) | Without general heap |
 |---|---:|---:|
-| General heap / dedicated TLS pool | 31,744 / 49,152 | 16,384 / 53,248 |
-| SRAM1 linked | 124,008 | 127,080 |
-| SRAM2 statics | 145,540 | 143,892 |
-| RTC FAST / SLOW | 7,896 / 8,192 | 5,848 / 8,192 |
-| Main stack budget | 51,068 | 52,716 |
-| Flash image | 2,905,833 | 2,906,593 |
+| General heap reservation | 31,744 | 0 |
+| Dedicated MbedTLS pool | 49,152 | 53,248 |
+| Linked SRAM1 | 124,008 | 125,712 |
+| SRAM2 statics | 145,540 | 142,620 |
+| RTC FAST / SLOW | 7,896 / 8,192 | 7,648 / 8,192 |
+| Main stack budget | 51,068 | 53,988 |
+| Flash image | 2,905,833 | 2,835,277 |
 
-The combined allocator reservations shrink by 11,264 B. Counting the new static workspaces across SRAM1, SRAM2 and RTC gives a net saving of 624 B. IRAM is unchanged. The production QEMU test left 11,292 → 12,940 B of stack untouched immediately after an automation button save and 11,084 → 12,732 B after the edit sequence.
+The combined allocator reservations shrink by 27,648 B. Including the new static workspaces, linked usage across SRAM1, SRAM2 statics and RTC falls by **1,464 B**. IRAM is unchanged. The production QEMU test left 11,292 → **12,820 B** untouched immediately after saving an automation button and 11,084 → **12,628 B** after the full edit sequence. The new firmware reads the architectural stack pointer when painting unused memory at boot.
 
 | QEMU workload | General heap peak before (B) | After (B) |
 |---|---:|---:|
-| Six-CA import, including status and error handling | 24,016 | 11,512 |
-| EST identity import, including status and error handling | 21,232 | 11,512 |
-| HTTPS certificate rotation | 18,724 | 11,512 |
-| HTTPS automation edits | 8,368 | 8,360 |
-| Two CA-verified Mosquitto brokers, CA replacement and concurrent HTTPS status | 30,600 | 11,512 |
-| NTS authenticated time exchange, before requesting certificate details | 18,104 | 9,212 |
+| Six-CA import, including status and error handling | 24,016 | 0 |
+| EST identity import, including status and error handling | 21,232 | 0 |
+| HTTPS certificate rotation | 18,724 | 0 |
+| HTTPS automation edits | 8,368 | 0 |
+| Two CA-authenticated Mosquitto brokers, CA replacement and concurrent HTTPS status | 30,600 | 0 |
+| Authenticated NTS exchange before reading full certificate details | 18,104 | 0 |
 
-The first four workloads ran twice per build on fresh installations. For the larger EST case, the baseline reset while requesting 22,528 B to assemble the trust list. With fixed storage, enrollment and renewal succeeded with built-in and installed roots, the client identity and its intermediate certificate. The dedicated TLS pool peaked at 50,712 B. A 48 KiB pool exhausted its capacity in this workload.
-
-The general heap still serves Picoserve request futures, temporary certificate and CSR data, Rust RSA verification and the NTS task's UDP buffers. Steady idle reaches zero live bytes. Removing the allocator requires fixed storage or allocation-free implementations for these active paths as well.
+The first four workloads ran twice per build on fresh installations. For the larger EST case, the baseline reset while requesting 22,528 B to assemble the trust list. Enrollment and renewal now succeed with built-in and installed roots, the client identity and its intermediate certificate. The dedicated TLS pool peaked at 50,712 B. A 48 KiB pool exhausted its capacity in that workload. The pinned MQTT test checks both EC and RSA brokers across certificate renewal and a change of key.
 
 ### Earlier MQTT and HTTPS measurements
 
@@ -270,9 +274,9 @@ In this earlier experiment, shrinking the HTTPS RX windows without moving the bu
 
 1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
 2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
-3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. The plain SNTP request and shared DNS resolver are heapless. The installed root list and certificate inspection now have static storage. Temporary credentials, NTS UDP buffers and some request futures still use the general heap.
-4. **Crypto allocator.** MbedTLS runs in a dedicated 52 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
-5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
+3. **Application storage.** The general allocator has been removed. HTTPS request futures have bounded, statically allocated frames. Certificate handling and NTS share the TLS workspace, and MQTT clients share the stored trust anchors. Run `heap-probe` to check the linked image and the running firmware.
+4. **Crypto allocator.** MbedTLS runs in a dedicated 52 KiB pool. QEMU covers authenticated EST, NTS, and EC and RSA broker verification. Check the pool peak and failure count with the certificate chains and traffic on the deployment hardware.
+5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which places the selected handler in the shared static request storage. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 
 ### Reproducing the sizes
 

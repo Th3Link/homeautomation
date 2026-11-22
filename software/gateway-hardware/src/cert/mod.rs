@@ -17,11 +17,9 @@ mod key;
 pub mod roots;
 mod store;
 
-use crate::config::{config, LoadOrInit};
+use crate::config::{config, Key};
 use crate::console_log;
 use crate::wall_clock;
-use alloc::string::String as HeapString;
-use alloc::vec::Vec;
 use core::fmt::Write as _;
 use core::ops::Range;
 use embassy_net::Stack;
@@ -42,6 +40,9 @@ pub use key::{wipe, Sensitive};
 
 /// One config item holds the DER private key for an EST client identity.
 pub const IDENTITY_KEY_CAP: usize = 2048;
+pub(crate) const UPLOAD_MAX: usize = 10 * 1024;
+const _: () = assert!(UPLOAD_MAX + store::CERTIFICATE.capacity() <= crate::https::SCRATCH_SIZE);
+const _: () = assert!(UPLOAD_MAX + IDENTITY_KEY_CAP <= crate::https::SCRATCH_SIZE);
 
 /// How the certificate is obtained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,11 +202,15 @@ pub async fn settings() -> Settings {
 /// The FQDN certificates are made for: the configured one, else the
 /// hostname (a single DNS label, which is a valid name too).
 pub async fn effective_fqdn() -> String<FQDN_CAP> {
-    let fqdn = settings().await.fqdn;
+    let mut store = config().await;
+    let fqdn: String<FQDN_CAP> = store.get_str(store::FQDN).await.unwrap_or_default();
     if !fqdn.is_empty() {
         return fqdn;
     }
-    let hostname = config().await.load_or_init().await.hostname;
+    let hostname: String<40> = store
+        .get_str(Key::Hostname)
+        .await
+        .unwrap_or_else(|| gateway_core::config::GatewayConfig::default().hostname);
     let mut fqdn = String::new();
     let _ = fqdn.push_str(if issue::valid_fqdn(&hostname) {
         &hostname
@@ -218,7 +223,11 @@ pub async fn effective_fqdn() -> String<FQDN_CAP> {
 /// The NTP server SNTP asks: the configured one, else the one DHCPv6
 /// named, else pool.ntp.org.
 pub async fn ntp_server() -> String<NTP_CAP> {
-    let configured = settings().await.ntp_server;
+    let configured: String<NTP_CAP> = config()
+        .await
+        .get_str(store::NTP_SERVER)
+        .await
+        .unwrap_or_default();
     if !configured.is_empty() {
         return configured;
     }
@@ -350,9 +359,10 @@ async fn make_self_signed(years: u8, origin: Origin) -> Result<(), CertError> {
         .map_err(|_| CertError::Key)?
         .read(&mut serial);
 
-    let mut der = alloc::vec![0u8; 1024];
+    let mut scratch = crate::https::scratch().await;
+    let der = &mut scratch[..1024];
     let len = issue::self_signed(
-        &mut der,
+        der,
         &SelfSigned {
             fqdn: &fqdn,
             serial,
@@ -366,8 +376,7 @@ async fn make_self_signed(years: u8, origin: Origin) -> Result<(), CertError> {
         issue::IssueError::BadFqdn => CertError::BadFqdn,
         _ => CertError::Key,
     })?;
-    der.truncate(len);
-    activate(&der, origin).await?;
+    activate(&der[..len], origin).await?;
     console_log!("https: self-signed certificate for {fqdn}, {years} years");
     Ok(())
 }
@@ -394,7 +403,7 @@ const UPLOAD_CERTS: usize = 8;
 
 /// The certificates of an upload (PEM with one or more blocks, or DER, one
 /// or more concatenated), decoded where they are: their places in `data`.
-/// No copy, so that an upload fits the heap next to a TLS session.
+/// Each range refers to the decoded bytes in the upload workspace.
 fn decode_certificates(
     data: &mut [u8],
 ) -> Result<heapless::Vec<Range<usize>, UPLOAD_CERTS>, CertError> {
@@ -435,34 +444,33 @@ fn uploaded_chain(data: &mut [u8]) -> Result<&[u8], CertError> {
     Ok(&data[..end])
 }
 
-/// `parts` one after the other, in a buffer allocated without panicking.
-fn concatenated<'a>(parts: impl Iterator<Item = &'a [u8]> + Clone) -> Result<Vec<u8>, CertError> {
-    let mut out = Vec::new();
-    out.try_reserve_exact(parts.clone().map(<[u8]>::len).sum())
-        .map_err(|_| CertError::NoMemory)?;
-    for part in parts {
-        out.extend_from_slice(part);
-    }
-    Ok(out)
-}
-
-/// Checks a chain for the device key, the FQDN and the time, orders it leaf
-/// first and returns it concatenated, ready to store.
-async fn validated_chain<'a>(certs: impl Iterator<Item = &'a [u8]>) -> Result<Vec<u8>, CertError> {
+/// Validate and reorder a chain in the caller's separate output buffer.
+async fn validated_chain<'a>(
+    certs: impl Iterator<Item = &'a [u8]>,
+    out: &mut [u8],
+) -> Result<usize, CertError> {
     let point = key::point().await.ok_or(CertError::Key)?;
     let fqdn = effective_fqdn().await;
     let chain = check::order_chain(certs, &point).map_err(CertError::Rejected)?;
     check::check_leaf(&chain[0], &point, &fqdn, wall_clock::clock())
         .map_err(CertError::Rejected)?;
-    concatenated(chain.iter().map(|cert| cert.der))
+    let mut used = 0;
+    for cert in &chain {
+        let end = used + cert.der.len();
+        out.get_mut(used..end)
+            .ok_or(CertError::Rejected(Problem::TooLong))?
+            .copy_from_slice(cert.der);
+        used = end;
+    }
+    Ok(used)
 }
 
 /// Installs an uploaded certificate (chain), PEM or DER, after checking it,
 /// and switches to the manual mode.
-pub async fn install_certificate(data: &mut [u8]) -> Result<(), CertError> {
+pub async fn install_certificate(data: &mut [u8], ordered: &mut [u8]) -> Result<(), CertError> {
     let certs = decode_certificates(data)?;
-    let chain = validated_chain(certs.iter().map(|range| &data[range.clone()])).await?;
-    activate(&chain, Origin::Manual).await?;
+    let len = validated_chain(certs.iter().map(|range| &data[range.clone()]), ordered).await?;
+    activate(&ordered[..len], Origin::Manual).await?;
     // An uploaded certificate is the manual mode's, whatever the mode was:
     // EST or a new FQDN in self-signed mode would replace it otherwise.
     config()
@@ -475,32 +483,33 @@ pub async fn install_certificate(data: &mut [u8]) -> Result<(), CertError> {
 }
 
 /// The CSR for the device key and the FQDN, as PEM.
-pub async fn csr_pem() -> Result<HeapString, CertError> {
+pub(crate) async fn csr_pem() -> Result<(crate::https::Scratch, usize), CertError> {
+    use embedded_io::Write as _;
     let fqdn = effective_fqdn().await;
-    let der = csr_der(&fqdn).await?;
-    let mut text = HeapString::new();
+    let mut der = [0; 512];
+    let len = csr_der(&fqdn, &mut der).await?;
+    let mut scratch = crate::https::scratch().await;
+    let mut out = &mut scratch[..];
     write!(
-        text,
+        out,
         "{}",
         Pem {
             label: "CERTIFICATE REQUEST",
-            der: &der
+            der: &der[..len]
         }
     )
     .map_err(|_| CertError::NoMemory)?;
-    Ok(text)
+    let len = crate::https::SCRATCH_SIZE - out.len();
+    Ok((scratch, len))
 }
 
-async fn csr_der(fqdn: &str) -> Result<Vec<u8>, CertError> {
+async fn csr_der(fqdn: &str, der: &mut [u8; 512]) -> Result<usize, CertError> {
     let point = key::point().await.ok_or(CertError::Key)?;
     let sign = key::signer().await.ok_or(CertError::Key)?;
-    let mut der = alloc::vec![0u8; 512];
-    let len = issue::csr(&mut der, fqdn, &point, sign).map_err(|e| match e {
+    issue::csr(der, fqdn, &point, sign).map_err(|e| match e {
         issue::IssueError::BadFqdn => CertError::BadFqdn,
         _ => CertError::Key,
-    })?;
-    der.truncate(len);
-    Ok(der)
+    })
 }
 
 /// Replaces the trust anchor (PEM or DER, one or more CA certificates);
@@ -684,7 +693,7 @@ pub async fn status() -> Status {
             Inspection::Capture(_) => unreachable!(),
         }
     });
-    crate::heap::boxed(|| async move {
+    {
         let mut scratch = crate::https::scratch().await;
         let settings = settings().await;
         let fqdn = effective_fqdn().await;
@@ -718,8 +727,7 @@ pub async fn status() -> Status {
             est: EST.lock().await.clone(),
             key_pin: key_pin().await,
         }
-    })
-    .await
+    }
 }
 
 /// SHA-256 of the device key's `SubjectPublicKeyInfo`: its `pin-sha256`
@@ -745,8 +753,9 @@ pub async fn server_credentials() -> Option<mbedtls_rs::Credentials<'static>> {
 
 async fn stored_certificate(blob: &store::Blob) -> Option<mbedtls_rs::Certificate<'static>> {
     let mut scratch = crate::https::scratch().await;
-    let chain = blob.read().await?;
-    mbedtls_certificate(split_concatenated(&chain), &mut scratch[..])
+    let (der, pem) = scratch.split_at_mut(blob.capacity());
+    let chain = blob.read_into(der).await?;
+    mbedtls_certificate(split_concatenated(chain), pem)
 }
 
 /// MbedTLS accepts a single DER certificate or a PEM list. It copies the
@@ -795,8 +804,9 @@ async fn ensure_usable() {
     let Some(point) = key::point().await else {
         return;
     };
-    let usable = match store::CERTIFICATE.read().await {
-        Some(chain) => match check::stored_leaf(&chain) {
+    let mut scratch = crate::https::scratch().await;
+    let usable = match store::CERTIFICATE.read_into(&mut scratch[..]).await {
+        Some(chain) => match check::stored_leaf(chain) {
             // Only an expired certificate is replaced: one that isn't valid
             // yet (uploaded while the time was unknown) becomes valid by
             // itself, and replacing it would lose it.
@@ -808,6 +818,7 @@ async fn ensure_usable() {
         },
         None => false,
     };
+    drop(scratch);
     if !usable {
         console_log!("https: no usable certificate, making a self-signed one");
         let years = settings().await.validity_years;
@@ -861,13 +872,12 @@ pub async fn manager_task(stack: Stack<'static>) {
 
         // On the heap: the checks hold certificates and settings, which
         // the task's static storage would otherwise keep room for always.
-        crate::heap::boxed(|| async {
+        {
             ensure_usable().await;
             if settings().await.mode == Mode::Est {
                 est_step(stack).await;
             }
-        })
-        .await;
+        }
     }
 }
 
@@ -892,7 +902,8 @@ async fn est_step(stack: Stack<'static>) {
     let fqdn = effective_fqdn().await;
     let origin = Origin::from_u8(config().await.get_u8(store::ORIGIN).await.unwrap_or(0));
     let (ours, due) = {
-        let chain = store::CERTIFICATE.read().await;
+        let mut scratch = crate::https::scratch().await;
+        let chain = store::CERTIFICATE.read_into(&mut scratch[..]).await;
         let current = chain.as_deref().and_then(check::stored_leaf);
         (
             origin == Origin::Est && current.is_some_and(|leaf| check::covers(&leaf, &fqdn)),
@@ -979,7 +990,8 @@ async fn enroll(
             .ok_or(EnrollError::Est(EstError::Tls))?
     };
 
-    let csr = csr_der(fqdn).await.map_err(EnrollError::Cert)?;
+    let mut csr = [0; 512];
+    let csr_len = csr_der(fqdn, &mut csr).await.map_err(EnrollError::Cert)?;
 
     // Renewal authenticates with the certificate being renewed (RFC 7030
     // 4.2.2); a first enrollment with the device identity, if there is one.
@@ -990,20 +1002,27 @@ async fn enroll(
     };
 
     let mut scratch = crate::https::scratch().await;
-    let p7 = est::exchange(
+    let p7_len = est::exchange(
         stack,
         url,
         operation,
-        &csr,
+        &csr[..csr_len],
         est::Auth { trust, client },
         &mut slot,
         &mut scratch[..],
     )
     .await
     .map_err(EnrollError::Est)?;
+    let (reply, ordered) =
+        scratch.split_at_mut(crate::https::SCRATCH_SIZE - store::CERTIFICATE.capacity());
+    let p7 = reply
+        .get(..p7_len)
+        .ok_or(EnrollError::Est(EstError::Malformed))?;
     let certs = pkcs7::certificates(p7).ok_or(EnrollError::Est(EstError::Malformed))?;
-    let chain = validated_chain(certs).await.map_err(EnrollError::Cert)?;
-    activate(&chain, Origin::Est)
+    let len = validated_chain(certs, ordered)
+        .await
+        .map_err(EnrollError::Cert)?;
+    activate(&ordered[..len], Origin::Est)
         .await
         .map_err(EnrollError::Cert)?;
     console_log!(

@@ -23,17 +23,16 @@ pub struct Memory {
 
 impl Memory {
     pub fn capture() -> Self {
-        let heap = esp_alloc::HEAP.stats();
         let stack_size = crate::stack::size();
         let stack_untouched = crate::stack::untouched();
         Self {
             boot_id: BOOT_ID.load(Ordering::Relaxed),
             uptime_ms: embassy_time::Instant::now().as_millis(),
-            heap_size: heap.size,
-            heap_used: heap.current_usage,
-            heap_free: heap.size - heap.current_usage,
-            heap_peak_used: heap.max_usage,
-            heap_min_free: heap.size - heap.max_usage,
+            heap_size: 0,
+            heap_used: 0,
+            heap_free: 0,
+            heap_peak_used: 0,
+            heap_min_free: 0,
             stack_size,
             stack_untouched,
             stack_peak_used: stack_size - stack_untouched,
@@ -70,15 +69,4 @@ pub async fn sample_task() {
         log();
         interval.next().await;
     }
-}
-
-#[cfg(feature = "memory-profile")]
-pub fn probe() -> bool {
-    let mut bytes = alloc::vec::Vec::<u8>::new();
-    if bytes.try_reserve_exact(8192).is_err() {
-        return false;
-    }
-    core::hint::black_box(&mut bytes);
-    drop(bytes);
-    true
 }

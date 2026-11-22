@@ -31,7 +31,7 @@ SCENARIOS = {
     "idle": ("idle.toml", "test_memory.py::test_idle_memory"),
     "sntp-dns": ("sntp-dns.toml", "test_memory.py::test_pending_sntp_lookup"),
     "idle-rest": ("idle.toml", "test_memory.py::test_rest_memory"),
-    "heap-probe": ("idle.toml", "test_memory.py::test_transient_heap_allocation"),
+    "heap-probe": ("idle.toml", "test_memory.py::test_no_general_heap"),
     "can-mqtt": ("mqtt.toml", "test_mqtt.py::test_mqtt_commands_and_state_on_two_can_buses"),
     "ha-reconnect": ("mqtt.toml", "test_mqtt.py::test_home_assistant_discovery_survives_broker_restart"),
     "dual-mqtt": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),

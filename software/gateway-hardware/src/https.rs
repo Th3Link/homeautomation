@@ -93,9 +93,9 @@ pub async fn slot() -> MutexGuard<'static, CriticalSectionRawMutex, Buffers> {
     SLOT.lock().await
 }
 
-/// The largest consumer is the EST trust list: the built-in roots and up to
-/// 6 KiB of installed DER, with PEM headers, line breaks and a trailing NUL.
-pub(crate) const SCRATCH_SIZE: usize = 14 * 1024;
+/// NTS-KE needs one receive record and room for the peer chain until verification.
+/// Certificate uploads use 10 KiB for input and 6 KiB for the ordered DER chain.
+pub(crate) const SCRATCH_SIZE: usize = 16 * 1024;
 type ScratchBuffer = &'static mut [u8; SCRATCH_SIZE];
 pub(crate) type Scratch = MutexGuard<'static, CriticalSectionRawMutex, ScratchBuffer>;
 

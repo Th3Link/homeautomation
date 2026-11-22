@@ -40,8 +40,8 @@ const PAGE: usize = 8;
 /// The routes under `/automation` sit in a router of their own: picoserve
 /// tries a router's routes one inside the other, each a stack frame holding
 /// the handler's future, so ten routes here would make every route before
-/// them ten frames deeper. The handlers build their futures on the heap
-/// ([`crate::heap::boxed`]): inline, the frames came to ~60 KB, more than
+/// them ten frames deeper. The handlers build their futures in the shared request slot
+/// ([`crate::future_slot::handler`]): inline, the frames came to ~60 KB, more than
 /// the main stack, and overwrote the statics below it.
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let name = || parse_path_segment::<ItemName>();
@@ -148,7 +148,7 @@ struct Status {
 }
 
 async fn status() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let (enabled, last_button) = {
             let rt = RUNTIME.lock().await;
             (rt.enabled, rt.last_button)
@@ -177,13 +177,10 @@ struct Update {
 }
 
 async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
-        crate::automation::set_enabled(body.enabled)
-            .await
-            .map_err(store_error)?;
-        status().await
-    })
-    .await
+    crate::automation::set_enabled(body.enabled)
+        .await
+        .map_err(store_error)?;
+    status().await
 }
 
 // ---- named items (outputs, motion lights, schedules) ----
@@ -192,7 +189,7 @@ async fn get_named<T: DeserializeOwned + Serialize>(
     section: Section,
     name: &Name,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let item = {
             let mut st = store().await;
             let slot = st.find::<T>(section, name).await.ok_or(NOT_FOUND)?;
@@ -210,38 +207,35 @@ async fn put_named<T: DeserializeOwned + Serialize>(
     name: Name,
     item: &T,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
-        let created = {
-            let mut st = store().await;
-            let existing = st.find_named::<T>(section, &name).await;
-            let named = Named {
-                name,
-                enabled: existing.is_none_or(|(_, enabled)| enabled),
-                item,
-            };
-            if let Some((slot, _)) = existing {
-                st.put(section, slot, &named).await.map_err(store_error)?;
-            } else {
-                st.add(section, &named).await.map_err(store_error)?;
-            }
-            existing.is_none()
+    let created = {
+        let mut st = store().await;
+        let existing = st.find_named::<T>(section, &name).await;
+        let named = Named {
+            name,
+            enabled: existing.is_none_or(|(_, enabled)| enabled),
+            item,
         };
-        post(Event::Reload);
-        let status = if created {
-            StatusCode::CREATED
+        if let Some((slot, _)) = existing {
+            st.put(section, slot, &named).await.map_err(store_error)?;
         } else {
-            StatusCode::OK
-        };
-        with_status(status, &Done { done: true }).await
-    })
-    .await
+            st.add(section, &named).await.map_err(store_error)?;
+        }
+        existing.is_none()
+    };
+    post(Event::Reload);
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    with_status(status, &Done { done: true }).await
 }
 
 async fn delete_named<T: DeserializeOwned>(
     section: Section,
     name: &Name,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         {
             let mut st = store().await;
             let slot = st.find::<T>(section, name).await.ok_or(NOT_FOUND)?;
@@ -299,7 +293,7 @@ struct List<T> {
 
 /// The outputs the automation runs, with their state.
 async fn outputs() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let buffer = super::json::acquire().await;
         let rt = RUNTIME.lock().await;
         let e = &rt.engine;
@@ -342,7 +336,7 @@ async fn put_output(
     ItemName(name): ItemName,
     Json(output): Json<Output>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         output.validate().map_err(refused)?;
         if let Output::Group(group) = &output {
             for member in &group.members {
@@ -366,7 +360,7 @@ async fn command(
     ItemName(name): ItemName,
     Json(op): Json<Op>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         if RUNTIME.lock().await.engine.output(&name).is_none() {
             return Err(NOT_FOUND);
         }
@@ -412,7 +406,7 @@ fn used_buttons(st: &crate::automation::store::Store, slot: u8) -> u8 {
 /// `GET /automation/switches?offset=n`: [`PAGE`] switch configurations
 /// from the `offset`th on.
 async fn switch_configs(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let page = {
             let mut st = store().await;
             let slots = st.slots(Section::Switch);
@@ -445,7 +439,7 @@ async fn put_switch_config(
     ItemName(name): ItemName,
     Json(config): Json<SwitchConfig>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         config.validate().map_err(refused)?;
         {
             let mut st = store().await;
@@ -472,7 +466,7 @@ async fn put_switch_config(
 }
 
 async fn delete_switch_config(ItemName(name): ItemName) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         {
             let mut st = store().await;
             let slot = st
@@ -513,7 +507,7 @@ async fn button_place(name: &Name, button: u8) -> Result<(Section, u8), ApiError
 async fn get_button(
     (ItemName(name), button): (ItemName, u8),
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let (section, slot) = button_place(&name, button).await?;
         let actions = store()
             .await
@@ -530,7 +524,7 @@ async fn put_button(
     (ItemName(name), button): (ItemName, u8),
     Json(actions): Json<ButtonActions>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         actions.validate().map_err(refused)?;
         for e in &actions.events {
             check_actions(&e.actions).await?;
@@ -555,7 +549,7 @@ async fn put_button(
 async fn delete_button(
     (ItemName(name), button): (ItemName, u8),
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let (section, slot) = button_place(&name, button).await?;
         {
             let mut st = store().await;
@@ -625,7 +619,7 @@ struct DevicePage {
 /// `GET /automation/devices?offset=n`: the devices with notes, their
 /// features (the lamp names only by device).
 async fn device_notes(Query(query): Query<PageQuery>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let page = {
             let mut st = store().await;
             let slots = st.slots(Section::Devices);
@@ -669,7 +663,7 @@ async fn notes_slot(st: &mut crate::automation::store::Store, device: DeviceRef)
 /// `GET /automation/devices/:device`: no features and no lamp names if
 /// there are no notes.
 async fn get_device_notes(DeviceKey(device): DeviceKey) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let notes = {
             let mut st = store().await;
             match notes_slot(&mut st, device).await {
@@ -691,7 +685,7 @@ async fn put_device_notes(
     DeviceKey(device): DeviceKey,
     Json(notes): Json<DeviceNotes>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         notes.validate().map_err(refused)?;
         {
             let mut st = store().await;
@@ -716,7 +710,7 @@ async fn put_device_notes(
 }
 
 async fn delete_device_notes(DeviceKey(device): DeviceKey) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let mut st = store().await;
         if let Some(slot) = notes_slot(&mut st, device).await {
             st.remove(Section::Devices, slot)
@@ -743,7 +737,7 @@ struct AutomationView<'a> {
 }
 
 async fn automations(kind: Kind) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let buffer = super::json::acquire().await;
         let rt = RUNTIME.lock().await;
         let e = &rt.engine;
@@ -794,7 +788,7 @@ struct Enabled {
 /// Enables or disables a motion light or schedule (kept on flash by the
 /// automation task).
 async fn switch(name: Name, enabled: bool) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         if RUNTIME.lock().await.engine.automation(&name).is_none() {
             return Err(NOT_FOUND);
         }
@@ -829,7 +823,7 @@ async fn put_motion(
     ItemName(name): ItemName,
     Json(motion): Json<MotionLight>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         motion.validate().map_err(refused)?;
         check_output(&motion.output).await?;
         if store()
@@ -868,7 +862,7 @@ async fn put_schedule(
     ItemName(name): ItemName,
     Json(schedule): Json<Schedule>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         schedule.validate().map_err(refused)?;
         check_output(&schedule.output).await?;
         if store()

@@ -61,15 +61,15 @@ pub struct Auth {
 
 /// Sends `csr` (DER) to the EST server at `url` and returns the PKCS#7
 /// (DER) it issued in the supplied scratch buffer.
-pub async fn exchange<'a>(
+pub async fn exchange(
     stack: Stack<'static>,
     url: &str,
     operation: Operation,
     csr: &[u8],
     auth: Auth,
     buffers: &mut https::Buffers,
-    scratch: &'a mut [u8],
-) -> Result<&'a [u8], EstError> {
+    scratch: &mut [u8],
+) -> Result<usize, EstError> {
     let server = est::parse_url(url).ok_or(EstError::BadUrl)?;
     let tls = https::tls().ok_or(EstError::Tls)?;
 
@@ -113,13 +113,13 @@ pub async fn exchange<'a>(
     result
 }
 
-async fn talk<'a, T>(
+async fn talk<T>(
     session: &mut Session<'_, T>,
     server: est::Server<'_>,
     operation: Operation,
     csr: &[u8],
-    scratch: &'a mut [u8],
-) -> Result<&'a [u8], EstError>
+    scratch: &mut [u8],
+) -> Result<usize, EstError>
 where
     T: embedded_io_async::Read + embedded_io_async::Write,
 {
@@ -167,10 +167,15 @@ where
         }
     }
 
+    let start = response.as_ptr() as usize;
     match est::parse_response(&mut response[..len]).map_err(|_| EstError::Malformed)? {
-        Answer::Issued(base64) => pem::decode_base64_in_place(base64)
-            .map(|der| &*der)
-            .map_err(|_| EstError::Malformed),
+        Answer::Issued(base64) => {
+            let der = pem::decode_base64_in_place(base64).map_err(|_| EstError::Malformed)?;
+            let offset = der.as_ptr() as usize - start;
+            let len = der.len();
+            response.copy_within(offset..offset + len, 0);
+            Ok(len)
+        }
         Answer::Pending { retry_after } => Err(EstError::Pending(retry_after)),
         Answer::Refused { status } => Err(EstError::Refused(status)),
     }

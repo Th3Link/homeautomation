@@ -27,8 +27,7 @@ use picoserve::routing::{get, post, PathRouter, RequestHandlerService};
 use picoserve::{ResponseSent, Router};
 use serde::{Deserialize, Serialize};
 
-const UPLOAD_MAX: usize = 10 * 1024;
-const _: () = assert!(UPLOAD_MAX + cert::IDENTITY_KEY_CAP <= crate::https::SCRATCH_SIZE);
+use cert::UPLOAD_MAX;
 
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let certificates = Router::new()
@@ -192,6 +191,10 @@ struct StatusView<'a> {
 }
 
 async fn read() -> Result<impl IntoResponse, ApiError> {
+    crate::future_slot::handler(read_status).await
+}
+
+async fn read_status() -> Result<impl IntoResponse, ApiError> {
     let status = cert::status().await;
     let ntp_server_in_use = cert::ntp_server().await;
     let now = embassy_time::Instant::now();
@@ -273,7 +276,7 @@ async fn update(Json(body): Json<Update>) -> Result<impl IntoResponse, ApiError>
         ),
         None => None,
     };
-    crate::heap::boxed(|| {
+    crate::future_slot::handler(|| {
         cert::update_settings(SettingsUpdate {
             fqdn: body.fqdn.as_deref(),
             mode,
@@ -295,7 +298,7 @@ struct SelfSignedRequest {
 }
 
 async fn self_signed(Json(body): Json<SelfSignedRequest>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         cert::generate_self_signed(body.validity_years)
             .await
             .map_err(api_error)?;
@@ -305,7 +308,7 @@ async fn self_signed(Json(body): Json<SelfSignedRequest>) -> Result<impl IntoRes
 }
 
 /// The CSR, as `application/pkcs10` PEM, offered as a file.
-struct CsrBody(alloc::string::String);
+struct CsrBody(crate::https::Scratch, usize);
 
 impl picoserve::response::Content for CsrBody {
     fn content_type(&self) -> &'static str {
@@ -313,23 +316,23 @@ impl picoserve::response::Content for CsrBody {
     }
 
     fn content_length(&self) -> usize {
-        self.0.len()
+        self.1
     }
 
     async fn write_content<W: picoserve::io::Write>(self, mut writer: W) -> Result<(), W::Error> {
-        writer.write_all(self.0.as_bytes()).await
+        writer.write_all(&self.0[..self.1]).await
     }
 }
 
 async fn csr() -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
-        let pem = cert::csr_pem().await.map_err(api_error)?;
+    crate::future_slot::handler(|| async move {
+        let (pem, len) = cert::csr_pem().await.map_err(api_error)?;
         Ok((
             [(
                 "Content-Disposition",
                 "attachment; filename=\"gateway.csr\"",
             )],
-            CsrBody(pem),
+            CsrBody(pem, len),
         ))
     })
     .await
@@ -380,7 +383,7 @@ impl RequestHandlerService<(), ()> for Upload {
         let size = request.body_connection.content_length();
         let (connection, result) = {
             let mut scratch = crate::https::scratch().await;
-            let (upload, key) = scratch.split_at_mut(UPLOAD_MAX);
+            let (upload, staging) = scratch.split_at_mut(UPLOAD_MAX);
             let body = if size == 0 || size > UPLOAD_MAX {
                 Err(ApiError::new(
                     StatusCode::PAYLOAD_TOO_LARGE,
@@ -399,10 +402,10 @@ impl RequestHandlerService<(), ()> for Upload {
             let result = match body {
                 Err(error) => Err(error),
                 Ok(data) => match self.0 {
-                    Target::Certificate => cert::install_certificate(data.0).await,
+                    Target::Certificate => cert::install_certificate(data.0, staging).await,
                     Target::TrustAnchor => cert::set_trust_anchor(data.0).await,
                     Target::Identity => {
-                        cert::set_est_identity(data.0, &mut key[..cert::IDENTITY_KEY_CAP]).await
+                        cert::set_est_identity(data.0, &mut staging[..cert::IDENTITY_KEY_CAP]).await
                     }
                 }
                 .map_err(api_error),

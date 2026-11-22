@@ -335,7 +335,7 @@ impl RequestHandlerService<(), ()> for GatewayUpload {
         request: Request<'_, R>,
         response_writer: W,
     ) -> Result<ResponseSent, W::Error> {
-        crate::heap::boxed(|| handle(Ok(Target::Gateway), request, response_writer)).await
+        crate::future_slot::handler(|| handle(Ok(Target::Gateway), request, response_writer)).await
     }
 }
 
@@ -355,7 +355,7 @@ impl RequestHandlerService<(), (DeviceName,)> for DeviceUpload {
             .resolve(name.as_str())
             .map(Target::Device)
             .ok_or(ApiError::not_found("no such device"));
-        crate::heap::boxed(|| handle(target, request, response_writer)).await
+        crate::future_slot::handler(|| handle(target, request, response_writer)).await
     }
 }
 
@@ -369,6 +369,9 @@ impl RequestHandlerService<(), (u8,)> for TypeUpload {
         request: Request<'_, R>,
         response_writer: W,
     ) -> Result<ResponseSent, W::Error> {
-        crate::heap::boxed(|| handle(Ok(Target::Type(device_type)), request, response_writer)).await
+        crate::future_slot::handler(|| {
+            handle(Ok(Target::Type(device_type)), request, response_writer)
+        })
+        .await
     }
 }

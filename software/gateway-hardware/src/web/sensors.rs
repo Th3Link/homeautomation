@@ -96,7 +96,7 @@ struct Page {
 }
 
 async fn list(Query(query): Query<ListQuery>) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let buffer = acquire().await;
         let now = now_seconds();
 

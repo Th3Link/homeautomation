@@ -127,7 +127,7 @@ async fn read_device(
     name: DeviceName,
     Query(query): Query<From>,
 ) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let key = device_key(&name).await?;
         let buffer = super::json::acquire().await;
         let body = crate::node_log::with_web(|web| {
@@ -166,7 +166,7 @@ async fn read_device(
 
 /// Downloads the device's log (`202`); `GET` shows it.
 async fn start_device(name: DeviceName) -> Result<impl IntoResponse, ApiError> {
-    crate::heap::boxed(|| async move {
+    crate::future_slot::handler(|| async move {
         let key = device_key(&name).await?;
         if !crate::node_log::request(key).await {
             return Err(ApiError::new(
