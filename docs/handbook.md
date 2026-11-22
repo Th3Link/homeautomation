@@ -1,6 +1,5 @@
 <p class="lead">
-Wire switches, sensors and actuators into a shared CAN bus. An ESP32
-gateway connects the bus to your MQTT broker over Ethernet.
+An ESP32 gateway connects CAN switches, sensors and actuators to MQTT over Ethernet.
 </p>
 
 <ol class="system-path" aria-label="System topology">
@@ -11,10 +10,8 @@ gateway connects the bus to your MQTT broker over Ethernet.
 
 ## Gateway quickstart
 
-Use a gateway with the Rust firmware, one configured [wall switch](#wall-switch),
-and an MQTT broker reachable on your local network. The example uses a switch
-with CAN device ID `10` and the name `kitchen`. You can verify CAN discovery
-before connecting a broker.
+Start with a Rust gateway and a configured [wall switch](#wall-switch). This example uses
+switch ID `10`, named `kitchen`. You only need a reachable broker for the MQTT step.
 
 ### Connect CAN and Ethernet
 
@@ -53,8 +50,7 @@ and the bitrate. For older firmware, try **Broadcast ping**. See
 
 In **MQTT → Primary broker**, enter your broker address and credentials.
 Enable **Connect to this broker**, save, and wait for **connected**.
-To check a button event on a local broker with a plain MQTT listener,
-subscribe from a machine that can reach the broker.
+Subscribe to button events on the broker’s plain MQTT listener.
 
 ```sh
 mosquitto_sub -h broker.example -t 'canbus/button/+' -v
@@ -68,8 +64,7 @@ credentials, TLS, command topics, and sensor data.
 
 ## Hardware
 
-These images are KiCad renders of the linked layouts. Parts without a
-3D model appear as footprints.
+KiCad renders show parts without 3D models as footprints.
 
 - **CAN bus** · [Gateway](#mqtt-gateway), [wall switch](#wall-switch),
   [mechanical relays](#mechanical-relay-module), [solid-state relays](#solid-state-relay-module)
@@ -767,10 +762,8 @@ kill "$broker_pid"
 
 ## Firmware memory
 
-Open **Memory report** in the handbook sidebar for the ESP32 memory map,
-Debug and Release ELF history, and the latest gateway workload measurements.
-The application binary is compared with the smallest app slot in the board's
-partition table. The ELF breaks RAM down by physical bank.
+The **Memory report** shows release placement for both firmwares, Debug and Release trends,
+and gateway usage under QEMU. Flash size is compared with the board’s smallest app slot.
 
 | Bank | ESP32 capacity | Gateway placement |
 |---|---:|---|
@@ -780,22 +773,19 @@ partition table. The ELF breaks RAM down by physical bank.
 | RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, one slot for certificate status or MQTT certificate capture, and the authenticated time client’s keys and cookies |
 | RTC SLOW | 8 KiB | Node log text for the web API |
 
-The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
-linker ranges and their contents. RTC memory is accounted for separately.
+[Gateway linker ranges and allocations](../software/gateway-core/docs/ram.md)
 
 ### Read the runtime measurements
 
-`GET /api/v1/system` reports the boot ID, uptime and memory use in bytes. The gateway builds against Rust `core` without a global allocator. Its general heap size, current use, peak and minimum free space are all **0 B**. These fields remain in the API so earlier firmware measurements can be compared on the same charts.
+`GET /api/v1/system` reports boot ID, uptime and memory in bytes.
 
-The separate `crypto_pool` object shows the fixed MbedTLS pool’s capacity, current use, high-water mark and failed allocation count. Read `stack_untouched` for the stack margin. At boot the firmware paints unused stack below the ESP32 stack pointer. The reported `stack_peak_used` is the stack budget minus the untouched bytes and includes the unpainted guard and startup area.
+- **Heap** · The gateway has no global allocator. General heap fields read `0` and remain available for comparison with older builds.
+- **TLS** · `crypto_pool` reports MbedTLS capacity, current use, peak and failed allocations.
+- **Stack** · `stack_untouched` counts bytes still painted since boot. `stack_peak_used` is the budget minus those bytes, including the guard and startup area.
 
-A profiling build emits UART samples every two seconds. This keeps the
-measurement available during MQTT or CAN activity even if a web request
-fails. The `idle-rest` scenario also samples over REST for ten seconds to
-include the cost of querying `/system`. The report keeps samples for each
-boot separate. A panic, missing samples, or an incomplete workload is
-visible in the result, and a failed workload can still have measurements
-from before the failure.
+Profiling samples UART every two seconds, even if HTTP fails. `idle-rest` also polls
+`/system` for ten seconds to measure the query itself. Each boot has its own row.
+Failed or partial runs retain their samples and may miss the peak.
 
 ### Reproduce the gateway profiles
 
