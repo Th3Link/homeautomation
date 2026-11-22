@@ -124,3 +124,39 @@ summary { cursor: pointer; }
 .status.passed { color: var(--pass-fg); background: var(--pass-bg); }
 .status.failed { color: var(--fail-fg); background: var(--fail-bg); }
 .status.partial { color: var(--partial-fg); background: var(--partial-bg); }
+
+.placement {
+  margin-block: 1.75rem;
+  padding: clamp(1rem, 2.5vw, 2rem);
+  border: 1px solid var(--rule);
+  border-radius: .5rem;
+  background: var(--surface);
+}
+.placement header, .placement-key, .placement-windows { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; }
+.placement h2 { margin: 0; }
+.placement header code, .placement-note, .placement-axis, .placement h3 small { color: var(--muted); }
+.placement label { display: block; font-weight: 600; }
+.placement select { display: block; max-width: 100%; margin-top: .35rem; padding: .55rem; font: inherit; }
+.placement-note { margin: .4rem 0 1rem; }
+.placement-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .5rem; }
+.placement-totals > div { background: var(--stripe); padding: .65rem 1rem; border-inline-start: 3px solid var(--rule); }
+.placement-totals strong { display: block; font: 600 1.4rem var(--mono); margin-block: .2rem; }
+.placement h3 { margin-bottom: .4rem; }
+.placement h3 small { font-size: .85rem; font-weight: normal; margin-inline-start: .65rem; }
+.placement-strip { display: flex; height: 2rem; outline: 1px solid var(--rule); }
+.segment { display: block; flex-basis: 0; }
+.placement-strip > i { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center; color: white; font: 600 .75rem/2rem var(--mono); }
+.segment.rom { background: repeating-linear-gradient(45deg, #6c6963 0 3px, #aaa69d 3px 6px); }
+.segment.linked { background: #536a7d; }
+.segment.object { background: #36778a; }
+.segment.object:nth-child(even) { background: #326e7a; }
+.segment.stack { background: #895c32; }
+.segment.gap { background: repeating-linear-gradient(-45deg, #bce3ba 0 4px, #8cb48c 4px 6px); }
+.segment.moved { background: #85558e; }
+.placement-axis { display: flex; justify-content: space-between; font-size: .8rem; }
+.placement-windows, .placement-key { font-size: .85rem; margin-block: .45rem .8rem; }
+.placement-key { align-items: center; margin-block: 1.2rem; }
+.placement-key span { display: inline-flex; gap: .4rem; align-items: center; }
+.placement-key i { width: .9rem; height: .9rem; flex-basis: auto; }
+.placement td:nth-child(2), .placement td:nth-child(3) { font-family: var(--mono); white-space: nowrap; }
+.placement td:last-child { overflow-wrap: anywhere; }

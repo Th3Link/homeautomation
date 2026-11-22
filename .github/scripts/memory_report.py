@@ -73,7 +73,7 @@ RAM_BANKS = {
 
 BANK_USES = {
     "SRAM0": "64 KiB for the flash caches. The remaining 128 KiB hold interrupt vectors and code in IRAM.",
-    "SRAM1": "The data and instruction addresses map to the same bank. The gateway uses it for allocators and network buffers alongside ROM data.",
+    "SRAM1": "The data and instruction addresses map to the same bank. The gateway places network buffers and TLS workspaces here alongside ROM data.",
     "SRAM2": "8 KiB reserved for ROM. The primary 192 KiB DRAM range holds statics, task state, and the main stack.",
     "RTC FAST": "Retained memory with mirrored data and instruction addresses.",
     "RTC SLOW": "Retained memory shared with the low-power subsystem.",
@@ -245,6 +245,12 @@ def measure(args):
         if section["name"] in SRAM1_SLOTS
     }
     if args.name == "gateway-hardware" and symbols:
+        m["sram1_objects"] = [
+            dict(name=demangle(obj["name"]), addr=obj["addr"], size=obj["size"],
+                 section=obj["section"])
+            for obj in sorted(symbols, key=lambda obj: obj["addr"])
+            if obj["section"] in SRAM1_SLOTS
+        ]
         m["heap_reserved"] = 0
         for obj in symbols:
             if obj["section"] == ".dram2_uninit" and demangle(obj["name"]).endswith("::HEAP"):
@@ -259,7 +265,7 @@ def measure(args):
                  if inside(s["addr"], DRAM) and s["name"] != ".stack"}
     top = sorted((y for y in symbols if y["section"] in ram_names),
                  key=lambda y: -y["size"])[:8]
-    m["top_ram"] = [dict(name=demangle(y["name"]), size=y["size"],
+    m["top_ram"] = [dict(name=demangle(y["name"]), addr=y["addr"], size=y["size"],
                          section=y["section"]) for y in top]
 
     out = dict(name=args.name, profile=args.profile, **m)
@@ -384,7 +390,7 @@ def report(args):
 HISTORY_KEYS = ("flash_image", "iram", "dram_static", "stack_budget",
                 "app_partition", "dram_total")
 HISTORY_DETAILS = ("ram_sections", "top_ram", "flash_bin", "sram1_total", "sram1_rom",
-                   "sram1_elf", "sram1_sections", "heap_reserved", "iram_total")
+                   "sram1_elf", "sram1_sections", "sram1_objects", "heap_reserved", "iram_total")
 HISTORY_LIMIT = 500  # entries kept; a commit per entry
 
 
@@ -492,6 +498,95 @@ def ram_bank_map():
         rows.append(f"<tr><th scope=\"row\">{bank}</th><td>{(end - start) // 1024} KiB</td>"
                     f"<td>{addresses}</td><td>{BANK_USES[bank]}</td></tr>")
     return "".join(rows)
+
+
+def section_spans(section, objects):
+    """Cover every linked byte once. Without unambiguous symbols, show the section."""
+    start = cursor = section["addr"]
+    end = start + section["size"]
+    name = section["name"]
+    spans = []
+    for obj in sorted((o for o in objects if o["section"] == name and "addr" in o),
+                      key=lambda o: o["addr"]):
+        addr = obj["addr"]
+        if addr < cursor or addr + obj["size"] > end:
+            return [dict(kind="linked", label=name, size=end - start)]
+        if addr > cursor:
+            spans.append(dict(kind="linked", label=name, size=addr - cursor))
+        spans.append(dict(kind="object", label=obj["name"], size=obj["size"]))
+        cursor = addr + obj["size"]
+    if cursor < end:
+        kind = "stack" if name == ".stack" else "linked"
+        spans.append(dict(kind=kind, label=name, size=end - cursor))
+    return spans
+
+
+def gateway_placement(metrics, revision):
+    sections = metrics.get("ram_sections", {})
+    if not sections.get("SRAM1") or not sections.get("SRAM2"):
+        return '<p id="gateway-placement">Gateway release section measurements are unavailable for this build.</p>'
+
+    # Preserve the ROM holes and linker-window boundaries. An instruction alias or
+    # a changed linker layout needs a new model before we can project placements.
+    sections1 = {s["name"]: s for s in sections["SRAM1"]}
+    if len(sections1) != len(sections["SRAM1"]) or sections1.keys() - SRAM1_SLOTS.keys():
+        return '<p id="gateway-placement">This SRAM1 layout is outside the modeled linker windows.</p>'
+    banks = {"SRAM1": [], "SRAM2": []}
+
+    def add(bank, label, start, spans):
+        banks[bank].append(dict(label=label, start=start, spans=spans))
+
+    cursor = RAM_BANKS["SRAM1"][0][0]
+    for name, (start, end) in SRAM1_SLOTS.items():
+        if cursor < start:
+            add("SRAM1", "ROM", cursor, [dict(kind="rom", label="ROM", size=start - cursor)])
+        section = sections1.get(name)
+        spans = []
+        used = 0
+        if section:
+            used = section["size"]
+            if section["addr"] != start or used > end - start:
+                return '<p id="gateway-placement">This SRAM1 layout is outside the modeled linker windows.</p>'
+            spans = section_spans(section, metrics.get("sram1_objects", []))
+        spans.append(dict(kind="gap", label="Unallocated", size=end - start - used))
+        add("SRAM1", name, start, spans)
+        cursor = end
+
+    start = RAM_BANKS["SRAM2"][0][0]
+    cursor = DRAM[0]
+    add("SRAM2", "ROM", start, [dict(kind="rom", label="ROM", size=cursor - start)])
+    for section in sorted(sections["SRAM2"], key=lambda s: s["addr"]):
+        addr = section["addr"]
+        if addr < cursor or addr + section["size"] > DRAM[1]:
+            return '<p id="gateway-placement">This SRAM2 layout is outside the modeled linker range.</p>'
+        if cursor < addr:
+            add("SRAM2", "Unallocated", cursor, [dict(kind="gap", label="Unallocated", size=addr - cursor)])
+        add("SRAM2", section["name"], addr, section_spans(section, metrics.get("top_ram", [])))
+        cursor = addr + section["size"]
+    if cursor != DRAM[1] or banks["SRAM2"][-1]["label"] != ".stack":
+        return '<p id="gateway-placement">This SRAM2 layout has no main stack at the end of the bank.</p>'
+
+    data = escape(json.dumps(banks, separators=(",", ":")), quote=True)
+    return f"""<section class="placement" data-banks="{data}">
+<header><h2 id="gateway-placement">Gateway SRAM placement</h2>
+<code>release · {escape(revision[:7])}</code></header>
+<p>Each strip follows one physical bank from low to high address. SRAM1 has three linker windows.
+In SRAM2 the main stack occupies the space above the statics.</p>
+<noscript>Enable JavaScript to explore placements. The section tables below list the linked addresses.</noscript>
+<div class="placement-ui" hidden>
+<label>Placement preview <select></select></label>
+<p class="placement-note"></p>
+<div class="placement-totals" aria-live="polite"></div>
+<div class="placement-bars"></div>
+<div class="placement-key"></div>
+<details><summary>Address ranges and objects</summary>
+<div class="table-scroll"><table class="memory-map"><thead><tr><th>Bank / section</th>
+<th>Start</th><th>Bytes</th><th>Contents</th></tr></thead><tbody></tbody></table></div></details>
+<p>Moving a static to SRAM2 packs its source window and charges its size to the main stack.
+The SRAM1 swap, when available, shows the largest gap obtainable by exchanging one pair of named statics.
+Alignment and boot initialization need a new link and a firmware test. Compare the projected
+budget with <a href="#runtime">stack usage under QEMU</a> before moving a buffer. The APP boot window requires the second CPU to stay parked.</p>
+</div></section>"""
 
 
 def ram_layout(firmware, metrics):
@@ -656,6 +751,7 @@ def chart(args):
 </tr></thead><tbody>{rows}</tbody></table></div>
 <p>The heap reservation is part of SRAM1 ELF usage. The ESP32 reserves another {SRAM1_ROM:,} B in SRAM1 for ROM data.
 Older builds may have missing measurements.</p>
+{gateway_placement(latest["firmware"].get("gateway-hardware/release", {}), latest["sha"])}
 <h3>RAM sections by firmware and build profile</h3>
 <p>The bank totals cover the ELF sections below. Cache and ROM reservations
 are listed in the memory map above.</p>
@@ -675,6 +771,7 @@ are listed in the memory map above.</p>
 <p>One point per commit on <code>main</code>. The ELF shows where the firmware
 places code and data and how much space the linker reserves for heap and
 stack. Usage within those reservations depends on the workload.</p>
+{('<p><a href="#gateway-placement">Explore gateway SRAM placement ↓</a></p>' if latest["firmware"].get("gateway-hardware/release", {}).get("ram_sections") else "")}
 <h2>ESP32 memory map</h2>
 <div class="table-scroll"><table class="memory-map address-map">
 <thead><tr><th>Bank</th><th>Physical size</th><th>Address range</th><th>Use</th></tr></thead>
