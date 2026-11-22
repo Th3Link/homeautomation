@@ -57,3 +57,33 @@ def test_automation_routes_fit_on_the_stack(api):
     assert after["boot_id"] == before["boot_id"], "the gateway restarted"
     print(f"Automation stack untouched: {after['stack_untouched']} of {after['stack_size']} bytes")
     assert after["stack_untouched"] >= MIN_STACK_MARGIN, after["stack_untouched"]
+
+
+def test_output_state_survives_reload_only_for_the_same_kind(sim, api):
+    path = "/automation/outputs"
+    name = "reloadlight"
+
+    def level():
+        status, result = api("GET", path)
+        assert status == 200
+        return next(item["level"] for item in result["items"] if item["name"] == name)
+
+    def put_and_wait(output, config):
+        since = sim.mark()
+        status, result = api("PUT", f"{path}/{output}", config)
+        assert status < 300, result
+        sim.expect(r"automation: \d+ outputs,", chip="gw", kind="serial", since=since)
+
+    try:
+        put_and_wait(name, LIGHT)
+        since = sim.mark()
+        assert api("POST", f"{path}/{name}/command", "on")[0] < 300
+        sim.expect_can("LampGroup", data=[17], since=since)
+        assert level() == LIGHT["light"]["default_level"]
+        put_and_wait("reloadgroup", {"group": {"members": [name]}})
+        assert level() == LIGHT["light"]["default_level"]
+        put_and_wait(name, RELAY)
+        assert level() == 0
+    finally:
+        api("DELETE", f"{path}/reloadgroup")
+        api("DELETE", f"{path}/{name}")

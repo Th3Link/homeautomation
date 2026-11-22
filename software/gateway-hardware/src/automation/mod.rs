@@ -200,7 +200,7 @@ fn now_ms() -> u64 {
 /// is still there.
 async fn load(rt: &mut Runtime) {
     let mut st = store().await;
-    let mut saved = alloc::boxed::Box::<Saved>::default();
+    let mut saved = Saved::default();
     rt.engine.save(&mut saved);
     rt.engine.clear();
     rt.output_slots.clear();

@@ -54,6 +54,22 @@ The DHCPv6 task initializes one 2,664 B workspace in upper SRAM1 whenever it sta
 
 Upper SRAM1 gains 408 B after accounting for the new workspace. The larger task pool costs 120 B of SRAM2 stack budget, leaving a **net saving of 288 B** across those banks. The 2,800 B drop in live heap use measures the removal of the DHCPv6 allocation. The idle heap peak includes startup work and reached 3,384 B on both builds.
 
+### Automation configuration reload
+
+When the gateway starts or an edit changes its configuration, the automation task rebuilds the engine from flash. Its 3,384 B snapshot preserves output levels and shutter motion by name and kind, plus eligible motion-light and schedule state. The snapshot lives in the static Embassy task in SRAM2 across flash reads. At startup the task scans the flash store in its final location under the store lock. This removes a temporary copy from the task frame.
+
+| Bytes | Before (`2f2dda8`) | After |
+|---|---:|---:|
+| Automation task pool in SRAM2, release ELF | 7,520 | 6,096 |
+| Main stack budget, release ELF | 49,212 | 50,636 |
+| General heap peak, fresh boot through idle | 3,384 | 424 |
+| General heap used at steady idle | 424 | 424 |
+| General heap peak, HTTPS automation edits | 9,968 | 8,792 |
+| Untouched stack immediately after saving a button, profiled build | 9,364 | 10,788 |
+| Untouched stack after the full edit sequence, profiled build | 9,156 | 10,372–10,580 |
+
+Both builds ran the same QEMU `idle` and `https-automation` workloads twice. The 1,424 B reduction in static SRAM2 gives the main stack 1,424 B more headroom. The general heap still reserves 31 KiB in SRAM1. The reload no longer allocates a snapshot from it.
+
 ### Earlier MQTT and HTTPS measurements
 
 The same `combined` scenario exercises two gateways, active CAN nodes, MQTT and an HTTPS automation read. The values below come from gateway A. The baseline allocator included MbedTLS. On the new build each allocator tracks its own peak, and those peaks can occur at different times.
@@ -175,7 +191,7 @@ In this earlier experiment, shrinking the HTTPS RX windows without moving the bu
 
 1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
 2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
-3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. DNS, the automation reload snapshot, variable-length credential data, NTS receive records and some request futures still use the general heap.
+3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. DNS, variable-length credential data, NTS receive records and some request futures still use the general heap.
 4. **Crypto allocator.** MbedTLS runs in a dedicated 48 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
 5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 
