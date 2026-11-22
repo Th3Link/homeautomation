@@ -811,7 +811,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
         )),
     )
     .await?;
-    match &status.certificate {
+    match &status.details.certificate {
         Some((info, state, origin)) => {
             respond(
                 writer,
@@ -866,7 +866,7 @@ async fn cmd_tls_status(writer: &mut CommandWriter<UartTx>) -> Result<(), ()> {
             } else {
                 "off"
             },
-            status.trust_anchor_count
+            status.details.trust_anchor_count
         )),
     )
     .await?;

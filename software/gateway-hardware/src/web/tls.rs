@@ -15,7 +15,6 @@
 
 use super::error::ApiError;
 use crate::cert::{self, CertError, CertInfo, Mode, SettingsUpdate};
-use alloc::vec::Vec;
 use core::fmt::Write as _;
 use gateway_core::x509::pem::Base64;
 use gateway_core::x509::time::Rfc3339;
@@ -28,9 +27,8 @@ use picoserve::routing::{get, post, PathRouter, RequestHandlerService};
 use picoserve::{ResponseSent, Router};
 use serde::{Deserialize, Serialize};
 
-/// The largest certificate/key upload: room for what can be stored (6 KiB of
-/// DER, as PEM), and small enough for the heap next to the TLS session.
 const UPLOAD_MAX: usize = 10 * 1024;
+const _: () = assert!(UPLOAD_MAX + cert::IDENTITY_KEY_CAP <= crate::https::SCRATCH_SIZE);
 
 pub fn routes<R: PathRouter>(router: Router<R>) -> Router<impl PathRouter> {
     let certificates = Router::new()
@@ -223,16 +221,17 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
             }
         }),
         certificate: status
+            .details
             .certificate
             .as_ref()
             .map(|(info, state, origin)| CertView {
                 status: Some(state.code()),
                 origin: Some(origin.code()),
-                count: Some(status.chain_length),
+                count: Some(status.details.chain_length),
                 ..CertView::new(info)
             }),
-        trust_anchor: status.trust_anchor.as_ref().map(|info| CertView {
-            count: Some(status.trust_anchor_count),
+        trust_anchor: status.details.trust_anchor.as_ref().map(|info| CertView {
+            count: Some(status.details.trust_anchor_count),
             ..CertView::new(info)
         }),
         built_in_roots: status.settings.built_in_roots,
@@ -240,7 +239,7 @@ async fn read() -> Result<impl IntoResponse, ApiError> {
         est: EstView {
             url: &status.settings.est_url,
             auto_renew: status.settings.est_auto_renew,
-            identity: status.est_identity.as_ref().map(CertView::new),
+            identity: status.details.est_identity.as_ref().map(CertView::new),
             last_result: status.est.last_result,
             last_status: status.est.last_status,
             last_attempt: (status.est.last_attempt != 0)
@@ -342,7 +341,9 @@ async fn delete_trust_anchor() -> Result<impl IntoResponse, ApiError> {
 }
 
 async fn delete_identity() -> Result<impl IntoResponse, ApiError> {
-    cert::set_est_identity(&mut []).await.map_err(api_error)?;
+    cert::set_est_identity(&mut [], &mut [])
+        .await
+        .map_err(api_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -377,39 +378,36 @@ impl RequestHandlerService<(), ()> for Upload {
         response_writer: W,
     ) -> Result<ResponseSent, W::Error> {
         let size = request.body_connection.content_length();
-        let body = if size == 0 || size > UPLOAD_MAX {
-            Err(ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "bad_size",
-                "the body must be 1 byte to 10 KiB",
-            ))
-        } else {
-            let mut data: Vec<u8> = Vec::new();
-            if data.try_reserve_exact(size).is_err() {
-                Err(api_error(CertError::NoMemory))
+        let (connection, result) = {
+            let mut scratch = crate::https::scratch().await;
+            let (upload, key) = scratch.split_at_mut(UPLOAD_MAX);
+            let body = if size == 0 || size > UPLOAD_MAX {
+                Err(ApiError::new(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "bad_size",
+                    "the body must be 1 byte to 10 KiB",
+                ))
             } else {
-                data.resize(size, 0);
+                let data = cert::Sensitive(&mut upload[..size]);
                 let mut reader = request.body_connection.body().reader();
-                match reader.read_exact(&mut data).await {
+                match reader.read_exact(data.0).await {
                     Ok(()) => Ok(data),
                     Err(_) => Err(ApiError::invalid("the body ended early")),
                 }
-            }
-        };
-        let connection = request.body_connection.finalize().await?;
-
-        let result = match body {
-            Err(error) => Err(error),
-            Ok(mut data) => {
-                let result = match self.0 {
-                    Target::Certificate => cert::install_certificate(&mut data).await,
-                    Target::TrustAnchor => cert::set_trust_anchor(&mut data).await,
-                    Target::Identity => cert::set_est_identity(&mut data).await,
-                };
-                // An identity upload holds a private key.
-                crate::cert::wipe(&mut data);
-                result.map_err(api_error)
-            }
+            };
+            let connection = request.body_connection.finalize().await?;
+            let result = match body {
+                Err(error) => Err(error),
+                Ok(data) => match self.0 {
+                    Target::Certificate => cert::install_certificate(data.0).await,
+                    Target::TrustAnchor => cert::set_trust_anchor(data.0).await,
+                    Target::Identity => {
+                        cert::set_est_identity(data.0, &mut key[..cert::IDENTITY_KEY_CAP]).await
+                    }
+                }
+                .map_err(api_error),
+            };
+            (connection, result)
         };
         match result {
             Ok(()) => {

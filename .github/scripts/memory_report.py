@@ -510,7 +510,7 @@ def ram_layout(firmware, metrics):
             name = section["name"]
             purpose = SECTION_USES.get(name, "")
             if name == ".dram2_uninit":
-                purpose = ("General heap, plus the TLS pool, HTTPS listeners and OTA scratch on newer builds" if firmware.startswith("gateway-hardware/")
+                purpose = ("General heap and, depending on the build, the TLS pool, HTTPS listeners, DHCPv6 and shared TLS/OTA workspaces" if firmware.startswith("gateway-hardware/")
                            else "Static data left uninitialized at boot")
             if name in SRAM1_SLOTS:
                 slot_start, slot_end = SRAM1_SLOTS[name]

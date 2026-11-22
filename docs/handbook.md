@@ -775,9 +775,9 @@ partition table. The ELF breaks RAM down by physical bank.
 | Bank | ESP32 capacity | Gateway placement |
 |---|---:|---|
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
-| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a 31 KiB general heap and a 48 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
-| SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The automation task holds its reload snapshot here while rebuilding the engine. The linker gives the main stack the space left after statics. |
-| RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, certificate capture buffer and one shared 4 KiB firmware upload chunk |
+| SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a shared 14 KiB workspace, a 16 KiB general heap and a 52 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
+| SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The automation task holds its reload snapshot here. MQTT, EST and NTS share a single cached copy of the installed trust anchors (up to 6 KiB). The linker gives the main stack the space left after statics. |
+| RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, one slot used for either certificate status or MQTT certificate capture |
 | RTC SLOW | 8 KiB | Node log text for the web API |
 
 The [gateway RAM notes](../software/gateway-core/docs/ram.md) identify the
@@ -835,6 +835,8 @@ and `--runs 1` for a single measurement.
 | `sntp-dns` | UART sample while the time server’s DNS lookup waits for a reply on an isolated guest LAN. The general heap must be empty. |
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
 | `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
+| `mqtt-pinned` | Connect to Mosquitto with a pinned public key, renew its certificate with the same key, then check that a different key is rejected |
+| `https-est` | Enroll and renew over mutual TLS with built-in and installed trust anchors, a client identity chain and chunked PKCS#7 replies |
 | `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
 | `https-trust-import` | Install a six-certificate CA bundle as PEM and DER, read its fingerprint and count, reject invalid uploads and remove it |
 | `https-identity-import` | Install an EST client certificate chain with its private key, check the leaf fingerprint, reject a key-only upload and remove the identity |
@@ -846,6 +848,8 @@ The two certificate import scenarios start on separate fresh gateways. Each
 `pytest.log` records the general heap high-water mark immediately after the
 first upload. The peak in `runtime.json` covers the whole scenario, including
 the subsequent read of the certificate details at `GET /api/v1/tls`.
+
+The EST test starts a local SNTP peer before boot so the gateway can validate certificate dates. In an isolated test network, make loopback UDP port 123 available to the test user. CI redirects requests from QEMU to the unprivileged port set in `SIM_SNTP_PORT`. Without a usable port, pytest skips this test.
 
 For a physical gateway, use the same API sampler with the device's trusted
 certificate. The output is labeled `hardware` and includes the running

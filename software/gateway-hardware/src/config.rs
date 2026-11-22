@@ -44,6 +44,22 @@ pub async fn pinned_certificate(
     (!cert.is_empty()).then_some(cert)
 }
 
+/// Digest of the stored SubjectPublicKeyInfo. An unreadable public key in
+/// a nonempty pin must still reject the connection.
+pub async fn pinned_key(slot: usize) -> Result<Option<[u8; 32]>, ()> {
+    config()
+        .await
+        .with_bytes(TRUST_KEY_BASE + slot as u8, |der| {
+            if der.is_empty() {
+                return Ok(None);
+            }
+            let key = gateway_core::tls_pin::public_key(der).ok_or(())?;
+            Ok(Some(crate::tls::fingerprint(key.info)))
+        })
+        .await
+        .unwrap_or(Ok(None))
+}
+
 /// Pins `certificate` (DER) for broker `slot`; an empty slice forgets the
 /// pinned one.
 pub async fn set_pinned_certificate(slot: usize, certificate: &[u8]) -> Result<(), ()> {

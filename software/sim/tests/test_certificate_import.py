@@ -58,6 +58,12 @@ def test_trust_bundle_import(api, identity):
         installed = tls_status(api)["trust_anchor"]
         assert installed["count"] == len(certs)
         assert installed["fingerprint_sha256"] == hashlib.sha256(certs[0]).hexdigest()
+    # A full workspace accepts a PEM with trailing whitespace. An oversized
+    # upload must release the workspace before serializing its JSON error.
+    full = pem.ljust(10 * 1024, b"\n")
+    assert api("PUT", path, full)[0] == 204
+    status, error = api("PUT", path, full + b"\n")
+    assert status == 413 and error["error"] == "bad_size"
     assert api("PUT", path, certs[0] + bytes.fromhex("3000"))[0] == 422
     assert api("PUT", path, bundle + certs[0])[0] == 422
     assert tls_status(api)["trust_anchor"] == installed

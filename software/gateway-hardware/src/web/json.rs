@@ -11,25 +11,22 @@
 //! buffer per response would live in the web tasks' futures, once per task.
 
 use super::error::ApiError;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::{Mutex, MutexGuard};
+use crate::https;
 use picoserve::response::{Body, Content, HeadersIter, Response, StatusCode};
 use serde::Serialize;
 
 /// The largest response body.
 const SIZE: usize = 3072;
 
-static BUFFER: Mutex<CriticalSectionRawMutex, [u8; SIZE]> = Mutex::new([0; SIZE]);
-
 /// The right to render one response. Hold it only for as long as needed:
 /// the other web tasks wait for it. Take it *before* locking anything else
 /// that others wait for (the device table), so that those aren't held up
 /// by the wait.
-pub struct JsonBuffer(MutexGuard<'static, CriticalSectionRawMutex, [u8; SIZE]>);
+pub struct JsonBuffer(https::Scratch);
 
 /// Waits for the buffer.
 pub async fn acquire() -> JsonBuffer {
-    JsonBuffer(BUFFER.lock().await)
+    JsonBuffer(https::scratch().await)
 }
 
 /// A rendered JSON document; holds the buffer until it is sent.
@@ -56,7 +53,7 @@ impl JsonBuffer {
     /// `value` rendered, as a body that doesn't borrow it (for a value that
     /// borrows locals of the handler).
     pub fn rendered(mut self, value: &impl Serialize) -> Result<JsonBody, ApiError> {
-        let len = serde_json_core::to_slice(value, &mut self.0[..]).map_err(|_| {
+        let len = serde_json_core::to_slice(value, &mut self.0[..SIZE]).map_err(|_| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "response_too_large",
@@ -72,7 +69,7 @@ impl JsonBuffer {
         status: StatusCode,
         value: &impl Serialize,
     ) -> Result<Response<impl HeadersIter, impl Body>, ApiError> {
-        let len = serde_json_core::to_slice(value, &mut self.0[..]).map_err(|_| {
+        let len = serde_json_core::to_slice(value, &mut self.0[..SIZE]).map_err(|_| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "response_too_large",

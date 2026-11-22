@@ -29,16 +29,18 @@ Both HTTPS OTA scenarios completed their bad-CRC checks and the subsequent versi
 | HTTPS TCP RX / TX, five listeners | One pair in each ROM boot area, three in upper SRAM1 | 5 × 2,560 |
 | MQTT application publication queue, primary broker | SRAM2 | 4,896 |
 | Gateway OTA partial-sector scratch | Upper SRAM1 | 4,096 |
-| MbedTLS allocator for HTTPS, EST and certificate parsing | Upper SRAM1 | 49,152 |
+| Shared certificate, JSON, firmware upload and NTS-KE workspace | Upper SRAM1 | 14,336 |
+| Installed trust anchors, shared across verified clients | SRAM2 | 6,144 DER payload |
+| MbedTLS allocator for HTTPS, EST and certificate parsing | Upper SRAM1 | 53,248 |
 | DHCPv6 client, UDP packet metadata and buffers, outgoing message | Upper SRAM1 | 2,664 |
-| General allocator, including Rust RSA and request futures | Upper SRAM1 | 31,744 |
-| MQTT pinned certificate capture, including lock | RTC FAST | 2,068 |
+| General allocator, including Rust RSA and request futures | Upper SRAM1 | 16,384 |
+| Certificate status or MQTT certificate capture | RTC FAST | One shared slot |
 
 The secondary broker subscribes, accepts commands and sends MQTT protocol acknowledgements. Application publications go to the primary broker. Removing the secondary queue saves 4,896 B. The two MQTT TCP window pairs save 3,072 B and the five HTTPS pairs save another 2,560 B. Together these remove **10,528 B of application storage**. Both MQTT sessions keep their own TLS records and a 2,048 B maximum MQTT packet. Moving the five HTTPS listeners into static storage also removes their lifetime heap allocations.
 
 Aligned, complete OTA sectors use the incoming chunk directly through the flash driver's 512 B DRAM bounce buffer. Partial sectors preserve adjacent data in one static 4 KiB workspace, including writes to boot metadata. NTS key exchange borrows the HTTPS buffers for TCP, its outgoing TLS records and its response. EST borrows them as its TCP buffers. The Home Assistant task streams one device or sensor at a time and releases its locks before publishing. The queue takes ownership of the discovery payload.
 
-The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 80,896 B combined, 15,360 B less than the earlier general heap. Pool and general-heap peaks can occur at different times. RTC FAST has 296 B free and the node log occupies RTC SLOW.
+The TLS pool is installed before the first MbedTLS allocation. Each allocation has 16-byte alignment, zeroed payload and an independent lifetime. `GET /api/v1/system` and memory profiles expose its capacity, usage, peak and failure count separately from the general heap. The two pools reserve 69,632 B combined. Pool and general-heap peaks can occur at different times. RTC FAST has 2,344 B free and the node log occupies RTC SLOW.
 
 ### DHCPv6 workspace
 
@@ -68,7 +70,7 @@ When the gateway starts or an edit changes its configuration, the automation tas
 | Untouched stack immediately after saving a button, profiled build | 9,364 | 10,788 |
 | Untouched stack after the full edit sequence, profiled build | 9,156 | 10,372–10,580 |
 
-Both builds ran the same QEMU `idle` and `https-automation` workloads twice. The 1,424 B reduction in static SRAM2 gives the main stack 1,424 B more headroom. The general heap still reserves 31 KiB in SRAM1. The reload no longer allocates a snapshot from it.
+Both builds at this step ran the same QEMU `idle` and `https-automation` workloads twice. The 1,424 B reduction in static SRAM2 gives the main stack 1,424 B more headroom. The general heap still reserves 31 KiB in SRAM1. The reload no longer allocates a snapshot from it.
 
 ### SNTP and DNS
 
@@ -116,6 +118,36 @@ ELF uses 145,540 B of static SRAM2 and leaves 51,068 B for the stack on
 both builds. The flash image shrinks by 348 B. A production QEMU run left
 11,292 B of stack untouched immediately after saving an automation button
 and 11,084 B after the edit sequence on both builds.
+
+### Shared certificate storage and the TLS pool
+
+Certificate uploads, JSON serialization, EST requests and replies, NTS key exchange and firmware uploads borrow the same 14 KiB buffer in upper SRAM1. Each user retains its own protocol limit. A certificate upload accepts up to 10 KiB and can decode an identity key beside the request. The key buffer is wiped when its guard drops. Firmware uploads release the workspace between chunks. The OTA flash writer still needs its separate 4 KiB buffer for partial sectors.
+
+The gateway loads installed trust anchors once and shares them with each verified client for its handshake. The flash writer updates the cached copy after committing the new bundle. EST converts a chain to PEM in the workspace and omits installed duplicates of enabled built-in roots. A single certificate can go directly into MbedTLS as DER. Certificate status and MQTT capture take turns in RTC FAST.
+
+| Release reservation or image, bytes | Before (`2c6c1f4`) | After |
+|---|---:|---:|
+| General heap / dedicated TLS pool | 31,744 / 49,152 | 16,384 / 53,248 |
+| SRAM1 linked | 124,008 | 127,080 |
+| SRAM2 statics | 145,540 | 143,892 |
+| RTC FAST / SLOW | 7,896 / 8,192 | 5,848 / 8,192 |
+| Main stack budget | 51,068 | 52,716 |
+| Flash image | 2,905,833 | 2,906,593 |
+
+The combined allocator reservations shrink by 11,264 B. Counting the new static workspaces across SRAM1, SRAM2 and RTC gives a net saving of 624 B. IRAM is unchanged. The production QEMU test left 11,292 → 12,940 B of stack untouched immediately after an automation button save and 11,084 → 12,732 B after the edit sequence.
+
+| QEMU workload | General heap peak before (B) | After (B) |
+|---|---:|---:|
+| Six-CA import, including status and error handling | 24,016 | 11,512 |
+| EST identity import, including status and error handling | 21,232 | 11,512 |
+| HTTPS certificate rotation | 18,724 | 11,512 |
+| HTTPS automation edits | 8,368 | 8,360 |
+| Two CA-verified Mosquitto brokers, CA replacement and concurrent HTTPS status | 30,600 | 11,512 |
+| NTS authenticated time exchange, before requesting certificate details | 18,104 | 9,212 |
+
+The first four workloads ran twice per build on fresh installations. For the larger EST case, the baseline reset while requesting 22,528 B to assemble the trust list. With fixed storage, enrollment and renewal succeeded with built-in and installed roots, the client identity and its intermediate certificate. The dedicated TLS pool peaked at 50,712 B. A 48 KiB pool exhausted its capacity in this workload.
+
+The general heap still serves Picoserve request futures, temporary certificate and CSR data, Rust RSA verification and the NTS task's UDP buffers. Steady idle reaches zero live bytes. Removing the allocator requires fixed storage or allocation-free implementations for these active paths as well.
 
 ### Earlier MQTT and HTTPS measurements
 
@@ -238,8 +270,8 @@ In this earlier experiment, shrinking the HTTPS RX windows without moving the bu
 
 1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
 2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
-3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. The plain SNTP request and shared DNS resolver are heapless. Variable-length credential data, NTS records and some request futures still use the general heap.
-4. **Crypto allocator.** MbedTLS runs in a dedicated 48 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
+3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. The plain SNTP request and shared DNS resolver are heapless. The installed root list and certificate inspection now have static storage. Temporary credentials, NTS UDP buffers and some request futures still use the general heap.
+4. **Crypto allocator.** MbedTLS runs in a dedicated 52 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
 5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 
 ### Reproducing the sizes

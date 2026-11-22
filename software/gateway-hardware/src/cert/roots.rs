@@ -6,7 +6,8 @@
 
 use super::store;
 use crate::config::config;
-use alloc::vec::Vec;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::rwlock::{RwLock, RwLockReadGuard};
 use gateway_core::x509::cert::split_concatenated;
 
 /// A root certificate compiled into the firmware.
@@ -48,18 +49,43 @@ pub async fn built_in_enabled() -> bool {
         .unwrap_or(true)
 }
 
-/// The CA certificates trusted right now, read once for one check.
+/// Uploaded DER is shared by the two MQTT handshakes, NTS and EST.
+struct Installed {
+    bytes: [u8; store::TRUST_ANCHOR.capacity()],
+    len: usize,
+}
+
+static INSTALLED: RwLock<CriticalSectionRawMutex, Installed> = RwLock::new(Installed {
+    bytes: [0; store::TRUST_ANCHOR.capacity()],
+    len: 0,
+});
+
+pub(super) async fn init() {
+    let mut installed = INSTALLED.write().await;
+    installed.len = store::TRUST_ANCHOR
+        .read_into(&mut installed.bytes)
+        .await
+        .map_or(0, |der| der.len());
+}
+
+pub(super) async fn replace(der: &[u8]) -> Result<(), ()> {
+    let mut installed = INSTALLED.write().await;
+    store::TRUST_ANCHOR.write(der).await?;
+    installed.bytes[..der.len()].copy_from_slice(der);
+    installed.len = der.len();
+    Ok(())
+}
+
 pub struct Trusted {
     built_in: bool,
-    /// Concatenated DER, as stored.
-    installed: Option<Vec<u8>>,
+    installed: RwLockReadGuard<'static, CriticalSectionRawMutex, Installed>,
 }
 
 impl Trusted {
     pub async fn load() -> Self {
         Self {
             built_in: built_in_enabled().await,
-            installed: store::TRUST_ANCHOR.read().await,
+            installed: INSTALLED.read().await,
         }
     }
 
@@ -69,11 +95,8 @@ impl Trusted {
             .iter()
             .filter(|_| self.built_in)
             .map(|root| root.der);
-        let installed = self
-            .installed
-            .as_deref()
-            .into_iter()
-            .flat_map(split_concatenated);
+        let installed = split_concatenated(&self.installed.bytes[..self.installed.len])
+            .filter(|der| !self.built_in || !BUILT_IN.iter().any(|root| root.der == *der));
         built_in.chain(installed)
     }
 

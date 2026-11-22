@@ -36,6 +36,7 @@ embassy-futures = { version = "0.1" }
 embassy-embedded-hal = { version = "0.6" }
 esp-rtos = { version = "0.4", features = ["esp32", "embassy"] }
 embedded-can = { version = "0.4" }
+embedded-io = "0.7"
 embedded-io-async = { version = "0.7" }
 embedded-storage = { version = "0.3" }
 static_cell = { version = "2.1", features = ["nightly"] }

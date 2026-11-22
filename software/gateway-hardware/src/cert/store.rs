@@ -64,6 +64,17 @@ impl Blob {
 
     /// The stored bytes, or `None` if nothing is stored.
     pub async fn read(&self) -> Option<Vec<u8>> {
+        self.read_with(|len| Some(alloc::vec![0u8; len])).await
+    }
+
+    pub async fn read_into<'a>(&self, buffer: &'a mut [u8]) -> Option<&'a mut [u8]> {
+        self.read_with(|len| buffer.get_mut(..len)).await
+    }
+
+    async fn read_with<T: AsMut<[u8]>>(
+        &self,
+        buffer: impl FnOnce(usize) -> Option<T>,
+    ) -> Option<T> {
         let mut store = config().await;
         let pointer = store.get_u32(self.pointer).await.unwrap_or(0);
         let len = (pointer & 0xFF_FFFF) as usize;
@@ -71,8 +82,8 @@ impl Blob {
             return None;
         }
         let first = self.slots[usize::from(pointer & SLOT_B != 0)];
-        let mut data = alloc::vec![0u8; len];
-        for (i, chunk) in data.chunks_mut(CHUNK).enumerate() {
+        let mut data = buffer(len)?;
+        for (i, chunk) in data.as_mut().chunks_mut(CHUNK).enumerate() {
             let n = store.read_bytes(first + i as u8, chunk).await?;
             if n != chunk.len() {
                 return None;

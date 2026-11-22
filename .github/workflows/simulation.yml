@@ -94,11 +94,17 @@ jobs:
         working-directory: software/sim
         env:
           EVENT: ${{ github.event_name }}
+          SIM_SNTP_PORT: 19123
         run: |
+          # QEMU maps 10.0.2.2 to host loopback. Keep the EST time peer unprivileged.
+          rule=(-o lo -d 127.0.0.1 -p udp --dport 123 -m owner --uid-owner "$(id -u)"
+                -j REDIRECT --to-ports "$SIM_SNTP_PORT")
+          sudo iptables -t nat -A OUTPUT "${rule[@]}"
+          trap 'sudo iptables -t nat -D OUTPUT "${rule[@]}"' EXIT
           args=(--ota-images "$RUNNER_TEMP/ota-images" --runs 2)
           if [[ "$EVENT" == pull_request ]]; then
             args=(--runs 1 --scenario can-mqtt --scenario dual-mqtt-tls --scenario https-automation
-                  --scenario sntp-dns --scenario https-trust-import --scenario https-identity-import)
+                  --scenario sntp-dns --scenario https-trust-import --scenario https-identity-import --scenario mqtt-pinned --scenario https-est)
           fi
           python memory_profile.py qemu --qemu-revision "$QEMU_REVISION" \
             --output "$GITHUB_WORKSPACE/profile-results" "${args[@]}"

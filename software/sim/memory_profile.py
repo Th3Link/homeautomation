@@ -38,10 +38,12 @@ SCENARIOS = {
     "dual-mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
     "https-trust-import": ("idle.toml", "test_certificate_import.py::test_trust_bundle_import"),
     "https-identity-import": ("idle.toml", "test_certificate_import.py::test_est_identity_import"),
+    "https-est": ("idle.toml", "test_est.py::test_est_with_installed_and_builtin_roots"),
     "https-cert-rotation": ("idle.toml", "test_tls_memory.py::test_replace_active_certificate"),
     "https-automation": ("sim.toml", "test_web.py"),
     "gateway-ota": ("ota.toml", "test_firmware_update.py::test_gateway_update_rejects_bad_crc_then_preserves_config"),
     "can-ota": ("ota.toml", "test_firmware_update.py::test_addressed_node_update_rejects_bad_crc_and_leaves_peer_unchanged"),
+    "mqtt-pinned": ("idle.toml", "test_mqtt.py::test_pinned_broker_renewal"),
     "mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_mqtt_commands_and_state_on_two_can_buses"),
     "combined": ("mqtt.toml", "test_mqtt.py::test_active_nodes_with_https_and_mqtt"),
 }

@@ -9,7 +9,7 @@ use core::ptr::{null_mut, NonNull};
 use critical_section::Mutex;
 use linked_list_allocator::Heap;
 
-pub const SIZE: usize = 48 * 1024;
+pub const SIZE: usize = 52 * 1024;
 // Reserve an aligned header before each C allocation to recover its layout in free.
 const ALIGN: usize = 16;
 

@@ -20,14 +20,13 @@ mod store;
 use crate::config::{config, LoadOrInit};
 use crate::console_log;
 use crate::wall_clock;
-use alloc::boxed::Box;
 use alloc::string::String as HeapString;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 use core::ops::Range;
 use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
+use embassy_sync::mutex::{MappedMutexGuard, Mutex, MutexGuard};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use gateway_core::est::Operation;
@@ -39,7 +38,10 @@ use gateway_core::x509::{pkcs7, time};
 use heapless::String;
 
 pub use est::EstError;
-pub use key::wipe;
+pub use key::{wipe, Sensitive};
+
+/// One config item holds the DER private key for an EST client identity.
+pub const IDENTITY_KEY_CAP: usize = 2048;
 
 /// How the certificate is obtained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -505,10 +507,7 @@ async fn csr_der(fqdn: &str) -> Result<Vec<u8>, CertError> {
 /// empty data removes it.
 pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
     if data.is_empty() {
-        store::TRUST_ANCHOR
-            .write(&[])
-            .await
-            .map_err(|_| CertError::Storage)?;
+        roots::replace(&[]).await.map_err(|_| CertError::Storage)?;
         crate::mqtt::reconnect_all();
         return Ok(());
     }
@@ -516,10 +515,7 @@ pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
     if all.len() > store::TRUST_ANCHOR.capacity() {
         return Err(CertError::Rejected(Problem::TooLong));
     }
-    store::TRUST_ANCHOR
-        .write(all)
-        .await
-        .map_err(|_| CertError::Storage)?;
+    roots::replace(all).await.map_err(|_| CertError::Storage)?;
     // EST and the brokers may have been waiting for exactly this: try again
     // now.
     let mut est = EST.lock().await;
@@ -533,7 +529,7 @@ pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
 
 /// Installs the EST device identity: its certificate (chain) and private key,
 /// both PEM in `data`. Empty data removes it. The key can't be read back.
-pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
+pub async fn set_est_identity(data: &mut [u8], key_buf: &mut [u8]) -> Result<(), CertError> {
     if data.is_empty() {
         store::IDENTITY
             .write(&[])
@@ -546,36 +542,26 @@ pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
             .map_err(|_| CertError::Storage);
     }
     // The key first: decoding the certificates overwrites `data`.
-    let mut key_der = {
+    let key_buf = Sensitive(key_buf);
+    let key_len = {
         let text = core::str::from_utf8(data).map_err(|_| CertError::BadInput)?;
         let (_, body) = pem::blocks(text)
             .find(|(label, _)| label.ends_with("PRIVATE KEY"))
             .ok_or(CertError::BadInput)?;
-        let mut der = Vec::new();
-        der.try_reserve_exact(body.len() * 3 / 4 + 3)
-            .map_err(|_| CertError::NoMemory)?;
-        der.resize(body.len() * 3 / 4 + 3, 0);
-        let len = pem::decode(body.as_bytes(), &mut der).map_err(|_| CertError::BadInput)?;
-        der.truncate(len);
-        der
+        pem::decode(body.as_bytes(), key_buf.0).map_err(|_| CertError::BadInput)?
     };
-    let chain = match uploaded_chain(data) {
-        Ok(chain) => chain,
-        Err(e) => {
-            key::wipe(&mut key_der);
-            return Err(e);
-        }
-    };
+    let key_der = &key_buf.0[..key_len];
+    let chain = uploaded_chain(data)?;
     // MbedTLS must be able to use it.
-    let usable = mbedtls_rs::PrivateKey::new(mbedtls_rs::X509::DER(&key_der), None).is_ok();
-    let result = if !usable || key_der.len() > 2048 {
+    let usable = mbedtls_rs::PrivateKey::new(mbedtls_rs::X509::DER(key_der), None).is_ok();
+    if !usable || key_der.len() > IDENTITY_KEY_CAP {
         Err(CertError::BadInput)
     } else if chain.len() > store::IDENTITY.capacity() {
         Err(CertError::Rejected(Problem::TooLong))
     } else {
         let stored = config()
             .await
-            .set_bytes(store::IDENTITY_KEY, &key_der)
+            .set_bytes(store::IDENTITY_KEY, key_der)
             .await
             .map_err(|_| CertError::Storage);
         match stored {
@@ -585,9 +571,7 @@ pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
                 .map_err(|_| CertError::Storage),
             Err(e) => Err(e),
         }
-    };
-    key::wipe(&mut key_der);
-    result
+    }
 }
 
 /// Asks for an EST enrollment now (in EST mode).
@@ -645,63 +629,95 @@ fn info(cert: &Certificate<'_>) -> CertInfo {
     }
 }
 
-/// The certificate manager's state, for the UI.
-#[derive(Debug, Clone)]
-pub struct Status {
-    pub settings: Settings,
-    pub effective_fqdn: String<FQDN_CAP>,
-    pub time_known: bool,
+/// The console and web UI take turns inspecting the three certificates.
+#[derive(Default)]
+pub struct CertificateDetails {
     pub certificate: Option<(CertInfo, check::Status, Origin)>,
     pub chain_length: usize,
     pub trust_anchor: Option<CertInfo>,
     pub trust_anchor_count: usize,
     pub est_identity: Option<CertInfo>,
+}
+
+// The TLS status page and explicit MQTT pin capture inspect certificates in
+// this one RTC FAST slot. Other HTTPS requests and both MQTT sessions can run.
+#[allow(clippy::large_enum_variant)]
+enum Inspection {
+    Details(CertificateDetails),
+    Capture(heapless::Vec<u8, { crate::tls::CERT_CAP }>),
+}
+
+#[esp_hal::ram(unstable(rtc_fast))]
+static INSPECTION: Mutex<CriticalSectionRawMutex, Inspection> =
+    Mutex::new(Inspection::Capture(heapless::Vec::new()));
+
+pub(crate) async fn capture_buffer(
+) -> MappedMutexGuard<'static, CriticalSectionRawMutex, heapless::Vec<u8, { crate::tls::CERT_CAP }>>
+{
+    MutexGuard::map(INSPECTION.lock().await, |slot| {
+        *slot = Inspection::Capture(heapless::Vec::new());
+        match slot {
+            Inspection::Capture(buf) => buf,
+            Inspection::Details(_) => unreachable!(),
+        }
+    })
+}
+
+pub struct Status {
+    pub settings: Settings,
+    pub effective_fqdn: String<FQDN_CAP>,
+    pub time_known: bool,
+    pub details: MappedMutexGuard<'static, CriticalSectionRawMutex, CertificateDetails>,
     pub est: EstState,
-    /// The device key's `pin-sha256` (RFC 7469), what an EST server that
-    /// registers clients by key is told.
     pub key_pin: Option<[u8; 32]>,
 }
 
-/// The status, on the heap: it is ~5 KB, and a handler holding it by value
-/// makes every web request's future, and the main stack frames that build
-/// and poll those, that much larger (the router keeps room for its largest
-/// handler).
-pub async fn status() -> Box<Status> {
-    crate::heap::boxed(|| async {
+pub async fn status() -> Status {
+    // All status readers take the inspection slot before scratch. The web reader keeps
+    // that slot while it acquires scratch again to render the JSON response.
+    let mut details = MutexGuard::map(INSPECTION.lock().await, |slot| {
+        if let Inspection::Capture(_) = slot {
+            *slot = Inspection::Details(CertificateDetails::default());
+        }
+        match slot {
+            Inspection::Details(details) => details,
+            Inspection::Capture(_) => unreachable!(),
+        }
+    });
+    crate::heap::boxed(|| async move {
+        let mut scratch = crate::https::scratch().await;
         let settings = settings().await;
         let fqdn = effective_fqdn().await;
         let clock = wall_clock::clock();
-
         let origin = Origin::from_u8(config().await.get_u8(store::ORIGIN).await.unwrap_or(0));
-        let est = EST.lock().await.clone();
-        let mut status = Box::new(Status {
+
+        let chain = store::CERTIFICATE.read_into(&mut scratch[..]).await;
+        details.certificate = chain
+            .as_deref()
+            .and_then(check::stored_leaf)
+            .map(|leaf| (info(&leaf), check::status(&leaf, &fqdn, clock), origin));
+        details.chain_length = chain.map_or(0, |chain| split_concatenated(chain).count());
+        let anchors = store::TRUST_ANCHOR.read_into(&mut scratch[..]).await;
+        details.trust_anchor = anchors
+            .as_deref()
+            .and_then(check::stored_leaf)
+            .map(|c| info(&c));
+        details.trust_anchor_count =
+            anchors.map_or(0, |anchors| split_concatenated(anchors).count());
+        details.est_identity = store::IDENTITY
+            .read_into(&mut scratch[..])
+            .await
+            .as_deref()
+            .and_then(check::stored_leaf)
+            .map(|c| info(&c));
+        Status {
             settings,
             effective_fqdn: fqdn,
             time_known: clock.known().is_some(),
-            certificate: None,
-            chain_length: 0,
-            trust_anchor: None,
-            trust_anchor_count: 0,
-            est_identity: None,
-            est,
+            details,
+            est: EST.lock().await.clone(),
             key_pin: key_pin().await,
-        });
-
-        if let Some(chain) = store::CERTIFICATE.read().await {
-            status.certificate = check::stored_leaf(&chain).map(|leaf| {
-                let state = check::status(&leaf, &status.effective_fqdn, clock);
-                (info(&leaf), state, origin)
-            });
-            status.chain_length = split_concatenated(&chain).count();
         }
-        if let Some(anchors) = store::TRUST_ANCHOR.read().await {
-            status.trust_anchor = check::stored_leaf(&anchors).map(|c| info(&c));
-            status.trust_anchor_count = split_concatenated(&anchors).count();
-        }
-        if let Some(identity) = store::IDENTITY.read().await {
-            status.est_identity = check::stored_leaf(&identity).map(|c| info(&c));
-        }
-        status
     })
     .await
 }
@@ -719,9 +735,7 @@ pub async fn key_pin() -> Option<[u8; 32]> {
 /// What the web server presents: the active chain and the device key, as
 /// MbedTLS objects.
 pub async fn server_credentials() -> Option<mbedtls_rs::Credentials<'static>> {
-    let chain = store::CERTIFICATE.read().await?;
-    let certificate = mbedtls_certificate(&chain)?;
-    drop(chain);
+    let certificate = stored_certificate(&store::CERTIFICATE).await?;
     let private_key = key::mbedtls_key().await?;
     Some(mbedtls_rs::Credentials {
         certificate,
@@ -729,13 +743,27 @@ pub async fn server_credentials() -> Option<mbedtls_rs::Credentials<'static>> {
     })
 }
 
-/// Concatenated DER certificates as one MbedTLS certificate chain (MbedTLS
-/// reads a chain in one go only from PEM).
-fn mbedtls_certificate(chain: &[u8]) -> Option<mbedtls_rs::Certificate<'static>> {
-    let mut text = HeapString::new();
-    for der in split_concatenated(chain) {
+async fn stored_certificate(blob: &store::Blob) -> Option<mbedtls_rs::Certificate<'static>> {
+    let mut scratch = crate::https::scratch().await;
+    let chain = blob.read().await?;
+    mbedtls_certificate(split_concatenated(&chain), &mut scratch[..])
+}
+
+/// MbedTLS accepts a single DER certificate or a PEM list. It copies the
+/// certificates into its own pool before the workspace is released.
+fn mbedtls_certificate<'a>(
+    mut certs: impl Iterator<Item = &'a [u8]>,
+    buffer: &mut [u8],
+) -> Option<mbedtls_rs::Certificate<'static>> {
+    use embedded_io::Write as _;
+    let first = certs.next()?;
+    let Some(second) = certs.next() else {
+        return mbedtls_rs::Certificate::new(mbedtls_rs::X509::DER(first)).ok();
+    };
+    let mut out = &mut *buffer;
+    for der in [first, second].into_iter().chain(certs) {
         write!(
-            text,
+            out,
             "{}",
             Pem {
                 label: "CERTIFICATE",
@@ -744,14 +772,16 @@ fn mbedtls_certificate(chain: &[u8]) -> Option<mbedtls_rs::Certificate<'static>>
         )
         .ok()?;
     }
-    text.push('\0');
-    let text = core::ffi::CStr::from_bytes_with_nul(text.as_bytes()).ok()?;
-    mbedtls_rs::Certificate::new(mbedtls_rs::X509::PEM(text)).ok()
+    out.write_all(&[0]).ok()?;
+    let remaining = out.len();
+    let pem = core::ffi::CStr::from_bytes_with_nul(&buffer[..buffer.len() - remaining]).ok()?;
+    mbedtls_rs::Certificate::new(mbedtls_rs::X509::PEM(pem)).ok()
 }
 
 /// Makes sure there is a key and a usable certificate; at boot, before the
 /// web server starts.
 pub async fn init() {
+    roots::init().await;
     if key::ensure().await.is_err() {
         console_log!("https: could not make the device key");
         return;
@@ -938,26 +968,16 @@ async fn enroll(
     operation: Operation,
     renewing: bool,
 ) -> Result<(), EnrollError> {
-    let anchors = roots::Trusted::load().await;
-    if anchors.is_empty() {
-        return Err(EnrollError::Cert(CertError::NoTrustAnchor));
-    }
-    let mut trust = HeapString::new();
-    for der in anchors.iter() {
-        write!(
-            trust,
-            "{}",
-            Pem {
-                label: "CERTIFICATE",
-                der
-            }
-        )
-        .map_err(|_| EnrollError::Cert(CertError::NoMemory))?;
-    }
-    trust.push('\0');
-    drop(anchors);
-    let trust = core::ffi::CStr::from_bytes_with_nul(trust.as_bytes())
-        .map_err(|_| EnrollError::Cert(CertError::NoMemory))?;
+    let mut slot = crate::https::slot().await;
+    let trust = {
+        let mut scratch = crate::https::scratch().await;
+        let anchors = roots::Trusted::load().await;
+        if anchors.is_empty() {
+            return Err(EnrollError::Cert(CertError::NoTrustAnchor));
+        }
+        mbedtls_certificate(anchors.iter(), &mut scratch[..])
+            .ok_or(EnrollError::Est(EstError::Tls))?
+    };
 
     let csr = csr_der(fqdn).await.map_err(EnrollError::Cert)?;
 
@@ -969,11 +989,19 @@ async fn enroll(
         identity_credentials().await
     };
 
-    let mut slot = crate::https::slot().await;
-    let p7 = est::exchange(stack, url, operation, &csr, trust, client, &mut slot)
-        .await
-        .map_err(EnrollError::Est)?;
-    let certs = pkcs7::certificates(&p7).ok_or(EnrollError::Est(EstError::Malformed))?;
+    let mut scratch = crate::https::scratch().await;
+    let p7 = est::exchange(
+        stack,
+        url,
+        operation,
+        &csr,
+        est::Auth { trust, client },
+        &mut slot,
+        &mut scratch[..],
+    )
+    .await
+    .map_err(EnrollError::Est)?;
+    let certs = pkcs7::certificates(p7).ok_or(EnrollError::Est(EstError::Malformed))?;
     let chain = validated_chain(certs).await.map_err(EnrollError::Cert)?;
     activate(&chain, Origin::Est)
         .await
@@ -986,17 +1014,17 @@ async fn enroll(
 }
 
 async fn identity_credentials() -> Option<mbedtls_rs::Credentials<'static>> {
-    let chain = store::IDENTITY.read().await?;
-    let certificate = mbedtls_certificate(&chain)?;
-    let mut der = alloc::vec![0u8; 2048];
+    let certificate = stored_certificate(&store::IDENTITY).await?;
+    let mut scratch = crate::https::scratch().await;
+    let der = Sensitive(&mut scratch[..IDENTITY_KEY_CAP]);
     let len = config()
         .await
-        .read_bytes(store::IDENTITY_KEY, &mut der)
+        .read_bytes(store::IDENTITY_KEY, der.0)
         .await
         .filter(|n| *n > 0);
-    let key = len
-        .and_then(|len| mbedtls_rs::PrivateKey::new(mbedtls_rs::X509::DER(&der[..len]), None).ok());
-    key::wipe(&mut der);
+    let key = len.and_then(|len| {
+        mbedtls_rs::PrivateKey::new(mbedtls_rs::X509::DER(&der.0[..len]), None).ok()
+    });
     Some(mbedtls_rs::Credentials {
         certificate,
         private_key: key?,

@@ -27,6 +27,15 @@ impl Drop for Scalar {
     }
 }
 
+/// Wipes borrowed storage on success, error or cancellation.
+pub struct Sensitive<'a>(pub &'a mut [u8]);
+
+impl Drop for Sensitive<'_> {
+    fn drop(&mut self) {
+        wipe(self.0);
+    }
+}
+
 /// Overwrites key material so it doesn't linger in RAM.
 pub fn wipe(bytes: &mut [u8]) {
     for byte in bytes.iter_mut() {

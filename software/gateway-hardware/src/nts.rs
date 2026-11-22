@@ -187,10 +187,6 @@ async fn key_exchange(
     host: &str,
     port: u16,
 ) -> Result<Association, &'static str> {
-    let roots = Trusted::load().await;
-    if roots.is_empty() {
-        return Err("no trusted certificate authority to check the server against");
-    }
     let addresses = crate::resolve::resolve(stack, host).await;
     if addresses.is_empty() {
         return Err("cannot resolve the name");
@@ -200,6 +196,10 @@ async fn key_exchange(
     // reuse its HTTP buffers for TCP, outgoing records and the KE response.
     // Acquire the slot before connecting because the server handshake is timed.
     let mut slot = crate::https::slot().await;
+    let roots = Trusted::load().await;
+    if roots.is_empty() {
+        return Err("no trusted certificate authority to check the server against");
+    }
     let crate::https::Buffers { http, out } = &mut *slot;
     let (rx, write_record) = http.split_at_mut(1024);
     let (tx, answer) = out.split_at_mut(512);
@@ -232,7 +232,8 @@ async fn handshake(
     write_record: &mut [u8],
     answer: &mut [u8],
 ) -> Result<Association, &'static str> {
-    let mut read_record = alloc::vec![0u8; tls::READ_RECORD_BYTES];
+    let mut scratch = crate::https::scratch().await;
+    let read_record = &mut scratch[..tls::READ_RECORD_BYTES];
 
     // The chain is checked once the server has answered: chrony gives the
     // whole session 2 s, the check alone takes over one. Until then
@@ -245,7 +246,7 @@ async fn handshake(
     const ALPN: &[&[u8]] = &[nts::ALPN];
     let opened = with_timeout(
         KE_TIMEOUT,
-        tls::open_with_alpn(socket, &mut read_record, write_record, trust, ALPN),
+        tls::open_with_alpn(socket, read_record, write_record, trust, ALPN),
     )
     .await;
     let mut connection = match opened {

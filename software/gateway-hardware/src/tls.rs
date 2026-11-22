@@ -91,8 +91,8 @@ pub type Connection<'a> = TlsConnection<'a, TcpSocket<'a>, Aes128GcmSha256>;
 
 /// What the server's certificate has to satisfy.
 pub enum Trust<'a> {
-    /// It has to verify against exactly this pinned certificate (DER).
-    Pinned(&'a [u8]),
+    /// The SHA-256 digest of the pinned SubjectPublicKeyInfo.
+    Pinned(&'a [u8; 32]),
     /// Its chain has to lead to one of `roots`, name `host` and be valid
     /// by `dates`; why it didn't is left in `problems` ([`ChainProblems`]).
     Authority {
@@ -334,8 +334,8 @@ const KEY_CAP: usize = 560;
 
 /// What the server's certificate is checked against.
 enum Check<'a> {
-    /// The pinned certificate (DER): the same public key.
-    Pinned(&'a [u8]),
+    /// SHA-256 of the entire pinned SubjectPublicKeyInfo.
+    Pinned(&'a [u8; 32]),
     /// The trusted CAs and the host name ([`verify_chain`]).
     Authority {
         roots: &'a Trusted,
@@ -384,8 +384,7 @@ impl TlsVerifier<Aes128GcmSha256> for KeyVerifier<'_> {
         let presented = tls_pin::public_key(leaf).ok_or(TlsError::InvalidCertificate)?;
         match &mut self.check {
             Check::Pinned(pinned) => {
-                let pinned = tls_pin::public_key(pinned).ok_or(TlsError::InvalidCertificate)?;
-                if presented.info != pinned.info {
+                if fingerprint(presented.info) != **pinned {
                     return Err(TlsError::InvalidCertificate);
                 }
             }

@@ -4,13 +4,11 @@
 //! there is no switch to turn that off.
 
 use crate::https::{self, TcpStream};
-use alloc::string::String;
-use alloc::vec::Vec;
 use core::ffi::CStr;
-use core::fmt::Write as _;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration};
+use embedded_io::Write as _;
 use embedded_io_async::Write as _;
 use gateway_core::est::{self, Answer, Operation, RequestHead};
 use gateway_core::x509::pem::{self, Base64};
@@ -18,6 +16,7 @@ use mbedtls_rs::{AuthMode, ClientSessionConfig, Credentials, Session, SessionCon
 
 /// The largest response read (a PKCS#7 with a long chain, in base64).
 const RESPONSE_MAX: usize = 12 * 1024;
+const _: () = assert!(RESPONSE_MAX < https::SCRATCH_SIZE);
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Why an EST exchange failed; `code` is what the API shows.
@@ -55,30 +54,33 @@ impl EstError {
     }
 }
 
+pub struct Auth {
+    pub trust: mbedtls_rs::Certificate<'static>,
+    pub client: Option<Credentials<'static>>,
+}
+
 /// Sends `csr` (DER) to the EST server at `url` and returns the PKCS#7
-/// (DER) it issued. `trust` is the trust anchor as a NUL-terminated PEM;
-/// `client` the credentials to authenticate with, if any.
-pub async fn exchange(
+/// (DER) it issued in the supplied scratch buffer.
+pub async fn exchange<'a>(
     stack: Stack<'static>,
     url: &str,
     operation: Operation,
     csr: &[u8],
-    trust: &CStr,
-    client: Option<Credentials<'static>>,
+    auth: Auth,
     buffers: &mut https::Buffers,
-) -> Result<Vec<u8>, EstError> {
+    scratch: &'a mut [u8],
+) -> Result<&'a [u8], EstError> {
     let server = est::parse_url(url).ok_or(EstError::BadUrl)?;
     let tls = https::tls().ok_or(EstError::Tls)?;
-    let trust =
-        mbedtls_rs::Certificate::new(mbedtls_rs::X509::PEM(trust)).map_err(|_| EstError::Tls)?;
 
     let addresses = crate::resolve::resolve(stack, server.host).await;
     if addresses.is_empty() {
         return Err(EstError::Dns);
     }
 
-    let mut host = String::from(server.host);
-    host.push('\0');
+    let mut host = heapless::String::<{ super::URL_CAP + 1 }>::try_from(server.host)
+        .map_err(|_| EstError::BadUrl)?;
+    host.push('\0').map_err(|_| EstError::BadUrl)?;
     let host = CStr::from_bytes_with_nul(host.as_bytes()).map_err(|_| EstError::BadUrl)?;
 
     let mut socket = TcpSocket::new(stack, &mut buffers.http, &mut buffers.out);
@@ -90,8 +92,8 @@ pub async fn exchange(
     }
 
     let mut config = ClientSessionConfig::new();
-    config.ca_chain = Some(trust);
-    config.creds = client;
+    config.ca_chain = Some(auth.trust);
+    config.creds = auth.client;
     config.server_name = Some(host);
     config.auth_mode = AuthMode::Required;
     config.min_version = TlsVersion::Tls1_2;
@@ -100,7 +102,8 @@ pub async fn exchange(
     let result = {
         let mut session =
             Session::new(tls, TcpStream(&mut socket), &config).map_err(|_| EstError::Tls)?;
-        let result = with_timeout(TIMEOUT, talk(&mut session, server, operation, csr)).await;
+        let result =
+            with_timeout(TIMEOUT, talk(&mut session, server, operation, csr, scratch)).await;
         let _ = with_timeout(Duration::from_secs(2), session.close()).await;
         result.unwrap_or(Err(EstError::Timeout))
     };
@@ -110,72 +113,64 @@ pub async fn exchange(
     result
 }
 
-async fn talk<T>(
+async fn talk<'a, T>(
     session: &mut Session<'_, T>,
     server: est::Server<'_>,
     operation: Operation,
     csr: &[u8],
-) -> Result<Vec<u8>, EstError>
+    scratch: &'a mut [u8],
+) -> Result<&'a [u8], EstError>
 where
     T: embedded_io_async::Read + embedded_io_async::Write,
 {
     session.connect().await.map_err(|_| EstError::Tls)?;
 
-    let mut body = String::new();
+    let encoded = csr.len().div_ceil(3) * 4;
+    let body_len = encoded + encoded.saturating_sub(1) / 64;
+    let mut out = &mut *scratch;
     write!(
-        body,
-        "{}",
+        out,
+        "{}{}",
+        RequestHead {
+            server,
+            operation,
+            body_len
+        },
         Base64 {
             bytes: csr,
             line: 64
         }
     )
     .map_err(|_| EstError::NoMemory)?;
-    let mut request = String::new();
-    write!(
-        request,
-        "{}",
-        RequestHead {
-            server,
-            operation,
-            body_len: body.len(),
-        }
-    )
-    .map_err(|_| EstError::NoMemory)?;
-    request.push_str(&body);
+    let remaining = out.len();
     session
-        .write_all(request.as_bytes())
+        .write_all(&scratch[..scratch.len() - remaining])
         .await
         .map_err(|_| EstError::Connect)?;
     session.flush().await.map_err(|_| EstError::Connect)?;
-    drop(request);
-    drop(body);
 
-    // `Connection: close`: the answer ends where the server closes.
-    let mut response = Vec::new();
-    let mut chunk = [0u8; 512];
+    // Read one byte beyond the protocol limit so a full valid response can
+    // be distinguished from an oversized one without another receive buffer.
+    let response = &mut scratch[..=RESPONSE_MAX];
+    let mut len = 0;
     loop {
-        match session.read(&mut chunk).await {
+        match session.read(&mut response[len..]).await {
             Ok(0) => break,
             Ok(n) => {
-                if response.len() + n > RESPONSE_MAX {
+                len += n;
+                if len > RESPONSE_MAX {
                     return Err(EstError::Malformed);
                 }
-                response.extend_from_slice(&chunk[..n]);
             }
-            // Some servers end with a TCP close instead of close_notify.
-            Err(_) if !response.is_empty() => break,
+            Err(_) if len > 0 => break,
             Err(_) => return Err(EstError::Connect),
         }
     }
 
-    match est::parse_response(&mut response).map_err(|_| EstError::Malformed)? {
-        Answer::Issued(base64) => {
-            let mut der = alloc::vec![0u8; base64.len() * 3 / 4 + 3];
-            let len = pem::decode(base64, &mut der).map_err(|_| EstError::Malformed)?;
-            der.truncate(len);
-            Ok(der)
-        }
+    match est::parse_response(&mut response[..len]).map_err(|_| EstError::Malformed)? {
+        Answer::Issued(base64) => pem::decode_base64_in_place(base64)
+            .map(|der| &*der)
+            .map_err(|_| EstError::Malformed),
         Answer::Pending { retry_after } => Err(EstError::Pending(retry_after)),
         Answer::Refused { status } => Err(EstError::Refused(status)),
     }
