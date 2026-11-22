@@ -97,7 +97,8 @@ jobs:
         run: |
           args=(--ota-images "$RUNNER_TEMP/ota-images" --runs 2)
           if [[ "$EVENT" == pull_request ]]; then
-            args=(--scenario can-mqtt --scenario dual-mqtt-tls --scenario https-automation --scenario sntp-dns --runs 1)
+            args=(--runs 1 --scenario can-mqtt --scenario dual-mqtt-tls --scenario https-automation
+                  --scenario sntp-dns --scenario https-trust-import --scenario https-identity-import)
           fi
           python memory_profile.py qemu --qemu-revision "$QEMU_REVISION" \
             --output "$GITHUB_WORKSPACE/profile-results" "${args[@]}"

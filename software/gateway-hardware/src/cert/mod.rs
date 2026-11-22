@@ -421,6 +421,18 @@ fn decode_certificates(
     Ok(certs)
 }
 
+/// CA bundles and identity chains keep their input order. Both upload formats
+/// leave the decoded DER at the start of the caller's buffer.
+fn uploaded_chain(data: &mut [u8]) -> Result<&[u8], CertError> {
+    let certs = decode_certificates(data)?;
+    let mut end = 0;
+    for range in certs {
+        end = range.end;
+        Certificate::parse(&data[range]).ok_or(CertError::Rejected(Problem::Unparsable))?;
+    }
+    Ok(&data[..end])
+}
+
 /// `parts` one after the other, in a buffer allocated without panicking.
 fn concatenated<'a>(parts: impl Iterator<Item = &'a [u8]> + Clone) -> Result<Vec<u8>, CertError> {
     let mut out = Vec::new();
@@ -500,17 +512,12 @@ pub async fn set_trust_anchor(data: &mut [u8]) -> Result<(), CertError> {
         crate::mqtt::reconnect_all();
         return Ok(());
     }
-    let certs = decode_certificates(data)?;
-    let certs = certs.iter().map(|range| &data[range.clone()]);
-    for der in certs.clone() {
-        Certificate::parse(der).ok_or(CertError::Rejected(Problem::Unparsable))?;
-    }
-    let all = concatenated(certs)?;
+    let all = uploaded_chain(data)?;
     if all.len() > store::TRUST_ANCHOR.capacity() {
         return Err(CertError::Rejected(Problem::TooLong));
     }
     store::TRUST_ANCHOR
-        .write(&all)
+        .write(all)
         .await
         .map_err(|_| CertError::Storage)?;
     // EST and the brokers may have been waiting for exactly this: try again
@@ -552,13 +559,7 @@ pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
         der.truncate(len);
         der
     };
-    let chain = match decode_certificates(data).and_then(|certs| {
-        let certs = certs.iter().map(|range| &data[range.clone()]);
-        for der in certs.clone() {
-            Certificate::parse(der).ok_or(CertError::Rejected(Problem::Unparsable))?;
-        }
-        concatenated(certs)
-    }) {
+    let chain = match uploaded_chain(data) {
         Ok(chain) => chain,
         Err(e) => {
             key::wipe(&mut key_der);
@@ -579,7 +580,7 @@ pub async fn set_est_identity(data: &mut [u8]) -> Result<(), CertError> {
             .map_err(|_| CertError::Storage);
         match stored {
             Ok(()) => store::IDENTITY
-                .write(&chain)
+                .write(chain)
                 .await
                 .map_err(|_| CertError::Storage),
             Err(e) => Err(e),
@@ -671,42 +672,36 @@ pub async fn status() -> Box<Status> {
         let fqdn = effective_fqdn().await;
         let clock = wall_clock::clock();
 
-        let chain = store::CERTIFICATE.read().await;
         let origin = Origin::from_u8(config().await.get_u8(store::ORIGIN).await.unwrap_or(0));
-        let (certificate, chain_length) = match chain.as_deref() {
-            Some(chain) => (
-                check::stored_leaf(chain)
-                    .map(|leaf| (info(&leaf), check::status(&leaf, &fqdn, clock), origin)),
-                split_concatenated(chain).count(),
-            ),
-            None => (None, 0),
-        };
-        let anchors = store::TRUST_ANCHOR.read().await;
-        let (trust_anchor, trust_anchor_count) = match anchors.as_deref() {
-            Some(anchors) => (
-                check::stored_leaf(anchors).map(|c| info(&c)),
-                split_concatenated(anchors).count(),
-            ),
-            None => (None, 0),
-        };
-        let identity = store::IDENTITY.read().await;
-        let est_identity = identity
-            .as_deref()
-            .and_then(check::stored_leaf)
-            .map(|c| info(&c));
-
-        Box::new(Status {
+        let est = EST.lock().await.clone();
+        let mut status = Box::new(Status {
             settings,
             effective_fqdn: fqdn,
             time_known: clock.known().is_some(),
-            certificate,
-            chain_length,
-            trust_anchor,
-            trust_anchor_count,
-            est_identity,
-            est: EST.lock().await.clone(),
+            certificate: None,
+            chain_length: 0,
+            trust_anchor: None,
+            trust_anchor_count: 0,
+            est_identity: None,
+            est,
             key_pin: key_pin().await,
-        })
+        });
+
+        if let Some(chain) = store::CERTIFICATE.read().await {
+            status.certificate = check::stored_leaf(&chain).map(|leaf| {
+                let state = check::status(&leaf, &status.effective_fqdn, clock);
+                (info(&leaf), state, origin)
+            });
+            status.chain_length = split_concatenated(&chain).count();
+        }
+        if let Some(anchors) = store::TRUST_ANCHOR.read().await {
+            status.trust_anchor = check::stored_leaf(&anchors).map(|c| info(&c));
+            status.trust_anchor_count = split_concatenated(&anchors).count();
+        }
+        if let Some(identity) = store::IDENTITY.read().await {
+            status.est_identity = check::stored_leaf(&identity).map(|c| info(&c));
+        }
+        status
     })
     .await
 }

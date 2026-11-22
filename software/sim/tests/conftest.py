@@ -122,11 +122,14 @@ def api(sim):
     base = sim.topology.chip("gw").url + "/api/v1"
 
     def call(method, path, body=None):
-        req = urllib.request.Request(base + path, method=method,
-                                     data=None if body is None else json.dumps(body).encode())
+        data, content_type = body, "application/octet-stream"
+        if body is not None and not isinstance(body, bytes):
+            data = json.dumps(body).encode()
+            content_type = "application/json"
+        req = urllib.request.Request(base + path, method=method, data=data)
         req.add_header("Authorization", auth)
         if body is not None:
-            req.add_header("Content-Type", "application/json")
+            req.add_header("Content-Type", content_type)
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=30) as r:
                 status, text = r.status, r.read().decode()

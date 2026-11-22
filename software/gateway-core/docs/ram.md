@@ -86,6 +86,37 @@ The time task polls plain SNTP directly. Its two 128 B UDP buffers and packet me
 
 The release reserves 432 B less SRAM2 and the flash image grows by 108 B. The general heap still reserves 31 KiB in SRAM1 for other workloads. Two QEMU runs per build gave the same heap values. To isolate the lookup, run `memory_profile.py qemu` with `--scenario sntp-dns`. The functional test `tests/test_sntp.py` uses QEMU and a local UDP peer on loopback port 123 to check that the gateway retries after an unsynchronised response.
 
+### CA bundle and EST identity import
+
+The HTTPS upload handler already owns the request body. For a CA bundle or
+an EST identity, it decodes PEM certificates into the front of that buffer.
+Concatenated DER is already in that layout. The gateway validates each
+certificate and writes the populated slice to flash in input order. This
+removes a second general-heap allocation as large as the decoded chain
+(up to 6 KiB for trust anchors or 4 KiB for an identity). The identity's
+private key still needs a separate temporary buffer during decoding.
+
+The certificate status endpoint fills one result object and releases each
+raw flash blob before reading the next. This matters when the browser
+reloads the certificate details after a successful upload.
+
+| General heap high-water mark, bytes | Before (`6c7e7d6`) | After |
+|---|---:|---:|
+| First PEM upload of six CA certificates (8,020 B PEM, 5,677 B DER) | 20,732 | 15,052 |
+| Whole CA import scenario, including status and rejected uploads | 28,060–28,064 | 24,016 |
+| First PEM upload of an EST identity (2,896 B DER plus RSA key) | 18,332 | 15,436 |
+| Whole EST identity import scenario (2,896 B DER plus RSA key) | 25,276 | 21,232 |
+| HTTPS server certificate rotation and reconnect | 22,380–22,384 | 18,724–18,728 |
+
+Run `https-trust-import` and `https-identity-import` separately in QEMU to
+reproduce the upload and whole-scenario peaks. Each scenario ran twice per
+build, starting from a fresh virtual installation. The general heap still
+reserves 31,744 B of SRAM1 and MbedTLS reserves 49,152 B. The production
+ELF uses 145,540 B of static SRAM2 and leaves 51,068 B for the stack on
+both builds. The flash image shrinks by 348 B. A production QEMU run left
+11,292 B of stack untouched immediately after saving an automation button
+and 11,084 B after the edit sequence on both builds.
+
 ### Earlier MQTT and HTTPS measurements
 
 The same `combined` scenario exercises two gateways, active CAN nodes, MQTT and an HTTPS automation read. The values below come from gateway A. The baseline allocator included MbedTLS. On the new build each allocator tracks its own peak, and those peaks can occur at different times.

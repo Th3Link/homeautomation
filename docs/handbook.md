@@ -836,9 +836,16 @@ and `--runs 1` for a single measurement.
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
 | `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
 | `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
+| `https-trust-import` | Install a six-certificate CA bundle as PEM and DER, read its fingerprint and count, reject invalid uploads and remove it |
+| `https-identity-import` | Install an EST client certificate chain with its private key, check the leaf fingerprint, reject a key-only upload and remove the identity |
 | `https-automation`, `combined` | Automation edits over HTTPS, including the button-save stack watermark and output state across configuration reloads, and an HTTPS request alongside active MQTT nodes |
 | `gateway-ota`, `can-ota` | The firmware update tests, including CRC rejection and the successful transfer |
 | `mqtt-tls` | Two gateways using TLS 1.3 with a local test broker and a generated certificate, with certificate verification disabled in the isolated test |
+
+The two certificate import scenarios start on separate fresh gateways. Each
+`pytest.log` records the general heap high-water mark immediately after the
+first upload. The peak in `runtime.json` covers the whole scenario, including
+the subsequent read of the certificate details at `GET /api/v1/tls`.
 
 For a physical gateway, use the same API sampler with the device's trusted
 certificate. The output is labeled `hardware` and includes the running
