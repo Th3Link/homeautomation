@@ -39,9 +39,7 @@ pub async fn resolve(stack: Stack<'static>, host: &str) -> Addresses {
     };
     let mut addresses = Addresses::new();
     for &query_type in order {
-        // On the heap: the DNS query's future is large and only needed for
-        // a moment.
-        if let Ok(found) = crate::heap::boxed(|| stack.dns_query(host, query_type)).await {
+        if let Ok(found) = stack.dns_query(host, query_type).await {
             for address in found {
                 let _ = addresses.push(address);
             }

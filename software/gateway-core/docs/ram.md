@@ -70,6 +70,22 @@ When the gateway starts or an edit changes its configuration, the automation tas
 
 Both builds ran the same QEMU `idle` and `https-automation` workloads twice. The 1,424 B reduction in static SRAM2 gives the main stack 1,424 B more headroom. The general heap still reserves 31 KiB in SRAM1. The reload no longer allocates a snapshot from it.
 
+### SNTP and DNS
+
+The time task polls plain SNTP directly. Its two 128 B UDP buffers and packet metadata are live only while trying the resolved addresses, so their task storage can be reused during NTS. A single 48 B packet holds the request and then the reply. Each DNS caller polls the network stack directly, including both MQTT brokers, EST and NTS. Independent lookups can still run concurrently.
+
+| Bytes | Before (`393e746`) | After |
+|---|---:|---:|
+| Time task pool in SRAM2, production ELF | 1,552 | 1,120 |
+| Total static SRAM2, production ELF | 145,972 | 145,540 |
+| Main stack budget, production ELF | 50,636 | 51,068 |
+| General heap used at steady idle, pending time-server lookup | 424 | 0 |
+| General heap peak from boot through idle | 424 | 388 |
+| General heap peak, combined CAN/MQTT/HTTPS, gateway A | 6,652 | 6,228 |
+| General heap peak, HTTPS automation | 8,792 | 8,368 |
+
+The release reserves 432 B less SRAM2 and the flash image grows by 108 B. The general heap still reserves 31 KiB in SRAM1 for other workloads. Two QEMU runs per build gave the same heap values. To isolate the lookup, run `memory_profile.py qemu` with `--scenario sntp-dns`. The functional test `tests/test_sntp.py` uses QEMU and a local UDP peer on loopback port 123 to check that the gateway retries after an unsynchronised response.
+
 ### Earlier MQTT and HTTPS measurements
 
 The same `combined` scenario exercises two gateways, active CAN nodes, MQTT and an HTTPS automation read. The values below come from gateway A. The baseline allocator included MbedTLS. On the new build each allocator tracks its own peak, and those peaks can occur at different times.
@@ -191,7 +207,7 @@ In this earlier experiment, shrinking the HTTPS RX windows without moving the bu
 
 1. **MQTT and TCP windows.** The secondary publication queue is gone. Exercise commands from both brokers, retained packets across TCP segments, HA republish on reconnect, a large TLS certificate and five simultaneous browser downloads. Compare gateway OTA with an added loopback delay.
 2. **Flash writes.** Full and partial OTA sectors now share the flash lock and use bounded scratch. QEMU covers a wrong CRC followed by a valid update, a version switch and preservation of settings or the peer node. Cold boot and interrupted power during a flash write still need physical ESP32 coverage.
-3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. DNS, variable-length credential data, NTS receive records and some request futures still use the general heap.
+3. **Application storage.** HTTPS socket buffers, the DHCPv6 workspace and the HA task are static. NTS-KE and EST reuse the HTTPS slot. The automation task owns its reload snapshot. The plain SNTP request and shared DNS resolver are heapless. Variable-length credential data, NTS records and some request futures still use the general heap.
 4. **Crypto allocator.** MbedTLS runs in a dedicated 48 KiB pool. Local QEMU tests exercised EST issuance and renewal against a test CA, then authenticated NTS against chronyd. Long production certificate chains and simultaneous pinned/RSA broker verification still need a deployment-hardware measurement.
 5. **Automation button stack.** A name lookup retains only the slot and enabled flag after decoding, and updates serialize the submitted item by reference. Switches and outputs have their own subrouters. Authentication hands each API request to its resource group, which uses the existing per-request allocation for that group’s handlers. The QEMU test writes and reads back the binding, checks the boot ID and reports the stack watermark immediately after the save and after the full edit sequence. The existing 8 KiB regression threshold applies to both measurements.
 

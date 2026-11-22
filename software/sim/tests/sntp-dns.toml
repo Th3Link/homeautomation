@@ -1,0 +1,6 @@
+# The SLIRP network has no DNS server at this address. Keep the lookup
+# pending so the UART sample includes the SNTP and DNS futures.
+[[gateway]]
+name = "gw"
+bus = "vcan-test"
+console = ["slaac off", "dns 10.0.2.99", "ntp-server clock.test"]

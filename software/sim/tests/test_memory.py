@@ -26,6 +26,12 @@ def test_idle_memory(sim):
     assert memory["stack_size"] >= memory["stack_untouched"]
 
 
+def test_pending_sntp_lookup(sim):
+    ready = sim.expect("network: ready", chip="gw", kind="serial", since=0)
+    _, memory = next_sample(sim, since=ready.seq)
+    assert memory["heap_used"] == 0, memory
+
+
 def test_rest_memory(sim):
     gateway = sim["gw"].topology
     time.sleep(5)

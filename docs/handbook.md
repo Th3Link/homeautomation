@@ -832,6 +832,7 @@ and `--runs 1` for a single measurement.
 | Scenario | Measured workload |
 |---|---|
 | `idle`, `idle-rest`, `heap-probe` | Gateway idle over UART, idle with REST requests, and an 8 KiB allocation freed before the next sample |
+| `sntp-dns` | UART sample while the time server’s DNS lookup waits for a reply on an isolated guest LAN. The general heap must be empty. |
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
 | `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
 | `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
