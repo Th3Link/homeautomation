@@ -223,24 +223,6 @@ pub async fn ntp_server() -> String<NTP_CAP> {
     crate::dhcpv6::ntp_server().unwrap_or_else(|| String::try_from(DEFAULT_NTP).unwrap_or_default())
 }
 
-/// Is HTTPS on? (`web-https off` on the console turns the web server back
-/// to plain HTTP on port 80, the way out if TLS ever doesn't work.)
-pub async fn https_enabled() -> bool {
-    config()
-        .await
-        .get_bool(store::HTTPS_ENABLED)
-        .await
-        .unwrap_or(true)
-}
-
-pub async fn set_https_enabled(on: bool) -> Result<(), CertError> {
-    config()
-        .await
-        .set_bool(store::HTTPS_ENABLED, on)
-        .await
-        .map_err(|_| CertError::Storage)
-}
-
 /// The changes [`update_settings`] takes; `None` leaves a value as it is.
 #[derive(Debug, Default)]
 pub struct SettingsUpdate<'a> {
@@ -667,7 +649,6 @@ fn info(cert: &Certificate<'_>) -> CertInfo {
 pub struct Status {
     pub settings: Settings,
     pub effective_fqdn: String<FQDN_CAP>,
-    pub https_enabled: bool,
     pub time_known: bool,
     pub certificate: Option<(CertInfo, check::Status, Origin)>,
     pub chain_length: usize,
@@ -717,7 +698,6 @@ pub async fn status() -> Box<Status> {
         Box::new(Status {
             settings,
             effective_fqdn: fqdn,
-            https_enabled: https_enabled().await,
             time_known: clock.known().is_some(),
             certificate,
             chain_length,
@@ -994,8 +974,8 @@ async fn enroll(
         identity_credentials().await
     };
 
-    let _slot = crate::https::slot().await;
-    let p7 = est::exchange(stack, url, operation, &csr, trust, client)
+    let mut slot = crate::https::slot().await;
+    let p7 = est::exchange(stack, url, operation, &csr, trust, client, &mut slot)
         .await
         .map_err(EnrollError::Est)?;
     let certs = pkcs7::certificates(&p7).ok_or(EnrollError::Est(EstError::Malformed))?;

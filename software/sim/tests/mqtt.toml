@@ -5,14 +5,12 @@
 name = "gw-a"
 bus = "vcan-mqtt-a"
 https = 8643
-http = 8280
 console = ["mqtt-uri mqtt://10.0.2.2:18883", "mqtt-enabled on", "ha-discovery on"]
 
 [[gateway]]
 name = "gw-b"
 bus = "vcan-mqtt-b"
 https = 8644
-http = 8281
 console = ["mqtt-uri mqtt://10.0.2.2:18883", "mqtt-enabled on", "ha-discovery on"]
 
 [[node]]

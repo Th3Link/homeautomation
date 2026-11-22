@@ -5,13 +5,8 @@
 //! read-only ones). One task serves one connection at a time, so several of
 //! them are started; each builds the (zero-sized) router itself.
 //!
-//! HTTPS (ADR 0018): the UI and the API are served over TLS on port 443
-//! with the certificate of [`crate::cert`]; port 80 only answers
-//! `308 Permanent Redirect` to the same URL on `https://` (308 keeps the
-//! method and body, so a script's `PUT` still arrives as a `PUT`). One TLS
-//! session runs at a time ([`crate::https::slot`]). `web-https off` on the
-//! console serves everything over plain HTTP on port 80 instead, the way
-//! back in if TLS ever doesn't work.
+//! The gateway serves the UI and API on port 443. Connections share one
+//! active TLS session through [`crate::https::slot`].
 
 mod assets;
 mod automation;
@@ -39,14 +34,11 @@ use picoserve::response::{IntoResponse, StatusCode};
 use picoserve::routing::{get, post, Layer, Next, PathRouter};
 use picoserve::{Config, ResponseSent, Router, Timeouts};
 
-/// Plain HTTP (`web-https off`): connections served at the same time.
-const HTTP_TASKS: usize = 3;
 /// HTTPS: connections that can be open at the same time. They are served
 /// one after the other (one TLS session at a time), but each needs its own
 /// listening socket, or a browser's parallel connections are refused; so
 /// these tasks are cheap and share the session's buffers.
 const HTTPS_TASKS: usize = 5;
-const HTTP_PORT: u16 = 80;
 const HTTPS_PORT: u16 = 443;
 /// How long a TLS handshake may take (the ECDH and the signature are done
 /// in software on a 160 MHz core).
@@ -63,77 +55,51 @@ static SERVER_CONFIG: Config = Config::new(Timeouts {
 })
 .keep_connection_alive();
 
-/// Starts the web server tasks on `stack`. `https`: see the module docs.
-pub fn spawn(spawner: &Spawner, stack: Stack<'static>, https: bool) {
+/// Starts the HTTPS listeners on port 443.
+pub fn spawn(spawner: &Spawner, stack: Stack<'static>) {
     spawner.spawn(system::restart_task().unwrap());
-    if https {
-        for _ in 0..HTTPS_TASKS {
-            spawner.spawn(https_task(stack).unwrap());
-        }
-        spawner.spawn(redirect_task(stack).unwrap());
-    } else {
-        for id in 0..HTTP_TASKS {
-            spawner.spawn(http_task(id, stack).unwrap());
-        }
+    for buffers in listener_buffers() {
+        spawner.spawn(https_task(stack, buffers).unwrap());
     }
 }
 
-// The servers' futures, with the buffers they hold, live on the heap (the
-// otherwise unused RAM above the statics): there they don't take away the
-// stack's room the way the tasks' static storage would.
+struct TcpBuffers {
+    rx: [u8; 1536],
+    tx: [u8; 1024],
+}
 
-#[embassy_executor::task(pool_size = HTTP_TASKS)]
-async fn http_task(id: usize, stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_plain(id, stack)).await
+/// Each ROM boot stack has room for one listener next to an MQTT connection.
+/// The remaining three share SRAM1 with the allocators.
+fn listener_buffers() -> [&'static mut TcpBuffers; HTTPS_TASKS] {
+    use core::mem::MaybeUninit;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    static TAKEN: AtomicBool = AtomicBool::new(false);
+    #[unsafe(link_section = ".rom_boot_pro_uninit")]
+    static mut PRO: MaybeUninit<TcpBuffers> = MaybeUninit::uninit();
+    #[unsafe(link_section = ".rom_boot_app_uninit")]
+    static mut APP: MaybeUninit<TcpBuffers> = MaybeUninit::uninit();
+    #[unsafe(link_section = ".dram2_uninit")]
+    static mut REST: MaybeUninit<[TcpBuffers; HTTPS_TASKS - 2]> = MaybeUninit::uninit();
+    assert!(!TAKEN.swap(true, Ordering::Relaxed));
+    // SAFETY: this is called once after the ROM stack is retired. Each listener
+    // receives a distinct pair of byte arrays, zeroed before any reference exists.
+    unsafe {
+        let pro = (&raw mut PRO).cast::<TcpBuffers>();
+        let app = (&raw mut APP).cast::<TcpBuffers>();
+        let rest = (&raw mut REST).cast::<[TcpBuffers; HTTPS_TASKS - 2]>();
+        pro.write_bytes(0, 1);
+        app.write_bytes(0, 1);
+        rest.write_bytes(0, 1);
+        let [a, b, c] = &mut *rest;
+        [&mut *pro, &mut *app, a, b, c]
+    }
 }
 
 #[embassy_executor::task(pool_size = HTTPS_TASKS)]
-async fn https_task(stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_tls(stack)).await
-}
-
-#[embassy_executor::task]
-async fn redirect_task(stack: Stack<'static>) -> ! {
-    crate::heap::boxed(|| serve_redirect(HTTPS_TASKS, stack)).await
-}
-
-async fn serve_plain(id: usize, stack: Stack<'static>) -> ! {
-    let app = app();
-    let mut http_buffer = [0u8; crate::https::HTTP_BUFFER];
-    let mut tcp_rx = [0u8; 4096];
-    let mut tcp_tx = [0u8; 1024];
-    picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
-        .listen_and_serve(id, stack, HTTP_PORT, &mut tcp_rx, &mut tcp_tx)
-        .await
-        .into_never()
-}
-
-/// Port 80 with HTTPS on: every request is sent to `https://`.
-async fn serve_redirect(id: usize, stack: Stack<'static>) -> ! {
-    let app = Router::new().layer(RedirectToHttps);
-    let mut http_buffer = [0u8; 1024];
-    let mut tcp_rx = [0u8; 1024];
-    let mut tcp_tx = [0u8; 512];
-    picoserve::Server::new(&app, &SERVER_CONFIG, &mut http_buffer)
-        .listen_and_serve(id, stack, HTTP_PORT, &mut tcp_rx, &mut tcp_tx)
-        .await
-        .into_never()
-}
-
-/// Port 443: accepts a connection, waits until the client sends something,
-/// then for the TLS slot, and serves the connection ([`serve_session`]).
-///
-/// This future only holds the socket's buffers (~3 KB): several of these
-/// wait at the same time. The session's own future (the handshake and
-/// picoserve, ~20 KB) is put on the heap only while it runs, and only one
-/// runs at a time.
-async fn serve_tls(stack: Stack<'static>) -> ! {
+async fn https_task(stack: Stack<'static>, buffers: &'static mut TcpBuffers) -> ! {
     use embassy_time::with_timeout;
-
-    let mut tcp_rx = [0u8; 2048];
-    let mut tcp_tx = [0u8; 1024];
     loop {
-        let mut socket = embassy_net::tcp::TcpSocket::new(stack, &mut tcp_rx, &mut tcp_tx);
+        let mut socket = embassy_net::tcp::TcpSocket::new(stack, &mut buffers.rx, &mut buffers.tx);
         if socket.accept(HTTPS_PORT).await.is_err() {
             continue;
         }
@@ -186,26 +152,68 @@ async fn serve_session(
 }
 
 fn app() -> Router<impl PathRouter> {
-    let api = Router::new()
-        .route("/system", get(system::get_system))
-        .route("/system/restart", post(system::restart));
-    let api = devices::routes(api);
-    let api = commands::routes(api);
-    let api = settings::routes(api);
-    let api = mqtt::routes(api);
-    let api = firmware::routes(api);
-    let api = sensors::routes(api);
-    let api = tls::routes(api);
-    let api = location::routes(api);
-    let api = network::routes(api);
-    let api = automation::routes(api);
-    let api = logs::routes(api);
-    // The API outermost: every route a request passes on its way costs a
-    // stack frame (see `automation::routes`), and the pages are asked for
-    // only when one loads.
     assets::routes(Router::new())
-        .nest("/api/v1", api)
+        .nest_service("/api/v1", Api)
         .layer(BasicAuth)
+}
+
+/// Select a small router before polling handlers. Chaining every endpoint
+/// makes its poll frame stay on the ESP32 stack while unrelated handlers run.
+struct Api;
+
+impl picoserve::routing::PathRouterService for Api {
+    async fn call_path_router_service<
+        R: Read,
+        W: picoserve::response::ResponseWriter<Error = R::Error>,
+    >(
+        &self,
+        _: &(),
+        _: (),
+        path: picoserve::request::Path<'_>,
+        request: picoserve::request::Request<'_, R>,
+        writer: W,
+    ) -> Result<ResponseSent, W::Error> {
+        let group = path.split_first_segment();
+        let resource = group
+            .and_then(|(_, rest)| rest.split_first_segment())
+            .and_then(|(_, tail)| tail.split_first_segment())
+            .map(|(segment, _)| segment);
+        let group = group.map(|(segment, _)| segment).unwrap_or_default();
+        let device = group == "devices" || group == "device-types";
+        let routes = Router::new();
+        if group == "automation" {
+            dispatch(automation::routes(routes), request, writer).await
+        } else if group == "firmware" || (device && resource.is_some_and(|s| s == "firmware")) {
+            dispatch(firmware::routes(routes), request, writer).await
+        } else if group == "logs" || (device && resource.is_some_and(|s| s == "log")) {
+            dispatch(logs::routes(routes), request, writer).await
+        } else if group == "sensors" || (device && resource.is_some_and(|s| s == "sensors")) {
+            dispatch(sensors::routes(routes), request, writer).await
+        } else if group == "bus" || device {
+            dispatch(devices::routes(commands::routes(routes)), request, writer).await
+        } else if group == "tls" {
+            dispatch(tls::routes(routes), request, writer).await
+        } else if group == "mqtt" {
+            dispatch(mqtt::routes(routes), request, writer).await
+        } else {
+            let routes = settings::routes(location::routes(network::routes(routes)))
+                .route("/system", get(system::get_system))
+                .route("/system/restart", post(system::restart));
+            dispatch(routes, request, writer).await
+        }
+    }
+}
+
+/// Router::handle_request starts at the original request URI. Each group
+/// retains picoserve's normal path parsing, method dispatch and rejection.
+async fn dispatch<R: Read, W: picoserve::response::ResponseWriter<Error = R::Error>>(
+    routes: Router<impl PathRouter>,
+    request: picoserve::request::Request<'_, R>,
+    writer: W,
+) -> Result<ResponseSent, W::Error> {
+    let router = Router::new().nest("/api/v1", routes);
+    // Build only the selected module’s request future, outside the poll frame.
+    crate::heap::boxed(|| router.handle_request(request, writer)).await
 }
 
 /// Lets only requests through that carry the configured web credentials in
@@ -243,10 +251,7 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
         };
 
         if authorized {
-            // The route's handler on the heap: the router keeps room for
-            // its largest one, and every layer above builds this future on
-            // the stack (see `crate::heap`).
-            crate::heap::boxed(|| next.run(state, path_parameters, response_writer)).await
+            next.run(state, path_parameters, response_writer).await
         } else {
             (
                 StatusCode::UNAUTHORIZED,
@@ -259,60 +264,5 @@ impl<State, PathParameters> Layer<State, PathParameters> for BasicAuth {
                 .write_to(next.into_connection().await?, response_writer)
                 .await
         }
-    }
-}
-
-/// Answers every request with `308 Permanent Redirect` to the same path on
-/// `https://`, at the host the client asked for (or the configured FQDN).
-struct RedirectToHttps;
-
-impl<State, PathParameters> Layer<State, PathParameters> for RedirectToHttps {
-    type NextState = State;
-    type NextPathParameters = PathParameters;
-
-    async fn call_layer<
-        'a,
-        R: Read + 'a,
-        NextLayer: Next<'a, R, State, PathParameters>,
-        W: picoserve::response::ResponseWriter<Error = R::Error>,
-    >(
-        &self,
-        next: NextLayer,
-        _state: &State,
-        _path_parameters: PathParameters,
-        request_parts: picoserve::request::RequestParts<'_>,
-        response_writer: W,
-    ) -> Result<ResponseSent, W::Error> {
-        let host = request_parts
-            .headers()
-            .get("Host")
-            .and_then(|value| value.as_str().ok())
-            .and_then(gateway_core::web::host_without_port)
-            .map(heapless::String::<{ crate::cert::FQDN_CAP }>::try_from)
-            .and_then(Result::ok);
-        let host = match host {
-            Some(host) => host,
-            None => crate::cert::effective_fqdn().await,
-        };
-        let mut location = heapless::String::<512>::new();
-        let written = gateway_core::web::https_location(
-            &mut location,
-            &host,
-            request_parts.path().encoded(),
-            request_parts.query().map(|q| q.0),
-        );
-        let connection = next.into_connection().await?;
-        if written.is_err() {
-            return StatusCode::URI_TOO_LONG
-                .write_to(connection, response_writer)
-                .await;
-        }
-        (
-            StatusCode::PERMANENT_REDIRECT,
-            [("Location", location.as_str())],
-            "",
-        )
-            .write_to(connection, response_writer)
-            .await
     }
 }

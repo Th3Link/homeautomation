@@ -290,9 +290,9 @@ async fn publish_with_custom_string(
     crate::mqtt::publish(topic.as_str(), body).await;
 }
 
-/// The gateway's own self-announce, sent to the primary broker (`slot`) once
+/// The gateway's own self-announce, sent to the primary broker once
 /// on every (re)connect to it (`BridgeDevice::connected_event`).
-pub async fn publish_self_available(slot: usize) {
+pub fn publish_self_available() {
     let device_key = CanId::new(
         crate::can::DEVICE_TYPE.load(core::sync::atomic::Ordering::Relaxed),
         crate::can::DEVICE_ID.load(core::sync::atomic::Ordering::Relaxed),
@@ -300,7 +300,7 @@ pub async fn publish_self_available(slot: usize) {
     )
     .device_key();
     let topic = device::available_topic(device_key);
-    crate::mqtt::publish_on_connect(slot, topic.as_str(), device::AVAILABLE_BODY).await;
+    crate::mqtt::publish_on_connect(topic.as_str(), device::AVAILABLE_BODY);
 }
 
 /// Routes one received MQTT message to whichever bridge's command topic it

@@ -80,7 +80,6 @@ function Certificate({ d }) {
         <div><dt>Key pin</dt><dd><code>${d.key_pin_sha256}</code></dd></div>
       </dl>
       <p class="muted">The pin-sha256 (RFC 7469) of the gateway's own key, the same for every certificate and CSR. An EST server that registers clients by their key wants this.</p>`}
-      ${!d.https && html`<p class="error">HTTPS is switched off (console: web-https on, then restart).</p>`}
     <//>`;
 }
 

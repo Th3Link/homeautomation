@@ -5,13 +5,12 @@
 //!
 //! The gateway serves up to [`MQTT_BROKERS`] brokers at the same time (e.g.
 //! Home Assistant's and a Cerbo's): one [`mqtt_task`] per configured broker
-//! slot, each with its own connection and publish queue. Commands are
+//! slot, each with its own connection. Commands are
 //! accepted from every broker and go onto the CAN bus the same way.
 //!
 //! The brokers aren't equal, though: slot [`PRIMARY`] is the one the gateway
 //! reports to — everything it publishes goes there ([`publish`]) — while
-//! slot [`SECONDARY`] only listens. Publishing to the secondary broker is
-//! an exception that has to be asked for explicitly ([`publish_secondary`]).
+//! slot [`SECONDARY`] only listens.
 //!
 //! Wire protocol note: the original used ESP-IDF's `esp-mqtt`, which
 //! speaks MQTT 3.1.1. The `rust-mqtt` crate used here only implements
@@ -78,10 +77,8 @@ pub const PRIMARY: usize = 0;
 /// The broker slot that only receives, apart from explicit exceptions.
 pub const SECONDARY: usize = 1;
 
-/// Outgoing publishes, one queue per broker slot, drained by that slot's
-/// [`mqtt_task`].
-static PUBLISH_QUEUES: [Channel<CriticalSectionRawMutex, Publication, 16>; MQTT_BROKERS] =
-    [Channel::new(), Channel::new()];
+/// Application publications go to the primary broker.
+static PUBLISH: Channel<CriticalSectionRawMutex, Publication, 16> = Channel::new();
 
 /// A retained message too long for the normal publish queue: Home Assistant's
 /// discovery configurations ([`crate::ha`]). One at a time, primary broker
@@ -96,18 +93,14 @@ static RETAINED: Channel<CriticalSectionRawMutex, RetainedPublication, 1> = Chan
 /// Publishes `topic`/`body` retained on the primary broker; waits until the
 /// connection took it. False if the broker isn't connected (or the message
 /// doesn't fit).
-pub async fn publish_retained(topic: &str, body: &str) -> bool {
+pub async fn publish_retained(
+    topic: gateway_core::ha_discovery::Topic,
+    body: gateway_core::ha_discovery::Payload,
+) -> bool {
     if !is_connected(PRIMARY) {
         return false;
     }
-    let mut p = RetainedPublication {
-        topic: String::new(),
-        body: gateway_core::ha_discovery::Payload::new(),
-    };
-    if p.topic.push_str(topic).is_err() || p.body.push_str(body).is_err() {
-        return false;
-    }
-    RETAINED.send(p).await;
+    RETAINED.send(RetainedPublication { topic, body }).await;
     true
 }
 
@@ -154,15 +147,9 @@ fn publication(topic: &str, body: &str) -> Publication {
 /// disconnected — matches the original's `IMQTT::publish` being a silent
 /// no-op while disconnected.
 pub async fn publish(topic: &str, body: &str) {
-    publish_if_connected(PRIMARY, topic, body);
-}
-
-/// Queues `topic`/`body` for publication on the secondary broker, which
-/// otherwise only receives. Nothing uses this yet; it is the one place to
-/// start from when a message has to reach the secondary broker too.
-#[allow(dead_code)]
-pub async fn publish_secondary(topic: &str, body: &str) {
-    publish_if_connected(SECONDARY, topic, body);
+    if is_connected(PRIMARY) {
+        let _ = PUBLISH.try_send(publication(topic, body));
+    }
 }
 
 /// Like [`publish`], but waits for room in the queue rather than dropping
@@ -172,22 +159,15 @@ pub async fn publish_wait(topic: &str, body: &str) {
     if CONNECTED[PRIMARY].load(Ordering::Relaxed) {
         let _ = embassy_time::with_timeout(
             embassy_time::Duration::from_secs(5),
-            PUBLISH_QUEUES[PRIMARY].send(publication(topic, body)),
+            PUBLISH.send(publication(topic, body)),
         )
         .await;
     }
 }
 
-fn publish_if_connected(slot: usize, topic: &str, body: &str) {
-    if CONNECTED[slot].load(Ordering::Relaxed) {
-        let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));
-    }
-}
-
-/// Queues `topic`/`body` for a broker that is just being connected to (it
-/// isn't marked as connected yet).
-pub async fn publish_on_connect(slot: usize, topic: &str, body: &str) {
-    let _ = PUBLISH_QUEUES[slot].try_send(publication(topic, body));
+/// Enqueues the primary broker announcement before marking the connection ready.
+pub fn publish_on_connect(topic: &str, body: &str) {
+    let _ = PUBLISH.try_send(publication(topic, body));
 }
 
 /// Every topic the gateway subscribes to on (re)connect — one entry per
@@ -294,10 +274,10 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
     // were read after it.
     RECONNECT[slot].reset();
     // Anything queued while this broker wasn't connected is stale by now.
-    while PUBLISH_QUEUES[slot].try_receive().is_ok() {}
     if slot == PRIMARY {
+        while PUBLISH.try_receive().is_ok() {}
         while RETAINED.try_receive().is_ok() {}
-        crate::translate::publish_self_available(slot).await;
+        crate::translate::publish_self_available();
     }
     CONNECTED[slot].store(true, Ordering::Relaxed);
     if slot == PRIMARY {
@@ -319,7 +299,13 @@ async fn serve<N: Transport>(client: &mut MqttClient<'_, '_, N>, slot: usize) {
             }
         };
         match select4(
-            PUBLISH_QUEUES[slot].receive(),
+            async {
+                if slot == PRIMARY {
+                    PUBLISH.receive().await
+                } else {
+                    core::future::pending().await
+                }
+            },
             client.poll(),
             RECONNECT[slot].wait(),
             retained,
@@ -435,15 +421,14 @@ async fn session<N: Transport>(
     Timer::after(Duration::from_secs(2)).await;
 }
 
-/// The buffers of one broker connection (13 KB). Static, in place from the
+/// The buffers of one broker connection. Static, in place from the
 /// start: in the task's future they would make it that much larger, and a
 /// task's future is built on the main stack when it is spawned.
 ///
-/// The TCP windows only have to take a segment (1,460 bytes); the TLS
-/// record buffers are sized in [`tls`].
+/// TCP can fragment a record across segments. Record limits are set in [`tls`].
 struct Buffers {
-    rx: [u8; 2048],
-    tx: [u8; 2048],
+    rx: [u8; 1536],
+    tx: [u8; 1024],
     read_record: [u8; tls::READ_RECORD_BYTES],
     write_record: [u8; tls::WRITE_RECORD_BYTES],
 }
@@ -480,6 +465,7 @@ fn take_buffers(slot: usize) -> &'static mut Buffers {
 
 /// The certificate a capturing connection saw (`mqtt-trust`). One for both
 /// slots: captures are rare and short, a second one waits for the first.
+#[esp_hal::ram(unstable(rtc_fast))]
 static CAPTURED: Mutex<CriticalSectionRawMutex, Vec<u8, { tls::CERT_CAP }>> =
     Mutex::new(Vec::new());
 

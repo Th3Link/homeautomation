@@ -19,6 +19,7 @@ pub mod can_update;
 pub mod cert;
 pub mod config;
 pub mod console;
+pub mod crypto_pool;
 pub mod device_list;
 pub mod dhcpv6;
 pub mod echo;

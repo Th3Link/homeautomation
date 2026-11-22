@@ -565,16 +565,16 @@ def cmd_doctor(args):
         check(elf.is_file(), f"{kind} firmware {elf}",
               f"cd software/{images.FIRMWARE[kind]['crate']} && cargo build --release")
     for gw in topo.gateways:
-        for port in (gw.https, gw.http):
-            s = socket.socket()
-            try:
-                s.bind(("127.0.0.1", port))
-                free = True
-            except OSError:
-                free = running(topo)
-            finally:
-                s.close()
-            check(free, f"port {port} for {gw.name}", "used by something else: change https/http in the topology")
+        port = gw.https
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port))
+            free = True
+        except OSError:
+            free = running(topo)
+        finally:
+            s.close()
+        check(free, f"port {port} for {gw.name}", "used by something else: change https in the topology")
     try:
         import pytest  # noqa: F401
         check(True, "pytest (for software/sim/tests)")

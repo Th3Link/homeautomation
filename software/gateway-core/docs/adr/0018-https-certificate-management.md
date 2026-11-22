@@ -26,11 +26,10 @@ The web server's TLS connections and the EST client take turns
 (`https::slot`); further connections are accepted and wait (a browser's
 keep-alive connection lets go after a second of idleness).
 
-**Ports.** 443 serves the UI and the API over TLS; 80 answers every request
-with `308 Permanent Redirect` to the same path on `https://` (308, unlike
-301/302, keeps the method and the body, so API clients' `PUT`s arrive as
-`PUT`s). `web-https off` on the console goes back to plain HTTP on port
-80: the way in if TLS ever doesn't work.
+**Ports.** The gateway serves the UI and API on port 443. Use an explicit
+`https://` URL. The UART console remains available for credential and
+certificate settings. Earlier firmware also opened port 80. Removing its
+redirect frees a socket and the redirect task's long-lived heap allocation.
 
 **Certificate management in one place** (`gateway-hardware::cert`, rules in
 `gateway_core::x509`):

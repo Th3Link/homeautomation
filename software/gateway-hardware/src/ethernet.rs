@@ -118,10 +118,9 @@ impl<D: embassy_net_driver::Driver> embassy_net_driver::Driver for SoftwareCheck
 // Constructed in place: by value it would pass through the stack.
 static DMA_STORAGE: ConstStaticCell<EthernetDmaStorage<RX_DESCRIPTORS, TX_DESCRIPTORS>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
-// DHCP, DHCPv6, DNS, two MQTT brokers, six web sockets (five HTTPS and the
-// redirect on port 80; plain HTTP uses three), the EST client and SNTP, plus
+// DHCP, DHCPv6, DNS, two MQTT brokers, five HTTPS sockets, the EST client and SNTP, plus
 // one spare. Keep in step with `web::HTTPS_TASKS`.
-static NET_RESOURCES: StaticCell<StackResources<14>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<StackResources<13>> = StaticCell::new();
 
 /// A look at the network state, for the console's `network`.
 #[derive(Debug, Clone)]

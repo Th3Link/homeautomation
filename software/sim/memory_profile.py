@@ -23,15 +23,19 @@ from simlib.topology import REPO, SIM_DIR, Topology, TopologyError
 
 IDLE_SECONDS = 10
 SAMPLE_SECONDS = 2
-MEMORY = re.compile(r"memory: (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)\s*$")
+MEMORY = re.compile(r"memory: (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)(?: (\d+) (\d+) (\d+) (\d+))?\s*$")
 FIELDS = ("boot_id", "uptime_ms", "heap_size", "heap_used", "heap_peak_used",
           "stack_size", "stack_untouched")
+CRYPTO_FIELDS = ("size", "used", "peak", "failures")
 SCENARIOS = {
     "idle": ("idle.toml", "test_memory.py::test_idle_memory"),
     "idle-rest": ("idle.toml", "test_memory.py::test_rest_memory"),
     "heap-probe": ("idle.toml", "test_memory.py::test_transient_heap_allocation"),
     "can-mqtt": ("mqtt.toml", "test_mqtt.py::test_mqtt_commands_and_state_on_two_can_buses"),
     "ha-reconnect": ("mqtt.toml", "test_mqtt.py::test_home_assistant_discovery_survives_broker_restart"),
+    "dual-mqtt": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
+    "dual-mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
+    "https-cert-rotation": ("idle.toml", "test_tls_memory.py::test_replace_active_certificate"),
     "https-automation": ("sim.toml", "test_web.py::test_automation_routes_fit_on_the_stack"),
     "gateway-ota": ("ota.toml", "test_firmware_update.py::test_gateway_update_rejects_bad_crc_then_preserves_config"),
     "can-ota": ("ota.toml", "test_firmware_update.py::test_addressed_node_update_rejects_bad_crc_and_leaves_peer_unchanged"),
@@ -42,7 +46,14 @@ SCENARIOS = {
 
 def parse_serial_sample(line):
     match = MEMORY.search(line)
-    return dict(zip(FIELDS, map(int, match.groups()))) if match else None
+    if not match:
+        return None
+    values = match.groups()
+    sample = dict(zip(FIELDS, map(int, values[:len(FIELDS)])))
+    crypto = values[len(FIELDS):]
+    if crypto[0] is not None:
+        sample["crypto_pool"] = dict(zip(CRYPTO_FIELDS, map(int, crypto)))
+    return sample
 
 
 def collect_serial(path):
@@ -75,19 +86,23 @@ def summarize(samples):
     heap_peak = max(s["heap_peak_used"] for s in samples)
     stack_free = min(s["stack_untouched"] for s in samples)
     first, last = samples[0], samples[-1]
-    return dict(samples=len(samples), boot_id=last["boot_id"],
+    result = dict(samples=len(samples), boot_id=last["boot_id"],
                 start_uptime_ms=first["uptime_ms"], end_uptime_ms=last["uptime_ms"],
                 heap_size=last["heap_size"], heap_peak_used=heap_peak,
                 heap_min_free=last["heap_size"] - heap_peak,
                 stack_size=last["stack_size"], stack_peak_used=last["stack_size"] - stack_free,
                 stack_untouched=stack_free)
+    if "crypto_pool" in last:
+        result["crypto_pool"] = last["crypto_pool"]
+    return result
 
 
-def sample_rest(url, user, password, seconds, *, cafile=None):
+def sample_rest(url, user, password, seconds, *, cafile=None, tls=None):
     auth = base64.b64encode(f"{user}:{password}".encode()).decode()
     request = urllib.request.Request(url.rstrip("/") + "/api/v1/system",
                                      headers={"Authorization": f"Basic {auth}"})
-    tls = ssl.create_default_context(cafile=cafile) if request.type == "https" else None
+    if tls is None and request.type == "https":
+        tls = ssl.create_default_context(cafile=cafile)
     start = time.monotonic()
     samples, errors = [], []
     next_sample = start
@@ -102,6 +117,8 @@ def sample_rest(url, user, password, seconds, *, cafile=None):
             sample = {key: value[key] for key in FIELDS}
             if any(type(sample[key]) is not int or sample[key] < 0 for key in FIELDS):
                 raise ValueError("invalid memory fields")
+            if "crypto_pool" in value:
+                sample["crypto_pool"] = value["crypto_pool"]
             samples.append(dict(sample, elapsed_ms=elapsed_ms, firmware_version=value["firmware_version"]))
         except (OSError, ValueError, KeyError, http.client.HTTPException) as exc:
             errors.append(dict(elapsed_ms=elapsed_ms, error=str(exc)))
@@ -141,7 +158,7 @@ def run_scenario(name, directory, ota_images):
             "--rootdir=.", "--sim-topology", str(topology), "--basetemp", str(directory / "pytest"),
             "--junitxml", str(junit), f"tests/{test}"]
     env = dict(os.environ, SIM_MEMORY_PROFILE=str(directory), PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
-    if name == "mqtt-tls":
+    if name in ("mqtt-tls", "dual-mqtt-tls"):
         env["SIM_MQTT_TLS"] = "1"
     if name.endswith("-ota") and ota_images:
         args.extend(("--ota-images", str(ota_images)))

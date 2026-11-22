@@ -138,22 +138,25 @@ impl Store {
     /// Reads the item in `slot`; `None` if there is none or it doesn't
     /// decode (logged).
     pub async fn get<T: DeserializeOwned>(&mut self, section: Section, slot: u8) -> Option<T> {
+        let bytes = self.bytes(section, slot).await?;
+        decode(bytes).or_else(|| {
+            console_log!(
+                "automation: item {:#06x} doesn't decode, skipped",
+                section.key(slot)
+            );
+            None
+        })
+    }
+
+    async fn bytes(&mut self, section: Section, slot: u8) -> Option<&[u8]> {
         let key = section.key(slot);
-        let bytes: &[u8] = match self.map.fetch_item(&mut self.data, &key).await {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => return None,
+        match self.map.fetch_item::<&[u8]>(&mut self.data, &key).await {
+            Ok(bytes) => bytes,
             Err(e) => {
                 console_log!("automation: reading {key:#06x} failed: {e:?}");
-                return None;
+                None
             }
-        };
-        let len = bytes.len().min(ITEM);
-        self.item[..len].copy_from_slice(&bytes[..len]);
-        let value = decode(&self.item[..len]);
-        if value.is_none() && len > 0 {
-            console_log!("automation: item {key:#06x} doesn't decode, skipped");
         }
-        value
     }
 
     /// Stores `value` in `slot`.
@@ -205,13 +208,32 @@ impl Store {
     /// The slot of the named item `name` in `section` (outputs, motion
     /// lights, schedules).
     pub async fn find<T: DeserializeOwned>(&mut self, section: Section, name: &str) -> Option<u8> {
+        self.find_named::<T>(section, name)
+            .await
+            .map(|(slot, _)| slot)
+    }
+
+    /// Keep the enabled flag alongside the slot so updates need only one flash scan.
+    pub async fn find_named<T: DeserializeOwned>(
+        &mut self,
+        section: Section,
+        name: &str,
+    ) -> Option<(u8, bool)> {
         for slot in self.slots(section).iter() {
-            if let Some(named) = self.get::<Named<T>>(section, slot).await {
-                if named.name == name {
-                    return Some(slot);
+            if let Some(bytes) = self.bytes(section, slot).await {
+                if let Some(enabled) = enabled_if_named::<T>(bytes, name) {
+                    return Some((slot, enabled));
                 }
             }
         }
         None
     }
+}
+
+/// Keep the decoded item out of the flash-reading future. Some outputs are
+/// over 1 KiB and only the comparison needs to reach the calling route.
+#[inline(never)]
+fn enabled_if_named<T: DeserializeOwned>(bytes: &[u8], name: &str) -> Option<bool> {
+    let item = decode::<Named<T>>(bytes)?;
+    (item.name == name).then_some(item.enabled)
 }

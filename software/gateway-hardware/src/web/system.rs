@@ -141,6 +141,7 @@ pub struct System {
     heap_free: usize,
     heap_peak_used: usize,
     heap_min_free: usize,
+    crypto_pool: crate::crypto_pool::Stats,
     /// Main stack bytes never used since boot: the margin left.
     stack_untouched: usize,
     stack_size: usize,
@@ -163,6 +164,7 @@ pub async fn get_system() -> Result<impl IntoResponse, ApiError> {
             heap_free: memory.heap_free,
             heap_peak_used: memory.heap_peak_used,
             heap_min_free: memory.heap_min_free,
+            crypto_pool: crate::crypto_pool::stats(),
             stack_untouched: memory.stack_untouched,
             stack_size: memory.stack_size,
             stack_peak_used: memory.stack_peak_used,

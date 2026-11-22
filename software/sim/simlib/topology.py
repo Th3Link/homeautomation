@@ -74,7 +74,6 @@ class Chip:
 @dataclass
 class Gateway(Chip):
     https: int = 8443
-    http: int = 8080
 
     @property
     def url(self):
@@ -190,7 +189,7 @@ class Topology:
             self.gateways.append(Gateway(
                 name=self._name(g), kind="gateway", index=index,
                 bus=g.get("bus", f"vcan{i}"), https=g.get("https", 8443 + i),
-                http=g.get("http", 8080 + i), console=g.get("console", [])))
+                console=g.get("console", [])))
             index += 1
         by_name = {g.name: g for g in self.gateways}
         for n in data.get("node", []):
@@ -286,10 +285,9 @@ class Topology:
                 raise TopologyError(f"{node.name}: another {node.kind} on {node.bus} has id {node.device_id}")
             keys.add(key)
         for gw in self.gateways:
-            for port in (gw.https, gw.http):
-                if port in ports:
-                    raise TopologyError(f"{gw.name}: port {port} is used twice")
-                ports.add(port)
+            if gw.https in ports:
+                raise TopologyError(f"{gw.name}: port {gw.https} is used twice")
+            ports.add(gw.https)
         buses = [g.bus for g in self.gateways]
         if len(buses) != len(set(buses)):
             raise TopologyError("two gateways on one bus: each gateway needs its own")

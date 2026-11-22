@@ -44,16 +44,21 @@ impl Memory {
 #[cfg(feature = "memory-profile")]
 pub fn log() {
     let m = Memory::capture();
+    let crypto = crate::crypto_pool::stats();
     // Field order is shared with the simulator's serial parser.
     crate::console_log!(
-        "memory: {} {} {} {} {} {} {}",
+        "memory: {} {} {} {} {} {} {} {} {} {} {}",
         m.boot_id,
         m.uptime_ms,
         m.heap_size,
         m.heap_used,
         m.heap_peak_used,
         m.stack_size,
-        m.stack_untouched
+        m.stack_untouched,
+        crypto.size,
+        crypto.used,
+        crypto.peak,
+        crypto.failures
     );
 }
 

@@ -5,6 +5,7 @@ import binascii
 import http.client
 import json
 import socket
+import ssl
 import time
 from pathlib import Path
 
@@ -24,7 +25,8 @@ class FirmwareApi:
         self.port = port
 
     def request(self, method, path, *, data=None, timeout=5):
-        connection = http.client.HTTPConnection(HOST, self.port, timeout=timeout)
+        connection = http.client.HTTPSConnection(HOST, self.port, timeout=timeout,
+                                                 context=ssl._create_unverified_context())
         credentials = base64.b64encode(b"ota-test:qemu-test-only").decode()
         headers = {"Authorization": f"Basic {credentials}", "Connection": "close"}
         if data is not None:
@@ -46,7 +48,12 @@ class FirmwareApi:
 
     def upload(self, path, data, *, wrong_crc=False):
         crc = binascii.crc32(data) ^ int(wrong_crc)
-        return self.request("PUT", f"{path}?crc32={crc}", data=data, timeout=900)
+        start = time.monotonic()
+        result = self.request("PUT", f"{path}?crc32={crc}", data=data, timeout=900)
+        if result[0] == 200:
+            elapsed = time.monotonic() - start
+            print(f"{path}: {len(data)} bytes accepted in {elapsed:.2f} s ({len(data) / elapsed / 1024:.1f} KiB/s)")
+        return result
 
     def wait_gateway_version(self, version, *, timeout=90):
         deadline = time.monotonic() + timeout
@@ -85,11 +92,8 @@ def wait_for_web_boot(simulation, *, since):
 
 @pytest.fixture
 def ota_setup(ota_images, start_sim, tmp_path):
-    # Keep both sockets reserved until both ports have been chosen.
-    with socket.socket() as http, socket.socket() as https:
-        http.bind((HOST, 0))
+    with socket.socket() as https:
         https.bind((HOST, 0))
-        http_port = http.getsockname()[1]
         https_port = https.getsockname()[1]
     old = ota_images / OLD
     firmware = (
@@ -98,12 +102,12 @@ def ota_setup(ota_images, start_sim, tmp_path):
     )
     topology = tmp_path / "ota.toml"
     topology.write_text(firmware + TOPOLOGY.read_text().replace(
-        'name = "gw"', f'name = "gw"\nhttp = {http_port}\nhttps = {https_port}', 1,
+        'name = "gw"', f'name = "gw"\nhttps = {https_port}', 1,
     ))
     print(f"OTA flash images and simulator logs: {Topology(topology).state_dir}")
     with start_sim(topology) as simulation:
         wait_for_web_boot(simulation, since=0)
-        yield simulation, FirmwareApi(http_port)
+        yield simulation, FirmwareApi(https_port)
 
 
 def test_gateway_update_rejects_bad_crc_then_preserves_config(ota_setup, ota_images):

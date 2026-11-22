@@ -14,7 +14,6 @@ use crate::config::config;
 use crate::console_log;
 use crate::device_list::DEVICE_LIST;
 use crate::sensor_list::{SENSOR_INFO, SENSOR_LIST};
-use alloc::vec::Vec;
 use core::fmt::Write as _;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
@@ -132,10 +131,6 @@ async fn update_features(key: u32, update: impl FnOnce(&mut Features) -> bool) -
 
 #[embassy_executor::task]
 async fn ha_task() {
-    crate::heap::boxed(run).await
-}
-
-async fn run() {
     loop {
         CHANGED.wait().await;
         // Things come in bursts (a device's settings, a node's sensors):
@@ -155,59 +150,37 @@ struct Known {
     model: &'static str,
 }
 
-/// A sensor as the sensor list knows it.
-struct Reading {
-    key: u32,
-    kind: SensorKind,
-    sub_id: u64,
-    name: String<8>,
-}
-
 async fn publish_changes() {
-    let devices: Vec<Known> = DEVICE_LIST
-        .lock()
-        .await
-        .iter()
-        .map(|e| Known {
+    // Read one entry at a time and release the table locks before MQTT can
+    // suspend. Discoveries arriving during a pass signal another scan.
+    let mut sent = 0;
+    let devices = DEVICE_LIST.lock().await.len();
+    for index in 0..devices {
+        let known = DEVICE_LIST.lock().await.iter().nth(index).map(|e| Known {
             key: e.id,
             name: e.custom_string.clone(),
             version: e.version.clone(),
             model: DeviceType::from((e.id >> 16) as u8).name(),
-        })
-        .collect();
-    let readings: Vec<Reading> = {
-        let sensors = SENSOR_LIST.lock().await;
-        let info = SENSOR_INFO.lock().await;
-        sensors
-            .iter()
-            .map(|e| Reading {
-                key: e.device_key,
-                kind: e.kind,
-                sub_id: e.sub_id,
-                name: info
-                    .find(e.device_key, e.sub_id)
-                    .and_then(|i| i.name)
-                    .and_then(|n| String::try_from(n.as_str()).ok())
-                    .unwrap_or_default(),
-            })
-            .collect()
-    };
-    let features: Vec<(u32, u16, bool)> = FEATURES
-        .lock()
-        .await
-        .iter()
-        .map(|f| (f.key, f.buttons, f.presence))
-        .collect();
-
-    let mut sent = 0;
-    for known in &devices {
+        });
+        let Some(known) = known else { break };
         let device = Device {
             key: known.key,
             name: &known.name,
             model: known.model,
             version: &known.version,
         };
-        for reading in readings.iter().filter(|r| r.key == known.key) {
+        let sensors = SENSOR_LIST.lock().await.len();
+        for index in 0..sensors {
+            let reading = SENSOR_LIST.lock().await.iter().nth(index).copied();
+            let Some(reading) = reading.filter(|e| e.device_key == known.key) else {
+                continue;
+            };
+            let name = SENSOR_INFO
+                .lock()
+                .await
+                .find(known.key, reading.sub_id)
+                .and_then(|i| i.name);
+            let name = name.as_ref().map_or("", |n| n.as_str());
             let topic = if reading.kind == SensorKind::Brightness {
                 device::ambient_light_topic(known.key, &known.name)
             } else {
@@ -216,17 +189,17 @@ async fn publish_changes() {
                     known.key,
                     &known.name,
                     reading.sub_id,
-                    &reading.name,
+                    name,
                 )
             };
             // A device's DS18B20s are told apart by name or id; its other
             // sensors are one of a kind.
             let mut label: String<12> = String::new();
             if named_by_node(reading.kind, reading.sub_id) {
-                if reading.name.is_empty() {
+                if name.is_empty() {
                     let _ = write!(label, "0x{:08x}", reading.sub_id as u32);
                 } else {
-                    let _ = label.push_str(&reading.name);
+                    let _ = label.push_str(name);
                 }
             }
             let entity = Entity::Sensor {
@@ -237,7 +210,13 @@ async fn publish_changes() {
             };
             sent += publish(&device, &entity).await;
         }
-        let Some(&(_, buttons, presence)) = features.iter().find(|f| f.0 == known.key) else {
+        let feature = FEATURES
+            .lock()
+            .await
+            .iter()
+            .find(|f| f.key == known.key)
+            .map(|f| (f.buttons, f.presence));
+        let Some((buttons, presence)) = feature else {
             continue;
         };
         if presence {
@@ -278,7 +257,7 @@ async fn publish(device: &Device<'_>, entity: &Entity<'_>) -> usize {
     if PUBLISHED.lock().await.get(&topic_hash) == Some(&payload_hash) {
         return 0;
     }
-    if !crate::mqtt::publish_retained(&topic, &payload).await {
+    if !crate::mqtt::publish_retained(topic, payload).await {
         return 0;
     }
     let mut published = PUBLISHED.lock().await;
