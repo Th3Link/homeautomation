@@ -62,7 +62,8 @@ static STORE: Mutex<CriticalSectionRawMutex, Option<Store>> = Mutex::new(None);
 /// Opens the store and finds out which slots are taken. A partition that
 /// doesn't hold a map (the C++ gateway's SPIFFS) is erased.
 pub async fn init() {
-    let mut store = Store {
+    let mut guard = STORE.lock().await;
+    let store = guard.insert(Store {
         map: MapStorage::new(
             BlockingAsync::new(SharedFlash),
             MapConfig::new(PARTITION),
@@ -75,7 +76,7 @@ pub async fn init() {
         data: [0; DATA],
         item: [0; ITEM],
         slots: [Slots::new(); SECTIONS],
-    };
+    });
     if let Err(e) = store.scan().await {
         console_log!("automation: store unreadable ({e:?}), erasing it");
         if store.map.erase_all().await.is_err() {
@@ -83,7 +84,6 @@ pub async fn init() {
         }
         store.slots = [Slots::new(); SECTIONS];
     }
-    *STORE.lock().await = Some(store);
 }
 
 /// Locks the store. Panics if [`init`] hasn't run.

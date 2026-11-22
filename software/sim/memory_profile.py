@@ -36,7 +36,7 @@ SCENARIOS = {
     "dual-mqtt": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
     "dual-mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
     "https-cert-rotation": ("idle.toml", "test_tls_memory.py::test_replace_active_certificate"),
-    "https-automation": ("sim.toml", "test_web.py::test_automation_routes_fit_on_the_stack"),
+    "https-automation": ("sim.toml", "test_web.py"),
     "gateway-ota": ("ota.toml", "test_firmware_update.py::test_gateway_update_rejects_bad_crc_then_preserves_config"),
     "can-ota": ("ota.toml", "test_firmware_update.py::test_addressed_node_update_rejects_bad_crc_and_leaves_peer_unchanged"),
     "mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_mqtt_commands_and_state_on_two_can_buses"),

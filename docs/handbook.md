@@ -776,7 +776,7 @@ partition table. The ELF breaks RAM down by physical bank.
 |---|---:|---|
 | SRAM0 | 192 KiB | 64 KiB flash cache, plus the vectors and IRAM code in the remaining 128 KiB |
 | SRAM1 | 128 KiB | Two MQTT connections, five HTTPS socket buffers, 4 KiB of OTA flash scratch, the static DHCPv6 client and its packet buffers, a 31 KiB general heap and a 48 KiB MbedTLS pool, alongside ROM data. The instruction address range mirrors the data range. |
-| SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The linker gives the main stack the space left after statics. |
+| SRAM2 | 200 KiB | 8 KiB reserved by the ROM and 192 KiB for primary DRAM. The automation task holds its reload snapshot here while rebuilding the engine. The linker gives the main stack the space left after statics. |
 | RTC FAST | 8 KiB | CAN log frame queue, MQTT log batch, certificate capture buffer and one shared 4 KiB firmware upload chunk |
 | RTC SLOW | 8 KiB | Node log text for the web API |
 
@@ -835,7 +835,7 @@ and `--runs 1` for a single measurement.
 | `can-mqtt`, `ha-reconnect` | Two gateways with four nodes and Mosquitto, then MQTT discovery republished after a broker restart |
 | `dual-mqtt`, `dual-mqtt-tls` | Commands from a second broker while five HTTPS clients download the UI, including a retained 1,800-byte payload and a TLS certificate larger than 4 KiB |
 | `https-cert-rotation` | Replace the active HTTPS certificate, reconnect and check the TLS pool |
-| `https-automation`, `combined` | The automation stack regression test, and an HTTPS request alongside active MQTT nodes |
+| `https-automation`, `combined` | Automation edits over HTTPS, including the button-save stack watermark and output state across configuration reloads, and an HTTPS request alongside active MQTT nodes |
 | `gateway-ota`, `can-ota` | The firmware update tests, including CRC rejection and the successful transfer |
 | `mqtt-tls` | Two gateways using TLS 1.3 with a local test broker and a generated certificate, with certificate verification disabled in the isolated test |
 
