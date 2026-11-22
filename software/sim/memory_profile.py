@@ -36,6 +36,8 @@ SCENARIOS = {
     "ha-reconnect": ("mqtt.toml", "test_mqtt.py::test_home_assistant_discovery_survives_broker_restart"),
     "dual-mqtt": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
     "dual-mqtt-tls": ("mqtt.toml", "test_mqtt.py::test_secondary_commands_during_five_https_downloads"),
+    "https-trust-import": ("idle.toml", "test_certificate_import.py::test_trust_bundle_import"),
+    "https-identity-import": ("idle.toml", "test_certificate_import.py::test_est_identity_import"),
     "https-cert-rotation": ("idle.toml", "test_tls_memory.py::test_replace_active_certificate"),
     "https-automation": ("sim.toml", "test_web.py"),
     "gateway-ota": ("ota.toml", "test_firmware_update.py::test_gateway_update_rejects_bad_crc_then_preserves_config"),
