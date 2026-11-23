@@ -1,0 +1,28 @@
+[package]
+name = "nts-client"
+description = "Bounded NTS-KE and authenticated NTP for embedded and async clients"
+edition = "2021"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+rust-version = "1.97"
+
+[features]
+default = []
+async-net = ["dep:async-net", "dep:async-io", "dep:futures-lite", "dep:futures-rustls", "dep:getrandom"]
+smol = ["async-net"]
+tokio = ["dep:tokio", "dep:tokio-util", "dep:futures-lite", "dep:futures-rustls", "dep:getrandom"]
+
+[dependencies]
+aes-siv = { version = "0.8", default-features = false }
+heapless = "0.9"
+async-io = { version = "2", optional = true }
+async-net = { version = "2", optional = true }
+futures-lite = { version = "2", optional = true }
+futures-rustls = { version = "0.26", optional = true, default-features = false, features = ["ring"] }
+getrandom = { version = "0.4", optional = true }
+tokio = { version = "1", optional = true, features = ["net", "time"] }
+tokio-util = { version = "0.7", optional = true, features = ["compat"] }
+
+[dev-dependencies]
+smol = "2"
+tokio = { version = "1", features = ["rt"] }

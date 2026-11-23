@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "software/nts-client",
     "software/common-core",
     "software/common-hardware",
     "software/gateway-core",

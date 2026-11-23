@@ -51,7 +51,7 @@ pub mod helper;
 pub mod lamp;
 pub mod lamp_pacer;
 pub mod network;
-pub mod nts;
+pub use nts_client as nts;
 pub mod relais;
 pub mod sensor;
 pub mod sensor_info;
