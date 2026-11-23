@@ -22,7 +22,7 @@ env:
 jobs:
   simulation:
     name: ${{ github.event_name == 'pull_request' && 'MQTT smoke' || 'Gateway memory profiles' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 70
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/qemu-memory
