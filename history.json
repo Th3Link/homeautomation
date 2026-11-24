@@ -6299,5 +6299,608 @@
     "iram_total": 131072
    }
   }
+ },
+ {
+  "sha": "0689e583bce865eb31caeef2ab0d5d2526edefbd",
+  "date": "2026-11-24T20:25:08+01:00",
+  "subject": "Merge pull request #116 from Th3Link/renovate/renovatebot-github-action-46.x",
+  "firmware": {
+   "cancomponents-hardware/debug": {
+    "flash_image": 498690,
+    "iram": 18680,
+    "dram_static": 45884,
+    "stack_budget": 150724,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 17656
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11816
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425960,
+       "size": 34068
+      },
+      {
+       "name": ".stack",
+       "addr": 1073460028,
+       "size": 150724
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "addr": 1073447488,
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "addr": 1073440800,
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "addr": 1073429888,
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "addr": 1073436632,
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "addr": 1073434448,
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "addr": 1073439056,
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "addr": 1073455936,
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "addr": 1073421840,
+      "size": 1368,
+      "section": ".data"
+     }
+    ],
+    "flash_bin": 498800,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 0,
+    "sram1_sections": {},
+    "sram1_objects": [],
+    "iram_total": 131072
+   },
+   "cancomponents-hardware/release": {
+    "flash_image": 519673,
+    "iram": 12116,
+    "dram_static": 45624,
+    "stack_budget": 150980,
+    "app_partition": 1048576,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 11092
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 11612
+      },
+      {
+       "name": ".bss",
+       "addr": 1073425760,
+       "size": 34012
+      },
+      {
+       "name": ".stack",
+       "addr": 1073459772,
+       "size": 150980
+      }
+     ],
+     "RTC FAST": [],
+     "RTC SLOW": []
+    },
+    "top_ram": [
+     {
+      "name": "cancomponents::cli::console_task::POOL",
+      "addr": 1073444024,
+      "size": 7808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::update::RECEIVER",
+      "addr": 1073429448,
+      "size": 4160,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::node_log::RING",
+      "addr": 1073433752,
+      "size": 4112,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::heating::heating_task::POOL",
+      "addr": 1073455328,
+      "size": 2184,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::environment::environment_task::POOL",
+      "addr": 1073438024,
+      "size": 1808,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::sensor_config::list_task::POOL",
+      "addr": 1073441216,
+      "size": 1744,
+      "section": ".bss"
+     },
+     {
+      "name": "cancomponents::temperature::temperature_task::POOL",
+      "addr": 1073439832,
+      "size": 1384,
+      "section": ".bss"
+     },
+     {
+      "name": "esp_rtos::scheduler::SCHEDULER",
+      "addr": 1073424384,
+      "size": 1368,
+      "section": ".data"
+     }
+    ],
+    "flash_bin": 519776,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 0,
+    "sram1_sections": {},
+    "sram1_objects": [],
+    "iram_total": 131072
+   },
+   "gateway-hardware/debug": {
+    "flash_image": 2764294,
+    "iram": 17816,
+    "dram_static": 144956,
+    "stack_budget": 51652,
+    "app_partition": 8126464,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 16792
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [
+      {
+       "name": ".rom_boot_pro_uninit",
+       "addr": 1073611840,
+       "size": 14336
+      },
+      {
+       "name": ".rom_boot_app_uninit",
+       "addr": 1073627984,
+       "size": 14336
+      },
+      {
+       "name": ".dram2_uninit",
+       "addr": 1073643056,
+       "size": 97032
+      }
+     ],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 37792
+      },
+      {
+       "name": ".bss",
+       "addr": 1073451936,
+       "size": 107164
+      },
+      {
+       "name": ".stack",
+       "addr": 1073559100,
+       "size": 51652
+      }
+     ],
+     "RTC FAST": [
+      {
+       "name": ".rtc_fast.data",
+       "addr": 1073217536,
+       "size": 7648
+      }
+     ],
+     "RTC SLOW": [
+      {
+       "name": ".rtc_slow.bss",
+       "addr": 1342177280,
+       "size": 8192
+      }
+     ]
+    },
+    "top_ram": [
+     {
+      "name": "gateway_hardware::mqtt::mqtt_task::POOL",
+      "addr": 1073461960,
+      "size": 19328,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::DMA_STORAGE",
+      "addr": 1073501984,
+      "size": 18676,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::NET_RESOURCES",
+      "addr": 1073520664,
+      "size": 8384,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::automation::RUNTIME",
+      "addr": 1073430360,
+      "size": 8376,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::device_list::DEVICE_LIST",
+      "addr": 1073539804,
+      "size": 6820,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::cert::roots::INSTALLED",
+      "addr": 1073490584,
+      "size": 6168,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::log_buffer::RING",
+      "addr": 1073438872,
+      "size": 6156,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::automation::automation_task::POOL",
+      "addr": 1073455184,
+      "size": 6096,
+      "section": ".bss"
+     }
+    ],
+    "flash_bin": 2764416,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 125704,
+    "sram1_sections": {
+     ".rom_boot_pro_uninit": 14336,
+     ".rom_boot_app_uninit": 14336,
+     ".dram2_uninit": 97032
+    },
+    "sram1_objects": [
+     {
+      "name": "gateway_hardware::mqtt::PRIMARY_BUFFERS",
+      "addr": 1073611840,
+      "size": 11776,
+      "section": ".rom_boot_pro_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::PRO",
+      "addr": 1073623616,
+      "size": 2560,
+      "section": ".rom_boot_pro_uninit"
+     },
+     {
+      "name": "gateway_hardware::mqtt::SECONDARY_BUFFERS",
+      "addr": 1073627984,
+      "size": 11776,
+      "section": ".rom_boot_app_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::APP",
+      "addr": 1073639760,
+      "size": 2560,
+      "section": ".rom_boot_app_uninit"
+     },
+     {
+      "name": "gateway_hardware::future_slot::FRAMES",
+      "addr": 1073643056,
+      "size": 10912,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::crypto_pool::init::ARENA",
+      "addr": 1073653968,
+      "size": 53248,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::REST",
+      "addr": 1073707216,
+      "size": 7680,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::dhcpv6::__dhcpv6_task_task::__dhcpv6_task_task_inner_function::WORKSPACE",
+      "addr": 1073714896,
+      "size": 2664,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::https::scratch::BYTES",
+      "addr": 1073717560,
+      "size": 16384,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::wall_clock::DatagramBuffers::take::BUFFERS",
+      "addr": 1073733944,
+      "size": 2048,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "NtCskR::m991GK8Z::common_hardware::flash::GatewayOtaFlash::embedded_storage::Storage::write::SCRATCH",
+      "addr": 1073735992,
+      "size": 4096,
+      "section": ".dram2_uninit"
+     }
+    ],
+    "heap_reserved": 0,
+    "iram_total": 131072
+   },
+   "gateway-hardware/release": {
+    "flash_image": 2835593,
+    "iram": 12052,
+    "dram_static": 142620,
+    "stack_budget": 53988,
+    "app_partition": 8126464,
+    "dram_total": 196608,
+    "ram_sections": {
+     "SRAM0": [
+      {
+       "name": ".rwtext",
+       "addr": 1074267136,
+       "size": 11028
+      },
+      {
+       "name": ".vectors",
+       "addr": 1074266112,
+       "size": 1024
+      }
+     ],
+     "SRAM1": [
+      {
+       "name": ".rom_boot_pro_uninit",
+       "addr": 1073611840,
+       "size": 14336
+      },
+      {
+       "name": ".rom_boot_app_uninit",
+       "addr": 1073627984,
+       "size": 14336
+      },
+      {
+       "name": ".dram2_uninit",
+       "addr": 1073643056,
+       "size": 97040
+      }
+     ],
+     "SRAM2": [
+      {
+       "name": ".data",
+       "addr": 1073414144,
+       "size": 35584
+      },
+      {
+       "name": ".bss",
+       "addr": 1073449728,
+       "size": 107036
+      },
+      {
+       "name": ".stack",
+       "addr": 1073556764,
+       "size": 53988
+      }
+     ],
+     "RTC FAST": [
+      {
+       "name": ".rtc_fast.data",
+       "addr": 1073217536,
+       "size": 7648
+      }
+     ],
+     "RTC SLOW": [
+      {
+       "name": ".rtc_slow.bss",
+       "addr": 1342177280,
+       "size": 8192
+      }
+     ]
+    },
+    "top_ram": [
+     {
+      "name": "gateway_hardware::mqtt::mqtt_task::POOL",
+      "addr": 1073526536,
+      "size": 19328,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::DMA_STORAGE",
+      "addr": 1073479416,
+      "size": 18676,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::ethernet::NET_RESOURCES",
+      "addr": 1073498104,
+      "size": 8384,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::automation::RUNTIME",
+      "addr": 1073427680,
+      "size": 8376,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::device_list::DEVICE_LIST",
+      "addr": 1073454328,
+      "size": 6820,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::cert::roots::INSTALLED",
+      "addr": 1073506712,
+      "size": 6168,
+      "section": ".bss"
+     },
+     {
+      "name": "gateway_hardware::log_buffer::RING",
+      "addr": 1073437124,
+      "size": 6156,
+      "section": ".data"
+     },
+     {
+      "name": "gateway_hardware::automation::automation_task::POOL",
+      "addr": 1073512896,
+      "size": 6096,
+      "section": ".bss"
+     }
+    ],
+    "flash_bin": 2835712,
+    "sram1_total": 131072,
+    "sram1_rom": 2160,
+    "sram1_elf": 125712,
+    "sram1_sections": {
+     ".rom_boot_pro_uninit": 14336,
+     ".rom_boot_app_uninit": 14336,
+     ".dram2_uninit": 97040
+    },
+    "sram1_objects": [
+     {
+      "name": "gateway_hardware::mqtt::PRIMARY_BUFFERS",
+      "addr": 1073611840,
+      "size": 11776,
+      "section": ".rom_boot_pro_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::PRO",
+      "addr": 1073623616,
+      "size": 2560,
+      "section": ".rom_boot_pro_uninit"
+     },
+     {
+      "name": "gateway_hardware::mqtt::SECONDARY_BUFFERS",
+      "addr": 1073627984,
+      "size": 11776,
+      "section": ".rom_boot_app_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::APP",
+      "addr": 1073639760,
+      "size": 2560,
+      "section": ".rom_boot_app_uninit"
+     },
+     {
+      "name": "NtCskT::common_hardware::flash::GatewayOtaFlash::embedded_storage::Storage::write::SCRATCH",
+      "addr": 1073643056,
+      "size": 4096,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::crypto_pool::init::ARENA",
+      "addr": 1073647152,
+      "size": 53248,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::https::scratch::BYTES",
+      "addr": 1073700400,
+      "size": 16384,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::dhcpv6::__dhcpv6_task_task::__dhcpv6_task_task_inner_function::WORKSPACE",
+      "addr": 1073716784,
+      "size": 2664,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::future_slot::FRAMES",
+      "addr": 1073719456,
+      "size": 10912,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::wall_clock::DatagramBuffers::take::BUFFERS",
+      "addr": 1073730368,
+      "size": 2048,
+      "section": ".dram2_uninit"
+     },
+     {
+      "name": "gateway_hardware::web::listener_buffers::REST",
+      "addr": 1073732416,
+      "size": 7680,
+      "section": ".dram2_uninit"
+     }
+    ],
+    "heap_reserved": 0,
+    "iram_total": 131072
+   }
+  }
  }
 ]
