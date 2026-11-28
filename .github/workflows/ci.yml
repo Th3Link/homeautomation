@@ -14,6 +14,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  nts-client:
+    name: nts-client / protocol and transports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check -p nts-client
+      - run: cargo test --locked -p nts-client --no-default-features
+      - run: |
+          for feature in async-net smol tokio; do
+            cargo check --locked -p nts-client --features "$feature"
+          done
+      - run: cargo clippy --locked -p nts-client --all-features --all-targets -- -D warnings
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends chrony openssl
+      - run: software/nts-client/tests/chrony.sh
+
   # The *-core crates (common-core, gateway-core, cancomponents-core) are
   # plain #![no_std]-but-host-testable Rust: fmt, clippy, and the test
   # suite all run on a normal stable toolchain, no ESP toolchain needed.

@@ -861,5 +861,5 @@ using the measurements as thresholds.
 | CAN nodes | [cancomponents-core](cancomponents-core/cancomponents_core/index.html) | [cancomponents](cancomponents-hardware/cancomponents/index.html) |
 | Shared code | [common-core](common-core/common_core/index.html) | [common-hardware](common-hardware/common_hardware/index.html) |
 
-[Gateway REST API](../software/gateway-core/docs/api-rest.md) ·
+[NTS client](nts-client/nts_client/index.html) · [Gateway REST API](../software/gateway-core/docs/api-rest.md) ·
 [Architecture decisions](adr/index.md)

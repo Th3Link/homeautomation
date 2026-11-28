@@ -31,7 +31,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{with_deadline, with_timeout, Duration, Instant};
 use embedded_io_async::Write as _;
 use esp_hal::rng::Trng;
-use gateway_core::nts::{self, AnswerError, Cookies, KeError, Keys, Sent, NAME_CAP};
+use gateway_core::nts::{self, AnswerError, KeError, Keys, RequestError, Sent, Session, NAME_CAP};
 use gateway_core::x509::cert::split_concatenated;
 use heapless::String;
 
@@ -53,8 +53,7 @@ struct Association {
     /// The setting it was made for.
     ke_host: String<NAME_CAP>,
     ke_port: u16,
-    keys: Keys,
-    cookies: Cookies,
+    session: Session,
     /// Where to send the NTP requests.
     ntp_host: String<NAME_CAP>,
     ntp_port: u16,
@@ -119,19 +118,19 @@ pub(crate) async fn synchronise(
     let mut association = ASSOCIATION.lock().await;
     let usable = association
         .as_ref()
-        .is_some_and(|a| a.ke_host == host && a.ke_port == port && !a.cookies.is_empty());
+        .is_some_and(|a| a.ke_host == host && a.ke_port == port && !a.session.cookies.is_empty());
     if !usable {
         *association = None;
         match key_exchange(stack, host, port).await {
             Ok(established) => {
                 console_log!(
                     "nts: key exchange with {host}: {} cookies, NTP at {}:{}",
-                    established.cookies.len(),
+                    established.session.cookies.len(),
                     established.ntp_host,
                     established.ntp_port
                 );
                 update_status(|s| {
-                    s.cookies = established.cookies.len();
+                    s.cookies = established.session.cookies.len();
                     s.key_exchange = Some(Instant::now());
                     s.error = None;
                 });
@@ -152,7 +151,7 @@ pub(crate) async fn synchronise(
     };
 
     let result = query(stack, established, buffers).await;
-    let cookies = established.cookies.len();
+    let cookies = established.session.cookies.len();
     match result {
         Ok(unix) => {
             established.unanswered = 0;
@@ -173,9 +172,9 @@ pub(crate) async fn synchronise(
             established.unanswered += 1;
             if established.unanswered >= MAX_UNANSWERED {
                 // Maybe the server doesn't take these cookies any more.
-                established.cookies.clear();
+                established.session.cookies.clear();
             }
-            let cookies = established.cookies.len();
+            let cookies = established.session.cookies.len();
             console_log!("nts: {}: {why}", established.ntp_host);
             update_status(|s| {
                 s.cookies = cookies;
@@ -296,19 +295,10 @@ async fn handshake(
         }
     };
 
-    let mut keys = Keys {
-        c2s: [0; nts::KEY_LEN],
-        s2c: [0; nts::KEY_LEN],
-    };
-    for (key, server_to_client) in [(&mut keys.c2s, false), (&mut keys.s2c, true)] {
-        connection
-            .export_keying_material(
-                nts::EXPORTER_LABEL,
-                &nts::exporter_context(server_to_client),
-                key,
-            )
-            .map_err(|_| "no keys")?;
-    }
+    let keys = Keys::from_exporter(|label, context, key| {
+        connection.export_keying_material(label, context, key)
+    })
+    .map_err(|_| "no keys")?;
     let _ = with_deadline(deadline, connection.close()).await;
 
     if let Err(problems) = tls::verify_chain(
@@ -328,8 +318,10 @@ async fn handshake(
     Ok(Association {
         ke_host: String::try_from(host).map_err(|_| "name too long")?,
         ke_port: port,
-        keys,
-        cookies: response.cookies,
+        session: Session {
+            keys,
+            cookies: response.cookies,
+        },
         ntp_host,
         ntp_port: response.port.unwrap_or(nts::NTP_PORT),
         unanswered: 0,
@@ -364,9 +356,6 @@ async fn query(
             &mut buffers.tx,
         );
         socket.bind(0).map_err(|_| "no socket")?;
-        let Some(cookie) = association.cookies.take() else {
-            return Err("out of cookies");
-        };
         let mut sent = Sent {
             unique_id: [0; nts::UNIQUE_ID_LEN],
             transmit: [0; 8],
@@ -375,13 +364,17 @@ async fn query(
         rng.read(&mut sent.unique_id);
         rng.read(&mut sent.transmit);
         rng.read(&mut nonce);
-        // Ask for as many fresh cookies as are missing.
-        let wanted = nts::MAX_COOKIES - association.cookies.len() - 1;
         {
             let mut scratch = crate::https::scratch().await;
             let packet = &mut scratch[..crate::wall_clock::DATAGRAM_CAP];
-            let len = nts::request(packet, &association.keys, &cookie, wanted, &sent, &nonce)
-                .ok_or("cookie too long")?;
+            let len =
+                association
+                    .session
+                    .prepare(packet, &sent, &nonce)
+                    .map_err(|err| match err {
+                        RequestError::NoCookies => "out of cookies",
+                        RequestError::BufferTooSmall => "cookie too long",
+                    })?;
             if socket
                 .send_to(&packet[..len], (address, association.ntp_port))
                 .await
@@ -396,9 +389,7 @@ async fn query(
         let deadline = Instant::now() + ANSWER_TIMEOUT;
         while let Ok(result) = with_deadline(
             deadline,
-            socket.recv_from_with(|packet, _| {
-                nts::parse_response(packet, &association.keys, &sent, &mut association.cookies)
-            }),
+            socket.recv_from_with(|packet, _| association.session.accept(packet, &sent)),
         )
         .await
         {
@@ -411,7 +402,6 @@ async fn query(
                         .ok_or("the server's time is out of range");
                 }
                 Err(AnswerError::Nak) => {
-                    association.cookies.clear();
                     return Err("the server can't read the cookies any more (NTS NAK)");
                 }
                 Err(AnswerError::Unusable) => {

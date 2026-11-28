@@ -26,6 +26,7 @@ workspace under `software/`:
 - [`cancomponents-core`](software/cancomponents-core) / [`cancomponents-hardware`](software/cancomponents-hardware)
   — the node firmware living on the bus: relays, rollershutters, buttons,
   lights.
+- [`nts-client`](software/nts-client) — heapless NTS protocol core with optional Tokio and async-net/smol clients.
 - [`tools/mqtt-log-reader`](software/tools/mqtt-log-reader) — a small
   Python tool for reading back the gateway's MQTT log/debug topics.
 - [`sim/`](software/sim) — `./sim up`: the unchanged gateway and node

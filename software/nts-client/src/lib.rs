@@ -19,7 +19,16 @@
 //! keys, encrypted for the server alone.
 //!
 //! Only AEAD_AES_SIV_CMAC_256 (the one every server has to support) and
-//! NTPv4. Pure: the caller does the TLS, the UDP and the random numbers.
+//! NTPv4. With default features the caller supplies TLS, UDP and randomness.
+//! Enable `smol` (or `async-net`) or `tokio` for a host client.
+
+#![no_std]
+
+#[cfg(any(test, feature = "async-net", feature = "tokio"))]
+extern crate std;
+
+#[cfg(any(feature = "async-net", feature = "tokio"))]
+pub mod client;
 
 use aes_siv::aead::KeyInit;
 use aes_siv::siv::Aes128Siv;
@@ -73,6 +82,60 @@ const AEAD_ALGORITHM: u16 = 4;
 const NEW_COOKIE: u16 = 5;
 const SERVER: u16 = 6;
 const PORT: u16 = 7;
+
+impl Keys {
+    /// Derive the directional keys from the authenticated NTS-KE TLS connection.
+    pub fn from_exporter<E>(
+        mut export: impl FnMut(&[u8], &[u8], &mut [u8]) -> Result<(), E>,
+    ) -> Result<Self, E> {
+        let mut keys = Self {
+            c2s: [0; KEY_LEN],
+            s2c: [0; KEY_LEN],
+        };
+        export(EXPORTER_LABEL, &exporter_context(false), &mut keys.c2s)?;
+        export(EXPORTER_LABEL, &exporter_context(true), &mut keys.s2c)?;
+        Ok(keys)
+    }
+}
+
+/// Traffic keys and single-use cookies from one authenticated exchange.
+pub struct Session {
+    pub keys: Keys,
+    pub cookies: Cookies,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestError {
+    NoCookies,
+    BufferTooSmall,
+}
+
+impl Session {
+    /// Consume one cookie and ask for replacements. Supply fresh, cryptographically
+    /// random request identifiers and a fresh nonce for every call.
+    pub fn prepare(
+        &mut self,
+        packet: &mut [u8],
+        sent: &Sent,
+        nonce: &[u8; NONCE_LEN],
+    ) -> Result<usize, RequestError> {
+        let cookie = self.cookies.0.first().ok_or(RequestError::NoCookies)?;
+        let wanted = MAX_COOKIES - self.cookies.len();
+        let len = request(packet, &self.keys, cookie, wanted, sent, nonce)
+            .ok_or(RequestError::BufferTooSmall)?;
+        self.cookies.take();
+        Ok(len)
+    }
+
+    /// Check a reply, retain new cookies and discard stale ones on an NTS NAK.
+    pub fn accept(&mut self, packet: &[u8], sent: &Sent) -> Result<Answer, AnswerError> {
+        let result = parse_response(packet, &self.keys, sent, &mut self.cookies);
+        if matches!(result, Err(AnswerError::Nak)) {
+            self.cookies.clear();
+        }
+        result
+    }
+}
 
 /// What the client sends on the NTS-KE connection: NTPv4,
 /// AEAD_AES_SIV_CMAC_256, end.
@@ -502,7 +565,12 @@ pub fn parse_server(setting: &str) -> Option<Server<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::x509::fixtures::unhex;
+    fn unhex(text: &str) -> std::vec::Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect()
+    }
     extern crate std;
 
     #[test]
@@ -655,6 +723,27 @@ mod tests {
         p.extend_from_slice(&tag);
         p.extend_from_slice(&plaintext);
         p
+    }
+
+    #[test]
+    fn consume_cookie_only_when_a_packet_is_ready() {
+        let mut session = Session {
+            keys: KEYS,
+            cookies: Cookies::new(),
+        };
+        let nonce = [0; NONCE_LEN];
+        assert_eq!(
+            session.prepare(&mut [], &SENT, &nonce),
+            Err(RequestError::NoCookies)
+        );
+        assert!(session.cookies.push(&[42; 32]));
+        assert_eq!(
+            session.prepare(&mut [], &SENT, &nonce),
+            Err(RequestError::BufferTooSmall)
+        );
+        assert_eq!(session.cookies.len(), 1);
+        assert!(session.prepare(&mut [0; 1024], &SENT, &nonce).is_ok());
+        assert!(session.cookies.is_empty());
     }
 
     #[test]

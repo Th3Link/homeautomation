@@ -36,14 +36,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        crate: [common-core, gateway-core, cancomponents-core]
+        crate: [common-core, gateway-core, cancomponents-core, nts-client]
     defaults:
       run:
         working-directory: software/${{ matrix.crate }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --no-deps
+      - run: cargo doc --no-deps ${{ matrix.crate == 'nts-client' && '--all-features' || '' }}
       - uses: actions/upload-artifact@v7
         with:
           name: docs-${{ matrix.crate }}
@@ -91,6 +91,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: docs-nts-client
+          path: site/nts-client
       - uses: actions/download-artifact@v8
         with:
           name: docs-common-core
