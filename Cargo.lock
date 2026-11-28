@@ -2048,7 +2048,6 @@ dependencies = [
  "sequential-storage",
  "serde",
  "serde-json-core 0.7.0",
- "sha2 0.10.9",
  "sha2 0.11.2",
  "smoltcp",
  "static_cell",
