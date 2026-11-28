@@ -73,7 +73,7 @@ picoserve = { version = "0.21.0", features = ["embassy", "json"] }
 # wall-clock hook), which needs cmake and ninja on the build host. The
 # record buffers: 16 KiB in (a browser sends full records, e.g. a firmware
 # upload), 8 KiB out (must hold the certificate chain in one message).
-mbedtls-rs = { version = "0.3", default-features = false, features = [
+mbedtls-rs = { version = "0.4", default-features = false, features = [
     "esp32",
     "embassy-time",
     "use-gcc",
